@@ -73,8 +73,20 @@ function withTimeout(promise, ms) {
   ]);
 }
 
+// req.body isn't guaranteed to be a plain string - depending on the
+// client's Content-Type header, Next's body parser can hand back an
+// object or a raw Buffer instead, which then throws "Cannot convert
+// object to primitive value" the moment it's used in a template literal
+// or a Firestore query value. Always normalize to a real string first.
+function normalizeLeagueId(body) {
+  if (typeof body === "string") return body;
+  if (Buffer.isBuffer(body)) return body.toString("utf8").replace(/^"|"$/g, "");
+  if (body && typeof body === "object" && typeof body.leagueId === "string") return body.leagueId;
+  return String(body ?? "");
+}
+
 export default async function handler(req, res) {
-  const REACT_APP_LEAGUE_ID = req.body;
+  const REACT_APP_LEAGUE_ID = normalizeLeagueId(req.body);
   const MAX_TOKENS = 8192;
 
   try {
