@@ -16,6 +16,13 @@ dotenv.config();
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
+// Vercel's default serverless function duration is too short for the
+// multiple chained GPT-4 calls this can make (one per draft-data chunk) -
+// without this the function gets killed mid-request and the client sees a
+// 504/timeout regardless of whether the calls would have eventually
+// succeeded.
+export const config = { maxDuration: 60 };
+
 const PROMPT_TEMPLATE = `Given the draft data: {draftData}, generate a creative and funny summary of how the draft went for each fantasy manager. Make sure to include ALL fantasy managers.
       The summary should include in any order:
       - Key picks, highlighting their best picks and what round they took them in, and critiquing their worst picks in a funny and humorous way.
@@ -34,7 +41,7 @@ const PROMPT_TEMPLATE = `Given the draft data: {draftData}, generate a creative 
 const generateSummaries = async (draftData) => {
   const model = new ChatOpenAI({
     temperature: 0.9,
-    model: "gpt-4",
+    model: "gpt-4-turbo",
     openAIApiKey: OPENAI_API_KEY,
   });
 

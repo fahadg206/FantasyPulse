@@ -23,6 +23,12 @@ import { db, storage } from "../../app/firebase";
 //dotenv.config();
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
+// Vercel's default serverless function duration is too short for a GPT-4
+// chain call - without this the function gets killed mid-request and the
+// client sees a 504 regardless of whether the OpenAI call would have
+// eventually succeeded.
+export const config = { maxDuration: 60 };
+
 const updateWeeklyInfo = async (REACT_APP_LEAGUE_ID, headlines) => {
   headlines = JSON.parse(headlines);
   // Reference to the "Weekly Info" collection
@@ -67,7 +73,7 @@ export default async function handler(req, res) {
     //console.info(process.env.OPENAI_API_KEY);
     const model = new ChatOpenAI({
       temperature: 0.9,
-      model: "gpt-4",
+      model: "gpt-4-turbo",
       openAIApiKey: process.env.OPENAI_API_KEY,
     });
 

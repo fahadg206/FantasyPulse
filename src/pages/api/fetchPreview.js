@@ -19,6 +19,11 @@ dotenv.config();
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const MAX_TOKENS = 8192; // GPT-4 turbo token limit
 
+// Vercel's default serverless function duration is too short for a GPT-4
+// chain call (or several, when the league data is chunked below) - without
+// this the function gets killed mid-request and the client sees a 504.
+export const config = { maxDuration: 60 };
+
 const updateWeeklyInfo = async (leagueId, articles) => {
   const weeklyInfoCollectionRef = collection(db, "Weekly Articles");
 
@@ -73,7 +78,7 @@ export default async function handler(req, res) {
     const model = new ChatOpenAI({
       temperature: 0.9,
       model: "gpt-4-turbo",
-      openAIApiKey: process.env.OPENAI_API_KEY,
+      openAIApiKey: OPENAI_API_KEY,
     });
 
     let promptTemplate;
