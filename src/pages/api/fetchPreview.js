@@ -8,15 +8,38 @@ import {
   updateDoc,
 } from "firebase/firestore/lite";
 import dotenv from "dotenv";
-import { ChatOpenAI } from "langchain/chat_models/openai";
-import { PromptTemplate } from "langchain/prompts";
-import { LLMChain } from "langchain/chains";
 import { db, storage, authReady } from "../../app/firebase";
 import { serverTimestamp } from "firebase/firestore/lite";
 
 dotenv.config();
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const MAX_TOKENS = 8192; // GPT-4 turbo token limit
+
+// Calls OpenAI's Chat Completions API directly instead of going through
+// langchain's ChatOpenAI/LLMChain - see fetchHeadlines.js for the full
+// story: langchain's bundled HTTP client (this project pins langchain
+// ^0.0.124, from mid-2023) hangs indefinitely on this exact same request
+// instead of erroring or completing. A direct fetch avoids it entirely.
+async function callOpenAI(promptText, model) {
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.9,
+      messages: [{ role: "user", content: promptText }],
+    }),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`OpenAI API error ${res.status}: ${errText.slice(0, 500)}`);
+  }
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content ?? "";
+}
 
 // Vercel's default serverless function duration is too short for a GPT-4
 // chain call (or several, when the league data is chunked below) - without
@@ -118,16 +141,10 @@ export default async function handler(req, res) {
     const leagueData = JSON.stringify(fileContent).replace(/\//g, "");
     const tokenCount = countTokens(leagueData);
 
-    const model = new ChatOpenAI({
-      temperature: 0.9,
-      model: "gpt-4o",
-      openAIApiKey: OPENAI_API_KEY,
-    });
-
     let promptTemplate;
     if (tokenCount > MAX_TOKENS) {
       promptTemplate = `
-        Here is the league data: {leagueData}
+        Here is the league data: __LEAGUE_DATA__
         Give me an article previewing each matchup in this fantasy football league and your predictions for how it'll turn out. 
         Make each matchup breakdown creative, funny, and exciting while also keeping it concise. 
         Provide an exciting one sentence description/preview of what the article will entail that will hook the readers to read the rest of the article.
@@ -145,7 +162,7 @@ export default async function handler(req, res) {
       `;
     } else {
       promptTemplate = `
-        Here is the league data: {leagueData}
+        Here is the league data: __LEAGUE_DATA__
         Your name is Boogie the writer and you've been getting a lot of heat for your predictions last week. 
         Give me an article previewing each matchup in this fantasy football league, include their star players based off their projected points, 
         and your predictions for how it'll turn out, double down on how certain you are this time and that league members should trust your years of experience/research.
@@ -163,16 +180,6 @@ export default async function handler(req, res) {
       Please ensure that the generated JSON response meets the specified criteria without any syntax issues or inconsistencies. 
       `;
     }
-
-    const prompt = new PromptTemplate({
-      inputVariables: ["leagueData"],
-      template: promptTemplate,
-    });
-
-    const chainA = new LLMChain({
-      llm: model,
-      prompt: prompt,
-    });
 
     let chunks = [];
     let currentChunk = "";
@@ -196,8 +203,9 @@ export default async function handler(req, res) {
 
     for (const chunk of chunks) {
       try {
-        const apiResponse = await withTimeout(chainA.call({ leagueData: chunk }), 45000);
-        let responseData = JSON.parse(apiResponse.text);
+        const filledPrompt = promptTemplate.replace("__LEAGUE_DATA__", chunk);
+        const text = await withTimeout(callOpenAI(filledPrompt, "gpt-4o"), 45000);
+        let responseData = JSON.parse(text);
         if (!Array.isArray(responseData)) {
           responseData = [responseData];
         }

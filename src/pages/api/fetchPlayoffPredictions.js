@@ -8,14 +8,37 @@ import {
   updateDoc,
 } from "firebase/firestore/lite";
 import dotenv from "dotenv";
-import { ChatOpenAI } from "langchain/chat_models/openai";
-import { PromptTemplate } from "langchain/prompts";
-import { LLMChain } from "langchain/chains";
 
 import { db, storage, authReady } from "../../app/firebase";
 
 dotenv.config();
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+
+// Calls OpenAI's Chat Completions API directly instead of going through
+// langchain's ChatOpenAI/LLMChain - see fetchHeadlines.js for the full
+// story: langchain's bundled HTTP client (this project pins langchain
+// ^0.0.124, from mid-2023) hangs indefinitely on this exact same request
+// instead of erroring or completing. A direct fetch avoids it entirely.
+async function callOpenAI(promptText, model) {
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.9,
+      messages: [{ role: "user", content: promptText }],
+    }),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`OpenAI API error ${res.status}: ${errText.slice(0, 500)}`);
+  }
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content ?? "";
+}
 
 // Vercel's default serverless function duration is too short for a GPT-4
 // chain call - without this the function gets killed mid-request and the
@@ -100,12 +123,6 @@ export default async function handler(req, res) {
     const fileContent = await response.text();
     const leagueData = JSON.stringify(fileContent).replace(/\//g, "");
 
-    const model = new ChatOpenAI({
-      temperature: 0.9,
-      model: "gpt-4o",
-      openAIApiKey: OPENAI_API_KEY,
-    });
-
     const basePrompt = `
       Your name is El Jefe and you're the Head of Media department over at the Fantasy Pulse website.
       You are an extremely over confident analyst that relies on years of experience and gut instinct over anything else.
@@ -124,19 +141,11 @@ export default async function handler(req, res) {
         "paragraph7": ""
       
       Make sure all teams are listed and there are no duplicates.
-      Here is the league data: {leagueData}
+      Here is the league data: ${leagueData}
     `;
 
-    const prompt = new PromptTemplate({
-      template: basePrompt,
-      inputVariables: ["leagueData"],
-    });
-
-    const chainA = new LLMChain({ llm: model, prompt });
-
-    // Properly pass the `leagueData` variable into the LLMChain
-    const apiResponse = await withTimeout(chainA.call({ leagueData }), 45000);
-    const predictions = JSON.parse(apiResponse.text);
+    const text = await withTimeout(callOpenAI(basePrompt, "gpt-4o"), 45000);
+    const predictions = JSON.parse(text);
 
     await updateWeeklyInfo(existingDoc, REACT_APP_LEAGUE_ID, predictions, currentWeek);
     return res.status(200).json(predictions);
