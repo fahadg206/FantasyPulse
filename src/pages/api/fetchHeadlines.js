@@ -86,7 +86,11 @@ export default async function handler(req, res) {
 
     const model = new ChatOpenAI({
       temperature: 0.9,
-      model: "gpt-4o",
+      // gpt-4o-mini responds in ~1-3s for a short task like this vs 10-60s+
+      // for gpt-4o on this old SDK - combined with the weekly cache above,
+      // this makes timeout risk negligible without losing much quality for
+      // a few punchy headlines.
+      model: "gpt-4o-mini",
       openAIApiKey: process.env.OPENAI_API_KEY,
     });
 

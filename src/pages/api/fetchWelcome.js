@@ -1,7 +1,6 @@
 export default async function handler(req, res) {
   try {
     const welcomeArticle = {
-      _deployCanary: "canary-ae224c1-check",
       description:
         "Welcome to Season 2 of Fantasy Pulse – your ultimate destination for fantasy football excellence.",
       title: "Welcome to Fantasy Pulse: Season 2 Kickoff!",
