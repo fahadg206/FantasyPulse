@@ -7,14 +7,8 @@ import {
   addDoc,
   updateDoc,
 } from "firebase/firestore/lite";
-import { Document } from "langchain/document";
 import dotenv from "dotenv";
-import { FaissStore } from "langchain/vectorstores/faiss";
-import { OpenAIEmbeddings } from "langchain/embeddings/openai";
 import { ChatOpenAI } from "langchain/chat_models/openai";
-import { RetrievalQAChain } from "langchain/chains";
-import { SystemMessage } from "langchain/schema";
-import { HumanMessage } from "langchain/schema";
 import { PromptTemplate } from "langchain/prompts";
 import { LLMChain } from "langchain/chains";
 
