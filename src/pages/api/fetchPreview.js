@@ -11,7 +11,7 @@ import dotenv from "dotenv";
 import { ChatOpenAI } from "langchain/chat_models/openai";
 import { PromptTemplate } from "langchain/prompts";
 import { LLMChain } from "langchain/chains";
-import { db, storage } from "../../app/firebase";
+import { db, storage, authReady } from "../../app/firebase";
 import { serverTimestamp } from "firebase/firestore/lite";
 
 dotenv.config();
@@ -82,6 +82,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "league_id is required" });
     }
 
+    await authReady;
     const currentWeek = await getCurrentWeek();
     const { doc: existingDoc, fresh } = await getCachedPreview(REACT_APP_LEAGUE_ID, currentWeek);
     if (fresh) {

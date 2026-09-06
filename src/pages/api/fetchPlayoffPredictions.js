@@ -12,7 +12,7 @@ import { ChatOpenAI } from "langchain/chat_models/openai";
 import { PromptTemplate } from "langchain/prompts";
 import { LLMChain } from "langchain/chains";
 
-import { db, storage } from "../../app/firebase";
+import { db, storage, authReady } from "../../app/firebase";
 
 dotenv.config();
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -66,6 +66,7 @@ export default async function handler(req, res) {
   const REACT_APP_LEAGUE_ID = req.body;
 
   try {
+    await authReady;
     const currentWeek = await getCurrentWeek();
     const { doc: existingDoc, fresh } = await getCachedPredictions(REACT_APP_LEAGUE_ID, currentWeek);
     if (fresh) {

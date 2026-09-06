@@ -33,7 +33,13 @@ const storage = getStorage(app);
 
 let currentUser; // Declare currentUser variable
 
-signInAnonymously(auth)
+// Firestore security rules require an authenticated request, but this
+// sign-in is fire-and-forget - any caller that reads/writes Firestore
+// before it resolves gets rejected with "Missing or insufficient
+// permissions." Exporting the promise lets server-side callers (API
+// routes, which don't have the luxury of a long-lived browser session
+// warming this up ahead of time) explicitly wait for it first.
+const authReady = signInAnonymously(auth)
   .then((userCredential) => {
     currentUser = userCredential.user;
     //console.log("Anonymous user ID: ", currentUser.uid);
@@ -43,4 +49,4 @@ signInAnonymously(auth)
     console.error("Anonymous sign-in error: ", error);
   });
 
-export { auth, db, storage };
+export { auth, db, storage, authReady };

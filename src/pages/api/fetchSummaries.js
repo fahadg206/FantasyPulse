@@ -10,7 +10,7 @@ import dotenv from "dotenv";
 import { ChatOpenAI } from "langchain/chat_models/openai";
 import { PromptTemplate } from "langchain/prompts";
 import { LLMChain } from "langchain/chains";
-import { db, storage } from "../../app/firebase";
+import { db, storage, authReady } from "../../app/firebase";
 
 dotenv.config();
 
@@ -138,6 +138,7 @@ export default async function handler(req, res) {
   );
 
   try {
+    await authReady;
     const querySnapshot = await getDocs(queryRef);
     if (!querySnapshot.empty) {
       const summariesDoc = querySnapshot.docs[0];
