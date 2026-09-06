@@ -69,9 +69,18 @@ function withTimeout(promise, ms) {
 // or a Firestore query value. Always normalize to a real string first.
 function normalizeLeagueId(body) {
   if (typeof body === "string") return body;
+  if (Array.isArray(body)) return normalizeLeagueId(body[0]);
   if (Buffer.isBuffer(body)) return body.toString("utf8").replace(/^"|"$/g, "");
   if (body && typeof body === "object" && typeof body.leagueId === "string") return body.leagueId;
-  return String(body ?? "");
+  // Some client payload shapes genuinely can't be coerced to a string at
+  // all (even String() throws on certain exotic objects) - never let that
+  // crash the handler, just fall through to an empty id, which fails
+  // cleanly further down instead of with an unhandled TypeError.
+  try {
+    return String(body ?? "");
+  } catch {
+    return "";
+  }
 }
 
 export default async function handler(req, res) {
