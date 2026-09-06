@@ -29,33 +29,34 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 // eventually succeeded.
 export const config = { maxDuration: 60 };
 
-const updateWeeklyInfo = async (REACT_APP_LEAGUE_ID, headlines) => {
-  headlines = JSON.parse(headlines);
-  // Reference to the "Weekly Info" collection
-  const weeklyInfoCollectionRef = collection(db, "Weekly Headlines");
-  // Use a Query to check if a document with the league_id exists
-  const queryRef = query(
-    weeklyInfoCollectionRef,
-    where("league_id", "==", REACT_APP_LEAGUE_ID)
-  );
-  const querySnapshot = await getDocs(queryRef);
-  // Add or update the document based on whether it already exists
-  if (!querySnapshot.empty) {
-    // Document exists, update it
-    //console.log("in if");
-    querySnapshot.forEach(async (doc) => {
-      await updateDoc(doc.ref, {
-        headlines: headlines,
-      });
-    });
+const weeklyHeadlinesRef = collection(db, "Weekly Headlines");
+
+async function getCurrentWeek() {
+  const res = await fetch("https://api.sleeper.app/v1/state/nfl");
+  const state = await res.json();
+  return state.season_type === "post" ? 18 : state.display_week || 1;
+}
+
+// Headlines only need to change when the NFL week rolls over - generating
+// them fresh on every request burns an OpenAI call (and risks a timeout)
+// for content that hasn't actually gone stale. Callers no longer need to
+// self-cache: this checks first and only pays for generation once per week
+// per league, regardless of who calls it or how often.
+async function getCachedHeadlines(leagueId, currentWeek) {
+  const snap = await getDocs(query(weeklyHeadlinesRef, where("league_id", "==", leagueId)));
+  if (snap.empty) return { doc: null, fresh: null };
+  const data = snap.docs[0].data();
+  const fresh = data.week === currentWeek && Array.isArray(data.headlines) ? data.headlines : null;
+  return { doc: snap.docs[0], fresh };
+}
+
+async function saveHeadlines(leagueId, existingDoc, headlines, week) {
+  if (existingDoc) {
+    await updateDoc(existingDoc.ref, { headlines, week });
   } else {
-    // Document does not exist, add a new one
-    await addDoc(weeklyInfoCollectionRef, {
-      league_id: REACT_APP_LEAGUE_ID,
-      headlines: headlines,
-    });
+    await addDoc(weeklyHeadlinesRef, { league_id: leagueId, headlines, week });
   }
-};
+}
 
 // Races the OpenAI call against a deadline safely inside Vercel's own
 // maxDuration, so a slow completion degrades to a clean fallback response
@@ -71,6 +72,12 @@ export default async function handler(req, res) {
   const REACT_APP_LEAGUE_ID = req.body;
 
   try {
+    const currentWeek = await getCurrentWeek();
+    const { doc: existingDoc, fresh } = await getCachedHeadlines(REACT_APP_LEAGUE_ID, currentWeek);
+    if (fresh) {
+      return res.status(200).json(fresh);
+    }
+
     const readingRef = ref(storage, `files/${REACT_APP_LEAGUE_ID}.txt`);
     const url = await getDownloadURL(readingRef);
     const response = await fetch(url);
@@ -95,8 +102,10 @@ export default async function handler(req, res) {
     const chainA = new LLMChain({ llm: model, prompt });
 
     const apiResponse = await withTimeout(chainA.call({ leagueData: newFile }), 45000);
+    const headlines = JSON.parse(apiResponse.text);
 
-    return res.status(200).json(JSON.parse(apiResponse.text));
+    await saveHeadlines(REACT_APP_LEAGUE_ID, existingDoc, headlines, currentWeek);
+    return res.status(200).json(headlines);
   } catch (error) {
     // Non-2xx so the client's existing default-headlines fallback kicks in
     // and it doesn't cache a failure as if it were real content - see

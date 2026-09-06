@@ -23,25 +23,32 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 // eventually succeeded.
 export const config = { maxDuration: 60 };
 
-const updateWeeklyInfo = async (REACT_APP_LEAGUE_ID, articles) => {
-  articles = await JSON.parse(articles);
-  const weeklyInfoCollectionRef = collection(db, "Weekly Articles");
-  const queryRef = query(
-    weeklyInfoCollectionRef,
-    where("league_id", "==", REACT_APP_LEAGUE_ID)
-  );
-  const querySnapshot = await getDocs(queryRef);
-  if (!querySnapshot.empty) {
-    querySnapshot.forEach(async (doc) => {
-      await updateDoc(doc.ref, {
-        playoff_predictions: articles,
-      });
-    });
+const weeklyArticlesRef = collection(db, "Weekly Articles");
+
+async function getCurrentWeek() {
+  const res = await fetch("https://api.sleeper.app/v1/state/nfl");
+  const state = await res.json();
+  return state.season_type === "post" ? 18 : state.display_week || 1;
+}
+
+// Playoff predictions only need to change when the NFL week rolls over -
+// generating them fresh on every request burns an OpenAI call (and risks a
+// timeout) for content that hasn't gone stale. This checks first and only
+// pays for generation once per week per league, regardless of caller.
+async function getCachedPredictions(leagueId, currentWeek) {
+  const snap = await getDocs(query(weeklyArticlesRef, where("league_id", "==", leagueId)));
+  if (snap.empty) return { doc: null, fresh: null };
+  const data = snap.docs[0].data();
+  const fresh = data.playoff_predictions_week === currentWeek && data.playoff_predictions ? data.playoff_predictions : null;
+  return { doc: snap.docs[0], fresh };
+}
+
+const updateWeeklyInfo = async (existingDoc, REACT_APP_LEAGUE_ID, articles, week) => {
+  const dataToUpdate = { playoff_predictions: articles, playoff_predictions_week: week };
+  if (existingDoc) {
+    await updateDoc(existingDoc.ref, dataToUpdate);
   } else {
-    await addDoc(weeklyInfoCollectionRef, {
-      league_id: REACT_APP_LEAGUE_ID,
-      playoff_predictions: articles,
-    });
+    await addDoc(weeklyArticlesRef, { league_id: REACT_APP_LEAGUE_ID, ...dataToUpdate });
   }
 };
 
@@ -59,6 +66,12 @@ export default async function handler(req, res) {
   const REACT_APP_LEAGUE_ID = req.body;
 
   try {
+    const currentWeek = await getCurrentWeek();
+    const { doc: existingDoc, fresh } = await getCachedPredictions(REACT_APP_LEAGUE_ID, currentWeek);
+    if (fresh) {
+      return res.status(200).json(fresh);
+    }
+
     const readingRef = ref(storage, `files/${REACT_APP_LEAGUE_ID}_preview.txt`);
     const url = await getDownloadURL(readingRef);
     const response = await fetch(url);
@@ -101,11 +114,10 @@ export default async function handler(req, res) {
 
     // Properly pass the `leagueData` variable into the LLMChain
     const apiResponse = await withTimeout(chainA.call({ leagueData }), 45000);
+    const predictions = JSON.parse(apiResponse.text);
 
-    // Save data to the database
-    await updateWeeklyInfo(REACT_APP_LEAGUE_ID, apiResponse.text);
-    // Process the response and send it as JSON
-    return res.status(200).json(JSON.parse(apiResponse.text));
+    await updateWeeklyInfo(existingDoc, REACT_APP_LEAGUE_ID, predictions, currentWeek);
+    return res.status(200).json(predictions);
   } catch (error) {
     // Non-2xx so the client's existing null-article fallback kicks in
     // instead of caching a failure as if it were real content.

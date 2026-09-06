@@ -13,7 +13,6 @@ import { PromptTemplate } from "langchain/prompts";
 import { LLMChain } from "langchain/chains";
 import { db, storage } from "../../app/firebase";
 import { serverTimestamp } from "firebase/firestore/lite";
-import { Readable } from "stream";
 
 dotenv.config();
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -24,32 +23,38 @@ const MAX_TOKENS = 8192; // GPT-4 turbo token limit
 // this the function gets killed mid-request and the client sees a 504.
 export const config = { maxDuration: 60 };
 
-const updateWeeklyInfo = async (leagueId, articles) => {
-  const weeklyInfoCollectionRef = collection(db, "Weekly Articles");
+const weeklyArticlesRef = collection(db, "Weekly Articles");
 
-  const queryRef = query(
-    weeklyInfoCollectionRef,
-    where("league_id", "==", leagueId)
-  );
-  const querySnapshot = await getDocs(queryRef);
+async function getCurrentWeek() {
+  const res = await fetch("https://api.sleeper.app/v1/state/nfl");
+  const state = await res.json();
+  return state.season_type === "post" ? 18 : state.display_week || 1;
+}
 
+// The weekly preview only needs to change when the NFL week rolls over -
+// generating it fresh on every request burns an OpenAI call (and risks a
+// timeout) for content that hasn't gone stale. This checks first and only
+// pays for generation once per week per league, regardless of caller.
+async function getCachedPreview(leagueId, currentWeek) {
+  const snap = await getDocs(query(weeklyArticlesRef, where("league_id", "==", leagueId)));
+  if (snap.empty) return { doc: null, fresh: null };
+  const data = snap.docs[0].data();
+  const fresh = data.preview_week === currentWeek && data.preview ? data.preview : null;
+  return { doc: snap.docs[0], fresh };
+}
+
+const updateWeeklyInfo = async (existingDoc, leagueId, preview, week) => {
   const dataToUpdate = {
-    preview: articles[0], // Directly using the parsed JSON object
+    preview,
+    preview_week: week,
     timestamp: serverTimestamp(),
     type: "preview",
   };
 
-  if (!querySnapshot.empty) {
-    querySnapshot.forEach(async (doc) => {
-      await updateDoc(doc.ref, dataToUpdate);
-    });
+  if (existingDoc) {
+    await updateDoc(existingDoc.ref, dataToUpdate);
   } else {
-    await addDoc(weeklyInfoCollectionRef, {
-      league_id: leagueId,
-      preview: articles,
-      timestamp: serverTimestamp(),
-      type: "preview",
-    });
+    await addDoc(weeklyArticlesRef, { league_id: leagueId, ...dataToUpdate });
   }
 };
 
@@ -75,6 +80,12 @@ export default async function handler(req, res) {
   try {
     if (!REACT_APP_LEAGUE_ID) {
       return res.status(400).json({ error: "league_id is required" });
+    }
+
+    const currentWeek = await getCurrentWeek();
+    const { doc: existingDoc, fresh } = await getCachedPreview(REACT_APP_LEAGUE_ID, currentWeek);
+    if (fresh) {
+      return res.status(200).json(fresh);
     }
 
     const readingRef = ref(storage, `files/${REACT_APP_LEAGUE_ID}_preview.txt`);
@@ -141,14 +152,6 @@ export default async function handler(req, res) {
       prompt: prompt,
     });
 
-    res.setHeader("Content-Type", "application/json");
-
-    const stream = new Readable({
-      read() {}, // Required but not used
-    });
-
-    stream.pipe(res);
-
     let chunks = [];
     let currentChunk = "";
     let currentTokens = 0;
@@ -169,9 +172,6 @@ export default async function handler(req, res) {
       chunks.push(currentChunk.trim());
     }
 
-    stream.push("[");
-    let firstChunk = true;
-
     for (const chunk of chunks) {
       try {
         const apiResponse = await withTimeout(chainA.call({ leagueData: chunk }), 45000);
@@ -180,29 +180,24 @@ export default async function handler(req, res) {
           responseData = [responseData];
         }
         allResponses.push(...responseData);
-
-        responseData.forEach((data, index) => {
-          if (index > 0 || !firstChunk) stream.push(",");
-          stream.push(JSON.stringify(data));
-          firstChunk = false;
-        });
       } catch (chunkError) {
         // A slow/failed chunk shouldn't hang the whole request until Vercel
-        // kills it - skip it and close the JSON array with whatever chunks
-        // did complete, rather than leaving the stream open or truncated.
+        // kills it - stop and use whatever chunks did complete.
         console.error("Error generating preview chunk:", chunkError);
         break;
       }
     }
 
-    stream.push("]");
-    stream.push(null); // End the stream
-
-    // Firestore rejects undefined field values - skip the write entirely if
-    // every chunk failed rather than saving a broken cache entry.
-    if (allResponses.length > 0) {
-      await updateWeeklyInfo(REACT_APP_LEAGUE_ID, allResponses);
+    if (allResponses.length === 0) {
+      return res.status(503).json({ error: "Failed to generate preview" });
     }
+
+    // The client (and the cache-hit path above) both expect a single
+    // article object, not an array - almost every league only ever
+    // produces one chunk anyway.
+    const preview = allResponses[0];
+    await updateWeeklyInfo(existingDoc, REACT_APP_LEAGUE_ID, preview, currentWeek);
+    return res.status(200).json(preview);
   } catch (error) {
     console.error("Unexpected error:", error);
     if (!res.headersSent) {
