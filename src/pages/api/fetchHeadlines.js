@@ -7,15 +7,8 @@ import {
   addDoc,
   updateDoc,
 } from "firebase/firestore/lite";
-import dotenv from "dotenv";
-import { ChatOpenAI } from "langchain/chat_models/openai";
-import { PromptTemplate } from "langchain/prompts";
-import { LLMChain } from "langchain/chains";
 
 import { db, storage, authReady } from "../../app/firebase";
-
-//dotenv.config();
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 // Vercel's default serverless function duration is too short for a GPT-4
 // chain call - without this the function gets killed mid-request and the
@@ -52,6 +45,33 @@ async function saveHeadlines(leagueId, existingDoc, headlines, week) {
   }
 }
 
+// Calls OpenAI's Chat Completions API directly instead of going through
+// langchain's ChatOpenAI/LLMChain - confirmed via a raw fetch probe that
+// the API key, network path, and model are all fine, but langchain's
+// bundled HTTP client (this project pins langchain ^0.0.124, from mid-2023)
+// hangs indefinitely on this exact same request instead of erroring or
+// completing. A direct fetch avoids whatever is broken in that old client.
+async function callOpenAI(promptText, model) {
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.9,
+      messages: [{ role: "user", content: promptText }],
+    }),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`OpenAI API error ${res.status}: ${errText.slice(0, 500)}`);
+  }
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content ?? "";
+}
+
 // Races the OpenAI call against a deadline safely inside Vercel's own
 // maxDuration, so a slow completion degrades to a clean fallback response
 // instead of the whole function getting hard-killed with no response body.
@@ -85,29 +105,13 @@ function normalizeLeagueId(body) {
 
 export default async function handler(req, res) {
   const REACT_APP_LEAGUE_ID = normalizeLeagueId(req.body);
-  const t0 = Date.now();
 
   try {
     await authReady;
-    console.log(`[timing] authReady: ${Date.now() - t0}ms`);
     const currentWeek = await getCurrentWeek();
-    console.log(`[timing] getCurrentWeek: ${Date.now() - t0}ms`);
     const { doc: existingDoc, fresh } = await getCachedHeadlines(REACT_APP_LEAGUE_ID, currentWeek);
-    console.log(`[timing] getCachedHeadlines: ${Date.now() - t0}ms`);
     if (fresh) {
       return res.status(200).json(fresh);
-    }
-
-    // Diagnostic only: confirms whether the runtime key is actually valid
-    // against OpenAI, without ever logging the key itself.
-    try {
-      const probe = await fetch("https://api.openai.com/v1/models/gpt-4-turbo", {
-        headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
-      });
-      const probeBody = await probe.text();
-      console.log(`[timing] key probe status: ${probe.status}, body: ${probeBody.slice(0, 300)}`);
-    } catch (probeError) {
-      console.log(`[timing] key probe failed: ${probeError.message}`);
     }
 
     const readingRef = ref(storage, `files/${REACT_APP_LEAGUE_ID}.txt`);
@@ -115,19 +119,8 @@ export default async function handler(req, res) {
     const response = await fetch(url);
     const fileContent = await response.text();
     const newFile = JSON.stringify(fileContent).replace(/\//g, "");
-    console.log(`[timing] storage read: ${Date.now() - t0}ms, payload chars: ${newFile.length}, key set: ${!!process.env.OPENAI_API_KEY}, key prefix: ${(process.env.OPENAI_API_KEY || "").slice(0, 7)}`);
 
-    const model = new ChatOpenAI({
-      temperature: 0.9,
-      // gpt-4o-mini (released well after this old langchain SDK) appears to
-      // hang indefinitely on this SDK rather than erroring - falling back
-      // to gpt-4-turbo, which the rest of this codebase already uses
-      // successfully on the same SDK version.
-      model: "gpt-4-turbo",
-      openAIApiKey: process.env.OPENAI_API_KEY,
-    });
-
-    const question = `{leagueData} give me 3 creative exciting and funny sports style headlines previewing this weeks fantasy football matchups, pick any 3 matchups to cover and make title's creative and exciting. Each headline should look like an exciting anticipated sports matchup.
+    const promptText = `${newFile} give me 3 creative exciting and funny sports style headlines previewing this weeks fantasy football matchups, pick any 3 matchups to cover and make title's creative and exciting. Each headline should look like an exciting anticipated sports matchup.
   include the teams, star players and key matchups in the matchup preview, include a bit of humor and be creative with the titles and descriptions. I want the information to be in this format exactly headline:
   "id": "",
   "category": "",
@@ -135,12 +128,8 @@ export default async function handler(req, res) {
   "description": ""
  keep response concise and exciting. give me the response in valid JSON array format. Please ensure that the generated JSON response meets the specified criteria without any syntax issues or inconsistencies.`;
 
-    const prompt = PromptTemplate.fromTemplate(question);
-    const chainA = new LLMChain({ llm: model, prompt });
-
-    const apiResponse = await withTimeout(chainA.call({ leagueData: newFile }), 45000);
-    console.log(`[timing] OpenAI call resolved: ${Date.now() - t0}ms`);
-    const headlines = JSON.parse(apiResponse.text);
+    const text = await withTimeout(callOpenAI(promptText, "gpt-4-turbo"), 45000);
+    const headlines = JSON.parse(text);
 
     await saveHeadlines(REACT_APP_LEAGUE_ID, existingDoc, headlines, currentWeek);
     return res.status(200).json(headlines);
