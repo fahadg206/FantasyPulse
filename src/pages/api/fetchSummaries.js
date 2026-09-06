@@ -36,7 +36,11 @@ async function callOpenAI(promptText, model) {
     throw new Error(`OpenAI API error ${res.status}: ${errText.slice(0, 500)}`);
   }
   const data = await res.json();
-  return data.choices?.[0]?.message?.content ?? "";
+  const content = data.choices?.[0]?.message?.content ?? "";
+  // gpt-4o often wraps JSON replies in a ```json ... ``` markdown fence
+  // despite being asked for raw JSON - strip it before JSON.parse, or it
+  // throws on the leading backtick.
+  return content.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
 }
 
 // Vercel's default serverless function duration is too short for the
