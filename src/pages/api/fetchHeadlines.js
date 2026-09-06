@@ -85,11 +85,15 @@ function normalizeLeagueId(body) {
 
 export default async function handler(req, res) {
   const REACT_APP_LEAGUE_ID = normalizeLeagueId(req.body);
+  const t0 = Date.now();
 
   try {
     await authReady;
+    console.log(`[timing] authReady: ${Date.now() - t0}ms`);
     const currentWeek = await getCurrentWeek();
+    console.log(`[timing] getCurrentWeek: ${Date.now() - t0}ms`);
     const { doc: existingDoc, fresh } = await getCachedHeadlines(REACT_APP_LEAGUE_ID, currentWeek);
+    console.log(`[timing] getCachedHeadlines: ${Date.now() - t0}ms`);
     if (fresh) {
       return res.status(200).json(fresh);
     }
@@ -99,6 +103,7 @@ export default async function handler(req, res) {
     const response = await fetch(url);
     const fileContent = await response.text();
     const newFile = JSON.stringify(fileContent).replace(/\//g, "");
+    console.log(`[timing] storage read: ${Date.now() - t0}ms, payload chars: ${newFile.length}, key set: ${!!process.env.OPENAI_API_KEY}, key prefix: ${(process.env.OPENAI_API_KEY || "").slice(0, 7)}`);
 
     const model = new ChatOpenAI({
       temperature: 0.9,
@@ -122,6 +127,7 @@ export default async function handler(req, res) {
     const chainA = new LLMChain({ llm: model, prompt });
 
     const apiResponse = await withTimeout(chainA.call({ leagueData: newFile }), 45000);
+    console.log(`[timing] OpenAI call resolved: ${Date.now() - t0}ms`);
     const headlines = JSON.parse(apiResponse.text);
 
     await saveHeadlines(REACT_APP_LEAGUE_ID, existingDoc, headlines, currentWeek);
