@@ -38,10 +38,20 @@ const PROMPT_TEMPLATE = `Given the draft data: {draftData}, generate a creative 
       
       Ensure that the generated JSON response meets the specified criteria without any syntax issues or inconsistencies. Make sure to include ALL fantasy managers. Provide the response in a valid JSON array format.`;
 
+// Races a chunk's OpenAI call against a deadline safely inside Vercel's own
+// maxDuration, so a slow completion is skipped instead of consuming the
+// whole request's time budget until the function gets hard-killed.
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("Timed out")), ms)),
+  ]);
+}
+
 const generateSummaries = async (draftData) => {
   const model = new ChatOpenAI({
     temperature: 0.9,
-    model: "gpt-4-turbo",
+    model: "gpt-4o",
     openAIApiKey: OPENAI_API_KEY,
   });
 
@@ -72,32 +82,31 @@ const generateSummaries = async (draftData) => {
     draftDataChunks.push(currentChunk);
   }
 
-  const summaries = [];
-  for (const chunk of draftDataChunks) {
-    let apiResponse;
-    try {
-      apiResponse = await chain.call({
-        draftData: JSON.stringify(chunk),
-      });
-      console.log("API response text:", apiResponse.text);
+  // Chunks are independent (each covers a disjoint slice of managers), so
+  // they can run concurrently instead of one-at-a-time - this matters once
+  // a league is large enough to need more than one chunk.
+  const chunkResults = await Promise.all(
+    draftDataChunks.map(async (chunk) => {
+      let apiResponse;
+      try {
+        apiResponse = await withTimeout(
+          chain.call({ draftData: JSON.stringify(chunk) }),
+          45000
+        );
+        const cleanText = apiResponse.text.trim().replace(/[`]/g, '"');
+        return JSON.parse(cleanText);
+      } catch (error) {
+        console.error("Error parsing response:", error);
+        console.error(
+          "Response text that caused the error:",
+          apiResponse ? apiResponse.text : "No response"
+        );
+        return [];
+      }
+    })
+  );
 
-      // Check and clean the response text
-      let cleanText = apiResponse.text.trim();
-      // Remove potential backticks and unexpected characters
-      cleanText = cleanText.replace(/[`]/g, '"');
-
-      const parsedResponse = JSON.parse(cleanText);
-      summaries.push(...parsedResponse);
-    } catch (error) {
-      console.error("Error parsing response:", error);
-      console.error(
-        "Response text that caused the error:",
-        apiResponse ? apiResponse.text : "No response"
-      );
-    }
-  }
-
-  return summaries;
+  return chunkResults.flat();
 };
 
 const updateSummariesInDB = async (REACT_APP_LEAGUE_ID, summaries) => {

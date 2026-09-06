@@ -45,19 +45,29 @@ const updateWeeklyInfo = async (REACT_APP_LEAGUE_ID, articles) => {
   }
 };
 
+// Races the OpenAI call against a deadline safely inside Vercel's own
+// maxDuration, so a slow completion degrades to a clean fallback response
+// instead of the whole function getting hard-killed with no response body.
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("Timed out")), ms)),
+  ]);
+}
+
 export default async function handler(req, res) {
   const REACT_APP_LEAGUE_ID = req.body;
-  const readingRef = ref(storage, `files/${REACT_APP_LEAGUE_ID}_preview.txt`);
-  const url = await getDownloadURL(readingRef);
-
-  const response = await fetch(url);
-  const fileContent = await response.text();
-  const leagueData = JSON.stringify(fileContent).replace(/\//g, "");
 
   try {
+    const readingRef = ref(storage, `files/${REACT_APP_LEAGUE_ID}_preview.txt`);
+    const url = await getDownloadURL(readingRef);
+    const response = await fetch(url);
+    const fileContent = await response.text();
+    const leagueData = JSON.stringify(fileContent).replace(/\//g, "");
+
     const model = new ChatOpenAI({
       temperature: 0.9,
-      model: "gpt-4-turbo",
+      model: "gpt-4o",
       openAIApiKey: OPENAI_API_KEY,
     });
 
@@ -90,16 +100,18 @@ export default async function handler(req, res) {
     const chainA = new LLMChain({ llm: model, prompt });
 
     // Properly pass the `leagueData` variable into the LLMChain
-    const apiResponse = await chainA.call({ leagueData });
+    const apiResponse = await withTimeout(chainA.call({ leagueData }), 45000);
 
     // Save data to the database
     await updateWeeklyInfo(REACT_APP_LEAGUE_ID, apiResponse.text);
     // Process the response and send it as JSON
     return res.status(200).json(JSON.parse(apiResponse.text));
   } catch (error) {
+    // Non-2xx so the client's existing null-article fallback kicks in
+    // instead of caching a failure as if it were real content.
     console.error("Unexpected error:", error);
     if (!res.headersSent) {
-      res.status(500).json({ error: "An error occurred" });
+      res.status(503).json({ error: "Failed to generate playoff predictions" });
     }
   }
 }

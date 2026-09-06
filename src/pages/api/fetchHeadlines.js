@@ -57,60 +57,51 @@ const updateWeeklyInfo = async (REACT_APP_LEAGUE_ID, headlines) => {
   }
 };
 
-export default async function handler(req, res) {
-  //console.log("here");
-  // console.log("what was passed in ", req.body);
-  const REACT_APP_LEAGUE_ID = req.body;
-  const readingRef = ref(storage, `files/${REACT_APP_LEAGUE_ID}.txt`);
-  const url = await getDownloadURL(readingRef);
+// Races the OpenAI call against a deadline safely inside Vercel's own
+// maxDuration, so a slow completion degrades to a clean fallback response
+// instead of the whole function getting hard-killed with no response body.
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("Timed out")), ms)),
+  ]);
+}
 
-  const response = await fetch(url);
-  const fileContent = await response.text();
-  const newFile = JSON.stringify(fileContent).replace(/\//g, "");
+export default async function handler(req, res) {
+  const REACT_APP_LEAGUE_ID = req.body;
 
   try {
-    //console.log("Here");
-    //console.info(process.env.OPENAI_API_KEY);
+    const readingRef = ref(storage, `files/${REACT_APP_LEAGUE_ID}.txt`);
+    const url = await getDownloadURL(readingRef);
+    const response = await fetch(url);
+    const fileContent = await response.text();
+    const newFile = JSON.stringify(fileContent).replace(/\//g, "");
+
     const model = new ChatOpenAI({
       temperature: 0.9,
-      model: "gpt-4-turbo",
+      model: "gpt-4o",
       openAIApiKey: process.env.OPENAI_API_KEY,
     });
 
     const question = `{leagueData} give me 3 creative exciting and funny sports style headlines previewing this weeks fantasy football matchups, pick any 3 matchups to cover and make title's creative and exciting. Each headline should look like an exciting anticipated sports matchup.
-  include the teams, star players and key matchups in the matchup preview, include a bit of humor and be creative with the titles and descriptions. I want the information to be in this format exactly headline: 
+  include the teams, star players and key matchups in the matchup preview, include a bit of humor and be creative with the titles and descriptions. I want the information to be in this format exactly headline:
   "id": "",
   "category": "",
   "title": "",
   "description": ""
  keep response concise and exciting. give me the response in valid JSON array format. Please ensure that the generated JSON response meets the specified criteria without any syntax issues or inconsistencies.`;
-    //console.log(question);
 
     const prompt = PromptTemplate.fromTemplate(question);
     const chainA = new LLMChain({ llm: model, prompt });
 
-    // The result is an object with a `text` property.
-    const apiResponse = await chainA.call({ leagueData: newFile });
-    // const cleanUp = await model.call([
-    //   new SystemMessage(
-    //     "Turn the following string into valid JSON format that strictly adhere to RFC8259 compliance"
-    //   ),
-    //   new HumanMessage(apiResponse.text),
-    // ]);
-    // console.log("Headlines API ", apiResponse.text);
-    // const cleanUp = await model.call([
-    //   new SystemMessage(
-    //     "Turn the following string into valid JSON format that strictly adhere to RFC8259 compliance, if it already is in a valid JSON format then give me the string as the response, without any other information from you"
-    //   ),
-    //   new HumanMessage(apiResponse.text),
-    // ]);
-
-    //updateWeeklyInfo(REACT_APP_LEAGUE_ID, apiResponse.text);
-    //console.log(apiResponse.text);
+    const apiResponse = await withTimeout(chainA.call({ leagueData: newFile }), 45000);
 
     return res.status(200).json(JSON.parse(apiResponse.text));
   } catch (error) {
+    // Non-2xx so the client's existing default-headlines fallback kicks in
+    // and it doesn't cache a failure as if it were real content - see
+    // HomeCarousel.tsx, which only caches an array response to Firestore.
     console.error("Unexpected error:", error);
-    return res.status(500).json({ error: "Failed" });
+    return res.status(503).json({ error: "Failed to generate headlines" });
   }
 }

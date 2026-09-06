@@ -58,6 +58,16 @@ function countTokens(inputString) {
     .length;
 }
 
+// Races a chunk's OpenAI call against a deadline safely inside Vercel's own
+// maxDuration, so a slow completion ends the stream cleanly instead of the
+// whole function getting hard-killed with a truncated response body.
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("Timed out")), ms)),
+  ]);
+}
+
 export default async function handler(req, res) {
   const REACT_APP_LEAGUE_ID = req.body;
   const MAX_TOKENS = 8192;
@@ -77,7 +87,7 @@ export default async function handler(req, res) {
 
     const model = new ChatOpenAI({
       temperature: 0.9,
-      model: "gpt-4-turbo",
+      model: "gpt-4o",
       openAIApiKey: OPENAI_API_KEY,
     });
 
@@ -163,10 +173,9 @@ export default async function handler(req, res) {
     let firstChunk = true;
 
     for (const chunk of chunks) {
-      const apiResponse = await chainA.call({ leagueData: chunk });
-      let responseData;
       try {
-        responseData = JSON.parse(apiResponse.text);
+        const apiResponse = await withTimeout(chainA.call({ leagueData: chunk }), 45000);
+        let responseData = JSON.parse(apiResponse.text);
         if (!Array.isArray(responseData)) {
           responseData = [responseData];
         }
@@ -177,17 +186,23 @@ export default async function handler(req, res) {
           stream.push(JSON.stringify(data));
           firstChunk = false;
         });
-      } catch (parseError) {
-        console.error("JSON parse error:", parseError);
-        res.status(500).json({ error: "Failed to parse response JSON" });
-        return;
+      } catch (chunkError) {
+        // A slow/failed chunk shouldn't hang the whole request until Vercel
+        // kills it - skip it and close the JSON array with whatever chunks
+        // did complete, rather than leaving the stream open or truncated.
+        console.error("Error generating preview chunk:", chunkError);
+        break;
       }
     }
 
     stream.push("]");
     stream.push(null); // End the stream
 
-    await updateWeeklyInfo(REACT_APP_LEAGUE_ID, allResponses);
+    // Firestore rejects undefined field values - skip the write entirely if
+    // every chunk failed rather than saving a broken cache entry.
+    if (allResponses.length > 0) {
+      await updateWeeklyInfo(REACT_APP_LEAGUE_ID, allResponses);
+    }
   } catch (error) {
     console.error("Unexpected error:", error);
     if (!res.headersSent) {
