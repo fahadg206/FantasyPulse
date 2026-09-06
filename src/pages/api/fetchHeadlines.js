@@ -98,6 +98,18 @@ export default async function handler(req, res) {
       return res.status(200).json(fresh);
     }
 
+    // Diagnostic only: confirms whether the runtime key is actually valid
+    // against OpenAI, without ever logging the key itself.
+    try {
+      const probe = await fetch("https://api.openai.com/v1/models/gpt-4-turbo", {
+        headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+      });
+      const probeBody = await probe.text();
+      console.log(`[timing] key probe status: ${probe.status}, body: ${probeBody.slice(0, 300)}`);
+    } catch (probeError) {
+      console.log(`[timing] key probe failed: ${probeError.message}`);
+    }
+
     const readingRef = ref(storage, `files/${REACT_APP_LEAGUE_ID}.txt`);
     const url = await getDownloadURL(readingRef);
     const response = await fetch(url);
