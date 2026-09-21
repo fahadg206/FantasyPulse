@@ -18,6 +18,7 @@ import { getTeamColor, getTeamLogo } from "../../../lib/nflTeams";
 import AnimatedNumber from "../../../components/AnimatedNumber";
 import BigPlayToast from "../../../components/BigPlayToast";
 import MatchupFeed from "../../../components/MatchupFeed";
+import CommentsSection from "../../../components/CommentsSection";
 import useBigPlayFeed from "../../../lib/useBigPlayFeed";
 
 const POSITION_COLOR: Record<string, string> = {
@@ -369,6 +370,19 @@ export default function MatchupDetail() {
             </View>
           </>
         )}
+      </View>
+
+      {/* CommentsSection is styled dark-only (matches the Feed screen and
+          everywhere else comments/posts appear), so it's wrapped in its
+          own dark background rather than inheriting this page's
+          light/dark-adaptive one. */}
+      <View className="bg-[#0c0c0e] pt-4 pb-8">
+        <CommentsSection
+          targetType="matchup"
+          targetId={`${week}:${matchupID}`}
+          leagueId={leagueID}
+          targetLabel={`${team1.name} vs ${team2.name} - Week ${week}`}
+        />
       </View>
     </ScrollView>
   );

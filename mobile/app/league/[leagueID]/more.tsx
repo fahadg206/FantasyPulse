@@ -17,6 +17,12 @@ export default function More() {
 
   const items: MenuItem[] = [
     {
+      label: "Feed",
+      description: "What's happening across your leagues - post, reply, like",
+      icon: <Feather name="message-circle" size={20} color="#af1222" />,
+      path: `/feed`,
+    },
+    {
       label: "Fantasy Profile",
       description: "Your stats across every league, and managers you follow",
       icon: <Ionicons name="person-circle" size={20} color="#af1222" />,
@@ -33,6 +39,12 @@ export default function More() {
       description: "Every team ranked and sorted into tiers",
       icon: <Ionicons name="trophy" size={20} color="#af1222" />,
       path: `/league/${leagueID}/powerrankings`,
+    },
+    {
+      label: "Trades",
+      description: "Every trade this season - tap one to comment",
+      icon: <Feather name="repeat" size={20} color="#af1222" />,
+      path: `/league/${leagueID}/trades`,
     },
     {
       label: "Rivalry",

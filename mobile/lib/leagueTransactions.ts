@@ -18,7 +18,7 @@ export type AddDropEvent = { kind: "add" | "drop"; team: TxTeam; asset: TxAsset;
 export type TradeEvent = (
   | { kind: "trade2"; teamA: TxTeam; teamB: TxTeam; aGives: TxAsset[]; aGets: TxAsset[] }
   | { kind: "tradeMulti"; parts: { team: TxTeam; receives: TxAsset[] }[] }
-) & { timestamp: number };
+) & { timestamp: number; id: string };
 export type TickerEvent = AddDropEvent | TradeEvent;
 
 function assetFromPlayer(playerId: string, playersData: any): TxAsset {
@@ -91,12 +91,14 @@ export async function buildLeagueTransactions(leagueId: string): Promise<TickerE
           aGives: receivedByRoster[ridB] ?? [],
           aGets: receivedByRoster[ridA] ?? [],
           timestamp,
+          id: t.transaction_id,
         });
       } else if (rosterIds.length > 0) {
         events.push({
           kind: "tradeMulti",
           parts: rosterIds.map((rid) => ({ team: team(rid), receives: receivedByRoster[rid] })),
           timestamp,
+          id: t.transaction_id,
         });
       }
     } else {
@@ -200,10 +202,12 @@ export async function buildAllSeasonsTradesBetween(leagueId: string, userIds: [s
             aGives: receivedByRoster[ridB] ?? [],
             aGets: receivedByRoster[ridA] ?? [],
             timestamp,
+            id: t.transaction_id,
           });
         } else {
           events.push({
             kind: "tradeMulti",
+            id: t.transaction_id,
             parts: involvedRosterIds.map((rid) => ({ team: team(rid), receives: receivedByRoster[rid] })),
             timestamp,
           });

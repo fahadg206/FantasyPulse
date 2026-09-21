@@ -42,7 +42,7 @@ export function AssetChip({ asset }: { asset: TxAsset }) {
   );
 }
 
-function AssetChips({ assets }: { assets: TxAsset[] }) {
+export function AssetChips({ assets }: { assets: TxAsset[] }) {
   return (
     <View className="flex-row items-center gap-2">
       {assets.map((a, i) => (
