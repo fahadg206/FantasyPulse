@@ -23,6 +23,8 @@ import {
   linkSleeperAccount,
   getUserProfileByUsername,
   requestPasswordReset,
+  completeProfile,
+  validateUsername,
   UserProfile,
 } from "../../lib/socialAuth";
 import { getFantasyProfileStats, FantasyProfileStats } from "../../lib/fantasyProfile";
@@ -35,6 +37,10 @@ export default function ProfileHome() {
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  // Distinguishes "haven't checked yet / still loading" from "checked, and
+  // there really is no profile doc for this real signed-in user" - the
+  // second case needs its own recovery UI, not a crash on a null profile.
+  const [profileChecked, setProfileChecked] = useState(false);
   const [stats, setStats] = useState<FantasyProfileStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [followCounts, setFollowCounts] = useState({ following: 0, followers: 0 });
@@ -47,9 +53,17 @@ export default function ProfileHome() {
   useEffect(() => {
     if (!authUser || isReadOnly(authUser)) {
       setProfile(null);
+      setProfileChecked(false);
       return;
     }
-    getUserProfile(authUser.uid).then(setProfile).catch(console.error);
+    setProfileChecked(false);
+    getUserProfile(authUser.uid)
+      .then(setProfile)
+      .catch((error) => {
+        console.error(error);
+        setProfile(null);
+      })
+      .finally(() => setProfileChecked(true));
   }, [authUser]);
 
   useEffect(() => {
@@ -82,6 +96,29 @@ export default function ProfileHome() {
     return <SignInUpScreen />;
   }
 
+  // A real signed-in user whose profile doc hasn't loaded yet.
+  if (!profileChecked) {
+    return (
+      <SafeAreaView className="flex-1 bg-[#0c0c0e] items-center justify-center">
+        <ActivityIndicator color="#af1222" />
+      </SafeAreaView>
+    );
+  }
+
+  // A real signed-in user with no profile doc at all - an account whose
+  // signup was interrupted after Auth succeeded but before its Firestore
+  // profile got written (the scenario signUp's rollback now prevents going
+  // forward, but this repairs any account already in that state).
+  if (!profile) {
+    return (
+      <SafeAreaView className="flex-1 bg-[#0c0c0e]">
+        <ScrollView contentContainerClassName="px-5 pt-8 pb-12" showsVerticalScrollIndicator={false}>
+          <CompleteProfileCard authUser={authUser!} onDone={setProfile} />
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView className="flex-1 bg-[#0c0c0e]">
       <ScrollView contentContainerClassName="px-5 pt-8 pb-12" showsVerticalScrollIndicator={false}>
@@ -106,10 +143,10 @@ export default function ProfileHome() {
           </View>
         </View>
 
-        {!profile?.sleeperUserId ? (
+        {!profile.sleeperUserId ? (
           <LinkSleeperCard
-            uid={profile!.uid}
-            onLinked={() => getUserProfile(profile!.uid).then(setProfile)}
+            uid={profile.uid}
+            onLinked={() => getUserProfile(profile.uid).then(setProfile)}
           />
         ) : statsLoading ? (
           <ActivityIndicator color="#af1222" className="mt-6" />
@@ -128,6 +165,62 @@ export default function ProfileHome() {
         </Pressable>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function CompleteProfileCard({ authUser, onDone }: { authUser: User; onDone: (profile: UserProfile) => void }) {
+  const [username, setUsername] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    const validationError = validateUsername(username);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const profile = await completeProfile(authUser, username, displayName);
+      onDone(profile);
+    } catch (e: any) {
+      setError(e.message || "Couldn't finish setting up your profile.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <View className="bg-[#141416] rounded-2xl border border-white/10 p-4">
+      <Text className="text-white font-bold text-[16px] mb-1">Finish setting up your profile</Text>
+      <Text className="text-gray-500 text-[12px] mb-4">
+        You're signed in as {authUser.email}, but your profile wasn't finished. Pick a username to continue.
+      </Text>
+      <TextInput
+        value={username}
+        onChangeText={setUsername}
+        placeholder="Username"
+        placeholderTextColor="#6b7280"
+        autoCapitalize="none"
+        className="bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-white mb-2.5"
+      />
+      <TextInput
+        value={displayName}
+        onChangeText={setDisplayName}
+        placeholder="Display name (optional)"
+        placeholderTextColor="#6b7280"
+        className="bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-white mb-2.5"
+      />
+      {error && <Text className="text-red-400 text-[12px] mb-2">{error}</Text>}
+      <Pressable onPress={submit} disabled={loading} className="bg-brand rounded-xl py-2.5 items-center">
+        {loading ? <ActivityIndicator color="#fff" /> : <Text className="text-white font-bold">Continue</Text>}
+      </Pressable>
+      <Pressable onPress={() => signOutUser()} className="items-center py-3 mt-1">
+        <Text className="text-gray-500 text-[12px]">Sign out instead</Text>
+      </Pressable>
+    </View>
   );
 }
 

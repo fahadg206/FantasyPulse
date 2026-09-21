@@ -4,6 +4,7 @@ import {
   sendPasswordResetEmail,
   signOut as firebaseSignOut,
   onAuthStateChanged,
+  deleteUser,
   type User,
 } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore/lite";
@@ -108,8 +109,50 @@ export async function signUp(
     createdAt: new Date().toISOString(),
   };
 
-  await setDoc(doc(db, "profiles", credential.user.uid), profile);
-  await setDoc(doc(db, "usernames", normalizedUsername), { uid: credential.user.uid });
+  // The Auth account and its Firestore profile doc have to end up in sync -
+  // if the Firestore writes fail (rules misconfigured, network drop,
+  // whatever), roll back the just-created Auth account rather than leaving
+  // an orphaned account with no profile behind: that account would then be
+  // stuck forever, since re-running signUp with the same email always fails
+  // with "email already registered" but there'd be no profile to recover
+  // via completeProfile (its username was never reserved either).
+  try {
+    await setDoc(doc(db, "profiles", credential.user.uid), profile);
+    await setDoc(doc(db, "usernames", normalizedUsername), { uid: credential.user.uid });
+  } catch (error) {
+    await deleteUser(credential.user).catch(() => {});
+    throw error;
+  }
+
+  return profile;
+}
+
+/**
+ * Finishes setting up an account that already has a real Firebase Auth
+ * user but no profile doc yet - the recovery path for any account that
+ * predates the deleteUser rollback above (an orphaned Auth account whose
+ * profile/username writes failed silently before that safeguard existed).
+ * Shown automatically by the profile screen whenever a real signed-in user
+ * has no matching profiles/{uid} doc.
+ */
+export async function completeProfile(user: User, username: string, displayName?: string): Promise<UserProfile> {
+  const normalizedUsername = normalizeUsername(username);
+  const usernameError = validateUsername(normalizedUsername);
+  if (usernameError) throw new Error(usernameError);
+  if (await isUsernameTaken(normalizedUsername)) {
+    throw new Error("That username is already taken.");
+  }
+
+  const profile: UserProfile = {
+    uid: user.uid,
+    username: normalizedUsername,
+    displayName: displayName?.trim() || normalizedUsername,
+    email: normalizeEmail(user.email ?? ""),
+    createdAt: new Date().toISOString(),
+  };
+
+  await setDoc(doc(db, "profiles", user.uid), profile);
+  await setDoc(doc(db, "usernames", normalizedUsername), { uid: user.uid });
 
   return profile;
 }
