@@ -7,6 +7,7 @@ import {
 } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore/lite";
 import { auth, db } from "./firebase";
+import { backend } from "./api";
 
 // Real accounts, on top of the app-wide anonymous session that already
 // exists in firebase.ts (kept as-is for the existing poll/article features
@@ -24,6 +25,7 @@ export interface UserProfile {
   uid: string;
   username: string;
   displayName: string;
+  phoneNumber?: string;
   sleeperUsername?: string;
   sleeperUserId?: string;
   bio?: string;
@@ -48,21 +50,57 @@ export function validateUsername(username: string): string | null {
   return null;
 }
 
+// Mirrors the same normalization in sendUsernameRecoveryOtp.js /
+// verifyUsernameRecoveryOtp.js server-side, so a number entered at signup
+// resolves to the same key a later recovery lookup uses. Assumes a US
+// number when no country code is given - this app's audience is US-based
+// fantasy football leagues.
+export function normalizePhoneNumber(raw: string): string {
+  const digits = (raw || "").replace(/[^\d+]/g, "");
+  if (digits.startsWith("+")) return digits;
+  const bare = digits.replace(/\D/g, "");
+  if (bare.length === 10) return `+1${bare}`;
+  if (bare.length === 11 && bare.startsWith("1")) return `+${bare}`;
+  return `+${bare}`;
+}
+
+export function validatePhoneNumber(raw: string): string | null {
+  const normalized = normalizePhoneNumber(raw);
+  if (!/^\+\d{10,15}$/.test(normalized)) {
+    return "Enter a valid phone number, e.g. (555) 123-4567.";
+  }
+  return null;
+}
+
 export async function isUsernameTaken(username: string): Promise<boolean> {
   const snap = await getDoc(doc(db, "usernames", normalizeUsername(username)));
+  return snap.exists();
+}
+
+export async function isPhoneNumberTaken(phoneNumber: string): Promise<boolean> {
+  const snap = await getDoc(doc(db, "phoneNumbers", normalizePhoneNumber(phoneNumber)));
   return snap.exists();
 }
 
 export async function signUp(
   username: string,
   password: string,
+  phoneNumber: string,
   displayName?: string
 ): Promise<UserProfile> {
   const normalized = normalizeUsername(username);
   const validationError = validateUsername(normalized);
   if (validationError) throw new Error(validationError);
   if (password.length < 6) throw new Error("Password must be at least 6 characters.");
+
+  const normalizedPhone = normalizePhoneNumber(phoneNumber);
+  const phoneError = validatePhoneNumber(phoneNumber);
+  if (phoneError) throw new Error(phoneError);
+
   if (await isUsernameTaken(normalized)) throw new Error("That username is already taken.");
+  if (await isPhoneNumberTaken(normalizedPhone)) {
+    throw new Error("That phone number is already linked to an account.");
+  }
 
   const credential = await createUserWithEmailAndPassword(
     auth,
@@ -74,13 +112,32 @@ export async function signUp(
     uid: credential.user.uid,
     username: normalized,
     displayName: displayName?.trim() || normalized,
+    phoneNumber: normalizedPhone,
     createdAt: new Date().toISOString(),
   };
 
   await setDoc(doc(db, "profiles", credential.user.uid), profile);
   await setDoc(doc(db, "usernames", normalized), { uid: credential.user.uid });
+  await setDoc(doc(db, "phoneNumbers", normalizedPhone), { uid: credential.user.uid });
 
   return profile;
+}
+
+/** step 1 of "forgot your username": request an SMS code be sent to this phone number */
+export async function sendUsernameRecoveryCode(phoneNumber: string): Promise<void> {
+  await backend.sendUsernameRecoveryOtp(normalizePhoneNumber(phoneNumber));
+}
+
+/** step 2: verify the code and get back the username tied to this phone number, if any */
+export async function verifyUsernameRecoveryCode(
+  phoneNumber: string,
+  code: string
+): Promise<string> {
+  const { username } = await backend.verifyUsernameRecoveryOtp(
+    normalizePhoneNumber(phoneNumber),
+    code
+  );
+  return username;
 }
 
 export async function signIn(username: string, password: string): Promise<UserProfile> {

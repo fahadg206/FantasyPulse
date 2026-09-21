@@ -22,6 +22,8 @@ import {
   getUserProfile,
   linkSleeperAccount,
   getUserProfileByUsername,
+  sendUsernameRecoveryCode,
+  verifyUsernameRecoveryCode,
   UserProfile,
 } from "../../lib/socialAuth";
 import { getFantasyProfileStats, FantasyProfileStats } from "../../lib/fantasyProfile";
@@ -292,19 +294,24 @@ function FindManagerCard() {
 }
 
 function SignInUpScreen() {
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [mode, setMode] = useState<"signin" | "signup" | "recover">("signin");
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [phoneNumber, setPhoneNumber] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  if (mode === "recover") {
+    return <ForgotUsernameFlow onDone={() => setMode("signin")} />;
+  }
 
   const submit = async () => {
     setLoading(true);
     setError(null);
     try {
       if (mode === "signup") {
-        await signUp(username, password, displayName);
+        await signUp(username, password, phoneNumber, displayName);
       } else {
         await signIn(username, password);
       }
@@ -350,6 +357,16 @@ function SignInUpScreen() {
             autoCorrect={false}
             className="bg-white/5 border border-white/10 rounded-xl px-3.5 py-3 text-white mb-2.5"
           />
+          {mode === "signup" && (
+            <TextInput
+              value={phoneNumber}
+              onChangeText={setPhoneNumber}
+              placeholder="Phone number"
+              placeholderTextColor="#6b7280"
+              keyboardType="phone-pad"
+              className="bg-white/5 border border-white/10 rounded-xl px-3.5 py-3 text-white mb-2.5"
+            />
+          )}
           <TextInput
             value={password}
             onChangeText={setPassword}
@@ -358,12 +375,23 @@ function SignInUpScreen() {
             secureTextEntry
             className="bg-white/5 border border-white/10 rounded-xl px-3.5 py-3 text-white mb-2.5"
           />
+          {mode === "signup" && (
+            <Text className="text-gray-600 text-[11px] mb-2.5 px-1">
+              Your phone number is only used if you ever forget your username - we'll text a
+              code to confirm it's you, then remind you.
+            </Text>
+          )}
 
           {error && <Text className="text-red-400 text-[13px] mb-2">{error}</Text>}
 
           <Pressable
             onPress={submit}
-            disabled={loading || !username.trim() || !password}
+            disabled={
+              loading ||
+              !username.trim() ||
+              !password ||
+              (mode === "signup" && !phoneNumber.trim())
+            }
             className="bg-brand rounded-xl py-3.5 items-center mt-2"
           >
             {loading ? (
@@ -374,6 +402,12 @@ function SignInUpScreen() {
               </Text>
             )}
           </Pressable>
+
+          {mode === "signin" && (
+            <Pressable onPress={() => setMode("recover")} className="items-center mt-4">
+              <Text className="text-gray-400 text-[13px]">Forgot your username?</Text>
+            </Pressable>
+          )}
 
           <Pressable
             onPress={() => {
@@ -389,6 +423,127 @@ function SignInUpScreen() {
               </Text>
             </Text>
           </Pressable>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+function ForgotUsernameFlow({ onDone }: { onDone: () => void }) {
+  const [step, setStep] = useState<"phone" | "code" | "result">("phone");
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [code, setCode] = useState("");
+  const [foundUsername, setFoundUsername] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const sendCode = async () => {
+    if (!phoneNumber.trim()) return;
+    setLoading(true);
+    setError(null);
+    try {
+      await sendUsernameRecoveryCode(phoneNumber);
+      setStep("code");
+    } catch (e: any) {
+      setError(e.message || "Couldn't send a code right now.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const verifyCode = async () => {
+    if (!code.trim()) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const username = await verifyUsernameRecoveryCode(phoneNumber, code.trim());
+      setFoundUsername(username);
+      setStep("result");
+    } catch (e: any) {
+      setError(e.message || "That code didn't work.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <SafeAreaView className="flex-1 bg-[#0c0c0e]">
+      <View className="px-4 pt-3">
+        <Pressable onPress={onDone} hitSlop={10}>
+          <Feather name="arrow-left" size={20} color="#fff" />
+        </Pressable>
+      </View>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1">
+        <ScrollView contentContainerClassName="flex-grow px-6 justify-center" keyboardShouldPersistTaps="handled">
+          <View className="items-center mb-6">
+            <View className="w-[56px] h-[56px] rounded-full bg-brand/20 items-center justify-center mb-3">
+              <Feather name="message-circle" size={24} color="#e2465a" />
+            </View>
+            <Text className="text-white text-[20px] font-bold">Forgot Your Username?</Text>
+            <Text className="text-gray-500 text-[13px] mt-1 text-center px-4">
+              {step === "phone" && "Enter the phone number you signed up with. We'll text you a code."}
+              {step === "code" && `Enter the code we texted to ${phoneNumber}.`}
+              {step === "result" && "Here's your username."}
+            </Text>
+          </View>
+
+          {step === "phone" && (
+            <>
+              <TextInput
+                value={phoneNumber}
+                onChangeText={setPhoneNumber}
+                placeholder="Phone number"
+                placeholderTextColor="#6b7280"
+                keyboardType="phone-pad"
+                className="bg-white/5 border border-white/10 rounded-xl px-3.5 py-3 text-white mb-2.5"
+              />
+              {error && <Text className="text-red-400 text-[13px] mb-2">{error}</Text>}
+              <Pressable
+                onPress={sendCode}
+                disabled={loading || !phoneNumber.trim()}
+                className="bg-brand rounded-xl py-3.5 items-center mt-2"
+              >
+                {loading ? <ActivityIndicator color="#fff" /> : <Text className="text-white font-bold text-[15px]">Send Code</Text>}
+              </Pressable>
+            </>
+          )}
+
+          {step === "code" && (
+            <>
+              <TextInput
+                value={code}
+                onChangeText={setCode}
+                placeholder="6-digit code"
+                placeholderTextColor="#6b7280"
+                keyboardType="number-pad"
+                maxLength={6}
+                className="bg-white/5 border border-white/10 rounded-xl px-3.5 py-3 text-white mb-2.5 text-center text-[18px] tracking-widest"
+              />
+              {error && <Text className="text-red-400 text-[13px] mb-2">{error}</Text>}
+              <Pressable
+                onPress={verifyCode}
+                disabled={loading || !code.trim()}
+                className="bg-brand rounded-xl py-3.5 items-center mt-2"
+              >
+                {loading ? <ActivityIndicator color="#fff" /> : <Text className="text-white font-bold text-[15px]">Verify</Text>}
+              </Pressable>
+              <Pressable onPress={() => setStep("phone")} className="items-center mt-4">
+                <Text className="text-gray-400 text-[13px]">Use a different number</Text>
+              </Pressable>
+            </>
+          )}
+
+          {step === "result" && (
+            <>
+              <View className="bg-[#141416] rounded-2xl border border-white/10 p-5 items-center mb-4">
+                <Text className="text-gray-500 text-[11px] font-bold tracking-widest mb-1">YOUR USERNAME</Text>
+                <Text className="text-white text-[22px] font-bold">@{foundUsername}</Text>
+              </View>
+              <Pressable onPress={onDone} className="bg-brand rounded-xl py-3.5 items-center">
+                <Text className="text-white font-bold text-[15px]">Back to Sign In</Text>
+              </Pressable>
+            </>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
