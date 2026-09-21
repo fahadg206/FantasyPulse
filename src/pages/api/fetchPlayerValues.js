@@ -1,5 +1,6 @@
 // pages/api/fetchPlayerValues.js
 import { MongoClient } from "mongodb";
+import { computeAdjustedValue } from "@/lib/playerValue";
 
 const password = process.env.MONGO_PASSWORD || "kabofahad123";
 const uri = `mongodb+srv://fantasypulseff:${password}@fantasypulsecluster.wj4o9kr.mongodb.net/?retryWrites=true&w=majority`;
@@ -22,38 +23,49 @@ async function connectToDatabase() {
   return client;
 }
 
+// Sane fallback if the caller doesn't pass league settings (defaults to the
+// old behaviour: dynasty 1QB, standard PPR, 4pt passing TDs, no TE premium).
+const DEFAULT_LEAGUE_SETTINGS = {
+  isDynasty: true,
+  isSuperflex: false,
+  tePremium: 0,
+  pprValue: 1,
+  passingTdPoints: 4,
+};
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ message: "Method not allowed" });
   }
 
-  const { sleeperId, scoringType } = req.body;
-  console.log("what was passed in ", sleeperId, scoringType);
+  const { sleeperId, leagueSettings, scoringType } = req.body;
 
-  if (!sleeperId || !scoringType) {
-    return res
-      .status(400)
-      .json({ message: "Sleeper ID and scoring type are required" });
+  if (!sleeperId) {
+    return res.status(400).json({ message: "Sleeper ID is required" });
   }
+
+  // Back-compat: older callers may still send a `scoringType` string instead
+  // of a full leagueSettings object.
+  const settings = leagueSettings || {
+    ...DEFAULT_LEAGUE_SETTINGS,
+    isDynasty:
+      typeof scoringType === "string"
+        ? scoringType.includes("dynasty")
+        : DEFAULT_LEAGUE_SETTINGS.isDynasty,
+  };
 
   try {
     const client = await connectToDatabase();
     const db = client.db("fantasypulse");
     const collection = db.collection("playersValues");
-    console.log("connected I think ", scoringType);
 
     const player = await collection.findOne({ "Sleeper ID": sleeperId });
-    console.log("Player? ", player);
 
     if (!player) {
       return res.status(404).json({ message: "Player not found" });
     }
 
-    const value = player.RdrftValue
-      ? scoringType.includes("dynasty")
-        ? player.Value
-        : player.RdrftValue
-      : player.Value;
+    const value = computeAdjustedValue(player, settings);
 
     return res.status(200).json({ value });
   } catch (error) {

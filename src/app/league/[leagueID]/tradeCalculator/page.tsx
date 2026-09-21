@@ -13,6 +13,10 @@ import Image from "next/image";
 import { FaSearch, FaPlus, FaTrash, FaStar } from "react-icons/fa";
 import logo from "../../../images/helmet2.png";
 import { useRouter } from "next/navigation";
+import {
+  getLeagueValueSettings,
+  LeagueValueSettings,
+} from "@/lib/playerValue";
 
 const teamColors: { [key: string]: string } = {
   BAL: "#241773",
@@ -97,7 +101,8 @@ const TradeCalculator: React.FC = () => {
   const [valueAdjustmentSide, setValueAdjustmentSide] = useState<number>(0);
   const [valueToEvenTrade, setValueToEvenTrade] = useState<number>(0);
   const acceptanceBufferAmount = 1000;
-  const [scoringType, setScoringType] = useState<string>("");
+  const [leagueSettings, setLeagueSettings] =
+    useState<LeagueValueSettings | null>(null);
 
   const REACT_APP_LEAGUE_ID = localStorage.getItem("selectedLeagueID");
 
@@ -116,7 +121,7 @@ const TradeCalculator: React.FC = () => {
   useEffect(() => {
     fetchUsers();
     fetchPlayersData();
-    fetchScoringType();
+    fetchLeagueSettings();
   }, []);
 
   useEffect(() => {
@@ -129,16 +134,18 @@ const TradeCalculator: React.FC = () => {
     calculateTradeStatus();
   }, [team1Trade, team2Trade]);
 
-  const fetchScoringType = async () => {
+  // Pulls the league's actual format (dynasty/redraft, superflex) and
+  // scoring settings (TE premium, PPR level, passing TD points) straight
+  // from Sleeper so player values reflect this specific league instead of a
+  // generic default.
+  const fetchLeagueSettings = async () => {
     try {
-      const drafts = await axios.get(
-        `https://api.sleeper.app/v1/league/${REACT_APP_LEAGUE_ID}/drafts`
+      const settings = await getLeagueValueSettings(
+        REACT_APP_LEAGUE_ID as string
       );
-      const drafts_response = drafts.data;
-      const scoring_type = drafts_response[0]?.metadata?.scoring_type || "";
-      setScoringType(scoring_type);
+      setLeagueSettings(settings);
     } catch (error) {
-      console.error("Error fetching scoring type:", error);
+      console.error("Error fetching league settings:", error);
     }
   };
 
@@ -228,7 +235,7 @@ const TradeCalculator: React.FC = () => {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ sleeperId, scoringType }),
+        body: JSON.stringify({ sleeperId, leagueSettings }),
       });
       const data = await response.json();
       return data.value;
