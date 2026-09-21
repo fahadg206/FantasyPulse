@@ -1,12 +1,12 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-
-interface FeedTeamInput {
-  userId: string;
-  name: string;
-  starterSleeperIds: string[];
-}
+import React from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import useBigPlayFeed, {
+  BigPlayFeedTeamInput,
+  FeedPlay,
+} from "../libs/useBigPlayFeed";
+import BigPlayToast from "./BigPlayToast";
 
 interface PlayerMeta {
   fn?: string;
@@ -18,33 +18,10 @@ interface PlayerMeta {
 interface MatchupFeedProps {
   week: number;
   season: string | number;
-  team1: FeedTeamInput;
-  team2: FeedTeamInput;
-  // loosely typed to match the weakly-typed playersData state it's fed
-  // from in schedule/page.tsx
+  team1: BigPlayFeedTeamInput;
+  team2: BigPlayFeedTeamInput;
   playersData: { [sleeperId: string]: PlayerMeta };
-}
-
-interface FeedPlay {
-  id: string;
-  awayTeam: string;
-  homeTeam: string;
-  awayScore: number;
-  homeScore: number;
-  period: number;
-  clock: string;
-  scoringTeam: string;
-  text: string;
-  playType: string;
-  scoringType: string;
-  player: {
-    sleeperId: string;
-    fn: string;
-    ln: string;
-    pos: string;
-    team: string;
-    fantasyTeam: "team1" | "team2";
-  };
+  scoringSettings: { [stat: string]: number };
 }
 
 const FANTASY_TEAM_COLOR: Record<"team1" | "team2", string> = {
@@ -58,79 +35,21 @@ const MatchupFeed: React.FC<MatchupFeedProps> = ({
   team1,
   team2,
   playersData,
+  scoringSettings,
 }) => {
-  const [plays, setPlays] = useState<FeedPlay[] | null>(null);
-  const [error, setError] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const fetchFeed = async () => {
-      setPlays(null);
-      setError(false);
-
-      const buildPlayers = (
-        team: FeedTeamInput,
-        fantasyTeam: "team1" | "team2"
-      ) =>
-        (team.starterSleeperIds || [])
-          .map((sleeperId) => {
-            const meta = playersData[sleeperId];
-            if (!meta || !meta.fn || !meta.ln || !meta.t) return null;
-            return {
-              sleeperId,
-              fn: meta.fn,
-              ln: meta.ln,
-              pos: meta.pos,
-              team: meta.t,
-              fantasyTeam,
-            };
-          })
-          .filter(Boolean);
-
-      const players = [
-        ...buildPlayers(team1, "team1"),
-        ...buildPlayers(team2, "team2"),
-      ];
-
-      if (players.length === 0) {
-        setPlays([]);
-        return;
-      }
-
-      try {
-        const response = await fetch("/api/fetchMatchupFeed", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ week, season, players }),
-        });
-        if (!response.ok) throw new Error("feed request failed");
-        const data = await response.json();
-        if (!cancelled) setPlays(data.plays || []);
-      } catch (err) {
-        console.error("Error fetching matchup feed:", err);
-        if (!cancelled) setError(true);
-      }
-    };
-
-    fetchFeed();
-    return () => {
-      cancelled = true;
-    };
-  }, [week, season, team1, team2, playersData]);
+  const { plays, latestPlay, loading } = useBigPlayFeed({
+    week,
+    season,
+    team1,
+    team2,
+    playersData,
+    scoringSettings,
+  });
 
   const teamName = (fantasyTeam: "team1" | "team2") =>
     fantasyTeam === "team1" ? team1.name : team2.name;
 
-  if (error) {
-    return (
-      <div className="text-center text-xs text-gray-500 dark:text-gray-400 py-6">
-        Couldn&apos;t load the play feed right now.
-      </div>
-    );
-  }
-
-  if (plays === null) {
+  if (loading) {
     return (
       <div className="text-center text-xs text-gray-500 dark:text-gray-400 py-6">
         Loading scoring plays...
@@ -148,48 +67,71 @@ const MatchupFeed: React.FC<MatchupFeedProps> = ({
 
   return (
     <div className="flex flex-col gap-2 w-[95vw] xl:w-[60vw] py-2">
-      {plays.map((play) => (
-        <div
-          key={play.id}
-          className="rounded-lg bg-[#d1d1d1] dark:bg-[#2a2a2a] p-3"
-        >
-          <div className="flex items-center justify-between text-[10px] text-gray-500 dark:text-gray-400 mb-1">
-            <span>
-              {play.awayTeam} {play.awayScore}-{play.homeScore} {play.homeTeam}
-            </span>
-            <span>
-              Q{play.period} {play.clock}
-            </span>
-          </div>
-          <p className="font-bold text-sm mb-1">{play.playType}</p>
-          <div className="flex items-center gap-2 mb-1">
-            <img
-              src={`https://sleepercdn.com/content/nfl/players/thumb/${play.player.sleeperId}.jpg`}
-              alt={play.player.fn}
-              className="w-8 h-8 rounded-full bg-slate-300 object-cover object-top"
-            />
-            <div className="flex flex-col">
-              <span className="text-xs font-medium">
-                {play.player.fn} {play.player.ln}{" "}
-                <span className="text-gray-500 dark:text-gray-400">
-                  {play.player.pos} · {play.player.team}
-                </span>
+      <div className="flex justify-end">
+        <BigPlayToast play={latestPlay} />
+      </div>
+      <AnimatePresence initial={false}>
+        {plays.map((play: FeedPlay) => (
+          <motion.div
+            key={play.id}
+            layout
+            initial={{ opacity: 0, y: -12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
+            className="rounded-lg bg-[#d1d1d1] dark:bg-[#2a2a2a] p-3"
+          >
+            <div className="flex items-center justify-between text-[10px] text-gray-500 dark:text-gray-400 mb-1">
+              <span>
+                {play.awayTeam} {play.awayScore}-{play.homeScore}{" "}
+                {play.homeTeam}
               </span>
-              <span
-                className="text-[10px] font-semibold w-fit px-1.5 rounded-full text-white"
-                style={{
-                  backgroundColor: FANTASY_TEAM_COLOR[play.player.fantasyTeam],
-                }}
-              >
-                {teamName(play.player.fantasyTeam)}
+              <span>
+                Q{play.period} {play.clock}
               </span>
             </div>
-          </div>
-          <p className="text-xs text-gray-600 dark:text-gray-300">
-            {play.text}
-          </p>
-        </div>
-      ))}
+            <div className="flex items-center justify-between mb-1">
+              <p className="font-bold text-sm">{play.playType}</p>
+              {play.pointsDelta !== null && (
+                <span
+                  className={`text-sm font-bold ${
+                    play.pointsDelta >= 0 ? "text-green-500" : "text-red-500"
+                  }`}
+                >
+                  {play.pointsDelta >= 0 ? "+" : ""}
+                  {play.pointsDelta.toFixed(1)}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2 mb-1">
+              <img
+                src={`https://sleepercdn.com/content/nfl/players/thumb/${play.player.sleeperId}.jpg`}
+                alt={play.player.fn}
+                className="w-8 h-8 rounded-full bg-slate-300 object-cover object-top"
+              />
+              <div className="flex flex-col">
+                <span className="text-xs font-medium">
+                  {play.player.fn} {play.player.ln}{" "}
+                  <span className="text-gray-500 dark:text-gray-400">
+                    {play.player.pos} · {play.player.team}
+                  </span>
+                </span>
+                <span
+                  className="text-[10px] font-semibold w-fit px-1.5 rounded-full text-white"
+                  style={{
+                    backgroundColor:
+                      FANTASY_TEAM_COLOR[play.player.fantasyTeam],
+                  }}
+                >
+                  {teamName(play.player.fantasyTeam)}
+                </span>
+              </div>
+            </div>
+            <p className="text-xs text-gray-600 dark:text-gray-300">
+              {play.text}
+            </p>
+          </motion.div>
+        ))}
+      </AnimatePresence>
     </div>
   );
 };

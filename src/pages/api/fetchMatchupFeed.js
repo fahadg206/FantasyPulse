@@ -1,20 +1,41 @@
 // pages/api/fetchMatchupFeed.js
 //
 // A per-fantasy-matchup "redzone" style feed: every real NFL scoring play
-// (touchdown, field goal, safety, 2-point conversion) involving a player
-// rostered by either team in this matchup, merged across however many real
-// games those players are spread across, in chronological order.
+// (touchdown, field goal) AND turnover (interception thrown, fumble lost)
+// involving a player rostered by either team in this matchup, merged across
+// however many real games those players are spread across, in
+// chronological order, with each play's fantasy point impact computed from
+// the league's own scoring settings.
 //
 // There's no free source for this keyed directly off Sleeper or Dynasty
 // Daddy - Sleeper's API has no live play-by-play, and Dynasty Daddy's own
 // "Fantasy Redzone" feature runs on a paid third-party provider (Tank01).
 // This uses ESPN's free, public (if undocumented) scoreboard/summary API
-// instead: no signup, no key. Verified directly against the live API - each
-// game summary's top-level `scoringPlays` array is already exactly the
-// scoring plays for that game, in chronological order, with each play's
-// `text` leading with the scoring player's name (e.g. "Harrison Butker 40
-// Yd Field Goal", "Joshua Palmer 43 Yd pass from Josh Allen") - that name is
-// parsed out here and matched against this matchup's rostered players.
+// instead, verified directly against live data rather than assumed:
+//   - a game summary's top-level `scoringPlays` array is already exactly
+//     the scoring plays for that game, in chronological order, with each
+//     play's `text` leading with the scoring player's full name (e.g.
+//     "Harrison Butker 40 Yd Field Goal", "Joshua Palmer 43 Yd pass from
+//     Josh Allen").
+//   - the full play-by-play (`drives.previous[].plays`, needed to find
+//     turnovers that don't result in a defensive score, since those never
+//     appear in scoringPlays) uses ABBREVIATED names instead ("J.Allen" not
+//     "Josh Allen"), and a different text structure - handled separately.
+//
+// Scope: rushing/receiving/passing touchdowns, field goals, interceptions
+// thrown, and lost fumbles. Two-point conversions, safeties, and
+// interception/fumble-return touchdowns (which would need crediting a
+// defense/IDP, not currently a supported roster concept here) are left out
+// rather than guessed at.
+import {
+  computeRushingTouchdownPoints,
+  computeReceivingTouchdownPoints,
+  computePassingTouchdownPoints,
+  computeFieldGoalPoints,
+  computeInterceptionThrownPoints,
+  computeFumbleLostPoints,
+} from "@/lib/bigPlayPoints";
+
 export const config = { maxDuration: 30 };
 
 const ESPN_SCOREBOARD_URL =
@@ -31,7 +52,12 @@ function cleanNameString(name) {
     .trim();
 }
 
-// ESPN scoring play text always leads with the scoring player's name.
+function stripLeadingParen(text) {
+  return (text || "").replace(/^\([^)]*\)\s*/, "");
+}
+
+// --- full-name matching, for scoringPlays text ---
+
 function extractLeadingName(text) {
   const match = (text || "").match(
     /^([A-Z][A-Za-z'.-]+(?: [A-Z][A-Za-z'.-]+)+?) \d/
@@ -39,23 +65,65 @@ function extractLeadingName(text) {
   return match ? match[1] : null;
 }
 
-function matchPlayer(text, players) {
-  const leadingName = extractLeadingName(text);
-  if (!leadingName) return null;
-  const cleaned = cleanNameString(leadingName);
+function extractPasser(text) {
+  const match = (text || "").match(
+    /pass from ([A-Z][A-Za-z'.-]+(?: [A-Z][A-Za-z'.-]+)+?)(?:\s*\(|$)/
+  );
+  return match ? match[1] : null;
+}
+
+function extractYardage(text) {
+  const match = (text || "").match(/(\d+)\s*Yd/);
+  return match ? parseInt(match[1], 10) : null;
+}
+
+function matchPlayerByFullName(name, players) {
+  if (!name) return null;
+  const cleaned = cleanNameString(name);
 
   const exact = players.find(
     (p) => cleanNameString(`${p.fn} ${p.ln}`) === cleaned
   );
   if (exact) return exact;
 
-  // fall back to a last-name match (handles nickname/suffix mismatches),
-  // only when it's unambiguous among this matchup's players
   const lastNameToken = cleaned.split(" ").slice(-1)[0];
   const lastNameMatches = players.filter(
     (p) => cleanNameString(p.ln) === lastNameToken
   );
   return lastNameMatches.length === 1 ? lastNameMatches[0] : null;
+}
+
+// --- abbreviated-name matching ("J.Allen"), for full play-by-play text ---
+
+function extractInterceptionPasser(text) {
+  const stripped = stripLeadingParen(text);
+  const match = stripped.match(/^([A-Z]\.[A-Za-z'-]+)\s+pass\s/i);
+  return match ? match[1] : null;
+}
+
+function extractFumbler(text) {
+  const stripped = stripLeadingParen(text);
+  if (/\bpass\b/i.test(stripped)) {
+    const match = stripped.match(
+      /pass\s+\S+\s+\S+\s+to\s+([A-Z]\.[A-Za-z'-]+)/i
+    );
+    return match ? match[1] : null;
+  }
+  const match = stripped.match(/^([A-Z]\.[A-Za-z'-]+)/);
+  return match ? match[1] : null;
+}
+
+function matchPlayerByAbbreviatedName(abbrevName, players) {
+  const match = (abbrevName || "").match(/^([A-Za-z])\.([A-Za-z'-]+)$/);
+  if (!match) return null;
+  const [, initial, lastName] = match;
+  const cleanedLast = cleanNameString(lastName);
+  const candidates = players.filter(
+    (p) =>
+      p.fn?.[0]?.toLowerCase() === initial.toLowerCase() &&
+      cleanNameString(p.ln) === cleanedLast
+  );
+  return candidates.length === 1 ? candidates[0] : null;
 }
 
 async function fetchJson(url) {
@@ -64,18 +132,51 @@ async function fetchJson(url) {
   return res.json();
 }
 
+function buildPlayEntry({
+  id,
+  gameId,
+  away,
+  home,
+  awayScore,
+  homeScore,
+  period,
+  clockDisplay,
+  clockSecondsRemaining,
+  text,
+  playType,
+  player,
+  pointsDelta,
+}) {
+  return {
+    id,
+    gameId,
+    awayTeam: away,
+    homeTeam: home,
+    awayScore,
+    homeScore,
+    period: period || 0,
+    clock: clockDisplay,
+    clockSecondsRemaining: clockSecondsRemaining ?? 0,
+    text,
+    playType,
+    player,
+    pointsDelta: pointsDelta === undefined ? null : pointsDelta,
+  };
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ message: "Method not allowed" });
   }
 
-  const { week, season, players } = req.body || {};
+  const { week, season, players, scoringSettings } = req.body || {};
 
   if (!week || !season || !Array.isArray(players) || players.length === 0) {
     return res
       .status(400)
       .json({ message: "week, season, and players are required" });
   }
+  const scoring = scoringSettings || {};
 
   try {
     const scoreboard = await fetchJson(
@@ -104,60 +205,174 @@ export default async function handler(req, res) {
           const home = competitors.find((c) => c.homeAway === "home")?.team
             ?.abbreviation;
 
+          const drives = [
+            ...(summary.drives?.previous || []),
+            ...(summary.drives?.current ? [summary.drives.current] : []),
+          ];
+
           return {
             eventId: event.id,
             away,
             home,
             scoringPlays: summary.scoringPlays || [],
+            plays: drives.flatMap((drive) => drive.plays || []),
           };
         } catch (err) {
           console.error(
             `Error fetching ESPN summary for event ${event.id}:`,
             err
           );
-          return { eventId: event.id, away: null, home: null, scoringPlays: [] };
+          return { eventId: event.id, away: null, home: null, scoringPlays: [], plays: [] };
         }
       })
     );
 
     const feed = [];
-    for (const game of gamesByEvent) {
-      for (const play of game.scoringPlays) {
-        const matched = matchPlayer(play.text, players);
-        if (!matched) continue;
 
-        feed.push({
+    for (const game of gamesByEvent) {
+      // --- scoring plays: touchdowns and field goals ---
+      for (const play of game.scoringPlays) {
+        const scorer = matchPlayerByFullName(
+          extractLeadingName(play.text),
+          players
+        );
+        const yardage = extractYardage(play.text);
+        const playType = play.type?.text;
+        const base = {
           id: play.id,
           gameId: game.eventId,
-          awayTeam: game.away,
-          homeTeam: game.home,
+          away: game.away,
+          home: game.home,
           awayScore: play.awayScore,
           homeScore: play.homeScore,
-          period: play.period?.number || 0,
-          clock: play.clock?.displayValue,
-          clockSecondsRemaining: play.clock?.value ?? 0,
-          scoringTeam: play.team?.abbreviation,
+          period: play.period?.number,
+          clockDisplay: play.clock?.displayValue,
+          clockSecondsRemaining: play.clock?.value,
           text: play.text,
-          playType: play.type?.text,
-          scoringType: play.scoringType?.displayName,
-          player: {
-            sleeperId: matched.sleeperId,
-            fn: matched.fn,
-            ln: matched.ln,
-            pos: matched.pos,
-            team: matched.team,
-            fantasyTeam: matched.fantasyTeam,
-          },
-        });
+          playType,
+        };
+
+        if (scorer && yardage !== null) {
+          let pointsDelta = null;
+          if (playType === "Rushing Touchdown") {
+            pointsDelta = computeRushingTouchdownPoints(yardage, scoring);
+          } else if (playType === "Passing Touchdown") {
+            pointsDelta = computeReceivingTouchdownPoints(yardage, scoring);
+          } else if (playType === "Field Goal Good") {
+            pointsDelta = computeFieldGoalPoints(yardage, scoring);
+          }
+
+          if (pointsDelta !== null) {
+            feed.push(
+              buildPlayEntry({
+                ...base,
+                player: {
+                  sleeperId: scorer.sleeperId,
+                  fn: scorer.fn,
+                  ln: scorer.ln,
+                  pos: scorer.pos,
+                  team: scorer.team,
+                  fantasyTeam: scorer.fantasyTeam,
+                },
+                pointsDelta,
+              })
+            );
+          }
+        }
+
+        // passing TD credit goes to a second, separately matched player
+        if (playType === "Passing Touchdown" && yardage !== null) {
+          const passer = matchPlayerByFullName(
+            extractPasser(play.text),
+            players
+          );
+          if (passer) {
+            feed.push(
+              buildPlayEntry({
+                ...base,
+                player: {
+                  sleeperId: passer.sleeperId,
+                  fn: passer.fn,
+                  ln: passer.ln,
+                  pos: passer.pos,
+                  team: passer.team,
+                  fantasyTeam: passer.fantasyTeam,
+                },
+                pointsDelta: computePassingTouchdownPoints(yardage, scoring),
+              })
+            );
+          }
+        }
+      }
+
+      // --- turnovers: interceptions thrown and lost fumbles ---
+      for (const play of game.plays) {
+        const playType = play.type?.text;
+        const base = {
+          id: play.id,
+          gameId: game.eventId,
+          away: game.away,
+          home: game.home,
+          awayScore: play.awayScore,
+          homeScore: play.homeScore,
+          period: play.period?.number,
+          clockDisplay: play.clock?.displayValue,
+          clockSecondsRemaining: play.clock?.value,
+          text: play.text,
+          playType,
+        };
+
+        if (playType === "Pass Interception Return") {
+          const passer = matchPlayerByAbbreviatedName(
+            extractInterceptionPasser(play.text),
+            players
+          );
+          if (passer) {
+            feed.push(
+              buildPlayEntry({
+                ...base,
+                player: {
+                  sleeperId: passer.sleeperId,
+                  fn: passer.fn,
+                  ln: passer.ln,
+                  pos: passer.pos,
+                  team: passer.team,
+                  fantasyTeam: passer.fantasyTeam,
+                },
+                pointsDelta: computeInterceptionThrownPoints(scoring),
+              })
+            );
+          }
+        } else if (playType === "Fumble Recovery (Opponent)") {
+          const fumbler = matchPlayerByAbbreviatedName(
+            extractFumbler(play.text),
+            players
+          );
+          if (fumbler) {
+            feed.push(
+              buildPlayEntry({
+                ...base,
+                player: {
+                  sleeperId: fumbler.sleeperId,
+                  fn: fumbler.fn,
+                  ln: fumbler.ln,
+                  pos: fumbler.pos,
+                  team: fumbler.team,
+                  fantasyTeam: fumbler.fantasyTeam,
+                },
+                pointsDelta: computeFumbleLostPoints(scoring),
+              })
+            );
+          }
+        }
       }
     }
 
-    // Chronological order across every game in this feed: each game's own
-    // scoringPlays already come in order, so within the same period a lower
-    // clock value is later in real time; across periods, a higher period
-    // number is later. Cross-game interleaving is inherently approximate
-    // without real timestamps (games run concurrently), so ties fall back
-    // to fetch order.
+    // Chronological order across every game in this feed: within the same
+    // period a lower clock value is later in real time; across periods, a
+    // higher period number is later. Cross-game interleaving is inherently
+    // approximate without real timestamps (games run concurrently), so
+    // ties fall back to fetch order.
     feed.sort((a, b) => {
       if (a.period !== b.period) return a.period - b.period;
       return b.clockSecondsRemaining - a.clockSecondsRemaining;

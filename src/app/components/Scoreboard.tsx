@@ -31,6 +31,7 @@ import {
 } from "react-scroll";
 import useTimeChecks from "../libs/getTimes";
 import { BsDot } from "react-icons/bs";
+import AnimatedNumber from "./AnimatedNumber";
 
 interface ScheduleData {
   [userId: string]: {
@@ -601,9 +602,11 @@ export default function Scoreboard() {
               </span>
               <p>
                 {parseFloat(team1.team_points || "0") > 0 ||
-                parseFloat(team2.team_points || "0") > 0
-                  ? team1.team_points
-                  : team1.user_id &&
+                parseFloat(team2.team_points || "0") > 0 ? (
+                  <AnimatedNumber
+                    value={parseFloat(team1.team_points || "0")}
+                  />
+                ) : team1.user_id &&
                     scheduleDataFinal[team1.user_id]?.wins !== undefined &&
                     scheduleDataFinal[team1.user_id]?.losses !== undefined
                   ? `${scheduleDataFinal[team1.user_id]?.wins} - ${
@@ -637,9 +640,11 @@ export default function Scoreboard() {
               </span>
               <p>
                 {parseFloat(team1.team_points || "0") > 0 ||
-                parseFloat(team2.team_points || "0") > 0
-                  ? team2.team_points
-                  : team2.user_id &&
+                parseFloat(team2.team_points || "0") > 0 ? (
+                  <AnimatedNumber
+                    value={parseFloat(team2.team_points || "0")}
+                  />
+                ) : team2.user_id &&
                     scheduleDataFinal[team2.user_id]?.wins !== undefined &&
                     scheduleDataFinal[team2.user_id]?.losses !== undefined
                   ? `${scheduleDataFinal[team2.user_id]?.wins} - ${

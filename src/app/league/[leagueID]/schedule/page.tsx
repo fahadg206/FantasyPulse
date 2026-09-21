@@ -21,6 +21,8 @@ import useTimeChecks from "../../../libs/getTimes";
 import { useRouter } from "next/navigation";
 import { players } from "@/server/playerInfo";
 import MatchupFeed from "../../../components/MatchupFeed";
+import MatchupBigPlayWatcher from "../../../components/MatchupBigPlayWatcher";
+import AnimatedNumber from "../../../components/AnimatedNumber";
 import { BiSolidNews } from "react-icons/bi";
 
 interface NflState {
@@ -107,6 +109,9 @@ export default function Schedule() {
   const [nflState, setNflState] = useState<NflState>();
   const [playersData, setPlayersData] = React.useState([]);
   const [expandedFeeds, setExpandedFeeds] = useState<Set<string>>(new Set());
+  const [scoringSettings, setScoringSettings] = useState<{
+    [stat: string]: number;
+  }>({});
 
   const toggleFeed = (matchupID: string) => {
     setExpandedFeeds((prev) => {
@@ -181,6 +186,20 @@ export default function Schedule() {
 
     fetchData();
   }, []);
+
+  useEffect(() => {
+    const fetchScoringSettings = async () => {
+      try {
+        const response = await axios.get<any>(
+          `https://api.sleeper.app/v1/league/${REACT_APP_LEAGUE_ID}`
+        );
+        setScoringSettings(response.data.scoring_settings || {});
+      } catch (error) {
+        console.error("Error fetching scoring settings:", error);
+      }
+    };
+    if (REACT_APP_LEAGUE_ID) fetchScoringSettings();
+  }, [REACT_APP_LEAGUE_ID]);
 
   const { isSundayAfternoon, isSundayEvening, isSundayNight, isMondayNight } =
     useTimeChecks();
@@ -608,7 +627,9 @@ export default function Schedule() {
                         : `hidden`
                     }
                   >
-                    {team1.team_points}
+                    <AnimatedNumber
+                      value={parseFloat(team1.team_points || "0")}
+                    />
                   </div>
                 </div>
 
@@ -652,7 +673,9 @@ export default function Schedule() {
                         : `hidden`
                     }
                   >
-                    {team2.team_points}
+                    <AnimatedNumber
+                      value={parseFloat(team2.team_points || "0")}
+                    />
                   </div>
                 </div>
                 {/* TopScorers team 2 */}
@@ -697,6 +720,26 @@ export default function Schedule() {
           {expandedFeeds.has(matchupID) ? "Hide Feed" : "Feed"}
         </button>
 
+        {team1?.user_id && team2?.user_id && nflState?.season && (
+          <MatchupBigPlayWatcher
+            week={counter}
+            season={nflState.season}
+            team1={{
+              userId: team1.user_id,
+              name: team1.name,
+              starterSleeperIds: team1.starters || [],
+            }}
+            team2={{
+              userId: team2.user_id,
+              name: team2.name,
+              starterSleeperIds: team2.starters || [],
+            }}
+            playersData={playersData as { [sleeperId: string]: any }}
+            scoringSettings={scoringSettings}
+            enabled={counter === nflState?.display_week}
+          />
+        )}
+
         {expandedFeeds.has(matchupID) &&
           team1?.user_id &&
           team2?.user_id &&
@@ -715,6 +758,7 @@ export default function Schedule() {
                 starterSleeperIds: team2.starters || [],
               }}
               playersData={playersData as { [sleeperId: string]: any }}
+              scoringSettings={scoringSettings}
             />
           )}
       </div>
