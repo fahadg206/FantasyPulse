@@ -7,6 +7,11 @@ import { FiAward } from "react-icons/fi";
 import axios from "axios";
 import helmet from "../../../images/helmet2.png";
 import getMatchupMap from "../../../libs/getMatchupData";
+import {
+  simulatePlayoffOdds,
+  SimMatchup,
+  SimDivision,
+} from "@/lib/playoffSimulator";
 
 interface ManagerInfo {
   [userId: string]: {
@@ -53,7 +58,6 @@ const Page = () => {
   const [managerInfo, setManagerInfo] = useState<ManagerInfo>({});
   const [sortedTeamDataFinal, setSortedTeamDataFinal] =
     useState<SortedTeamData>([]);
-  const [cachedSimulations, setCachedSimulations] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMessage, setLoadingMessage] = useState("Loading Standings");
   const selectedLeagueID = localStorage.getItem("selectedLeagueID");
@@ -153,6 +157,14 @@ const Page = () => {
         const leagueSettings = await getLeagueSettings();
         const playoffStartWeek = leagueSettings.settings.playoff_week_start;
 
+        // Which regular-season weeks are still ahead of us - re-simulating
+        // weeks that have already been played would double count them on
+        // top of the real wins already reflected in roster.settings.wins.
+        const nflStateResponse = await axios.get<any>(
+          "https://api.sleeper.app/v1/state/nfl"
+        );
+        const currentNflWeek: number = nflStateResponse.data.week || 1;
+
         const usersWithRoster = usersData.filter((user) =>
           rostersData.some((roster) => roster.owner_id === user.user_id)
         );
@@ -220,8 +232,10 @@ const Page = () => {
 
         const updatedManagerInfo = await calculatePlayoffOdds(
           managerInfo,
-          sortedTeamData,
+          rostersData,
+          leagueSettings,
           playoffStartWeek,
+          currentNflWeek,
           p_data,
           matchupData
         );
@@ -254,129 +268,117 @@ const Page = () => {
     fetchData();
   }, [selectedLeagueID]);
 
+  // Runs the league through a Monte Carlo playoff-odds simulation (see
+  // src/lib/playoffSimulator.ts) instead of the old ad hoc win-probability
+  // logic, which independently re-rolled each matchup from both teams'
+  // perspectives (so a single game could register a "win" for both teams,
+  // neither, or double-count) and re-simulated weeks that had already been
+  // played on top of their real results.
   const calculatePlayoffOdds = async (
     managerInfo: ManagerInfo,
-    sortedTeamData: SortedTeamData,
+    rostersData: any[],
+    leagueSettings: any,
     playoffStartWeek: number,
+    currentNflWeek: number,
     p_data: any,
     matchupData: any
   ) => {
-    const calculateWinProbability = (
-      teamProjection: number,
-      opponentProjection: number
-    ) => {
-      const randomFactor = Math.random();
-      return teamProjection * randomFactor > opponentProjection
-        ? 1
-        : opponentProjection * randomFactor > teamProjection
-        ? -1
-        : 0;
-    };
+    const userIdByRosterId: { [rosterId: number]: string } = {};
+    Object.entries(managerInfo).forEach(([userId, user]) => {
+      if (user.roster_id) userIdByRosterId[Number(user.roster_id)] = userId;
+    });
+    const rosterIds = Object.keys(userIdByRosterId).map(Number);
 
-    if (!cachedSimulations) {
-      const totalSimulations = 1000;
-      const playoffSpots = 6;
+    const currentRecord: {
+      [rosterId: number]: { wins: number; losses: number; pointsFor: number };
+    } = {};
+    rosterIds.forEach((rosterId) => {
+      const user = managerInfo[userIdByRosterId[rosterId]];
+      currentRecord[rosterId] = {
+        wins: parseInt(user.wins || "0"),
+        losses: parseInt(user.losses || "0"),
+        pointsFor:
+          (parseFloat(user.team_points_for || "0") || 0) +
+          (parseFloat(user.team_points_for_dec || "0") || 0) / 100,
+      };
+    });
 
-      const results: { [key: string]: { wins: number; playoffCount: number } } =
-        {};
-
-      sortedTeamData.forEach(([userId, user]) => {
-        results[userId] = { wins: parseInt(user.wins || "0"), playoffCount: 0 };
+    // Only simulate weeks that haven't been played yet - matchupData was
+    // fetched for every week from 1 to playoffStartWeek - 1, but weeks
+    // already in the books are reflected in currentRecord's wins already.
+    const remainingRegularSeasonWeeks: SimMatchup[][] = [];
+    const remainingRegularSeasonWeekNumbers: number[] = [];
+    for (
+      let week = Math.max(currentNflWeek, 1);
+      week < playoffStartWeek;
+      week++
+    ) {
+      const weekData = matchupData[week];
+      if (!weekData) continue;
+      const seenMatchupIds = new Set<any>();
+      const games: SimMatchup[] = [];
+      Object.values<any>(weekData).forEach((team: any) => {
+        if (!team.roster_id || !team.opponent_id) return;
+        if (seenMatchupIds.has(team.matchup_id)) return;
+        const opponent = weekData[team.opponent_id];
+        if (!opponent || !opponent.roster_id) return;
+        seenMatchupIds.add(team.matchup_id);
+        games.push({
+          team1RosterId: Number(team.roster_id),
+          team2RosterId: Number(opponent.roster_id),
+        });
       });
-
-      for (let i = 0; i < totalSimulations; i++) {
-        const simulatedResults = JSON.parse(JSON.stringify(results));
-
-        for (let week = 1; week < playoffStartWeek; week++) {
-          for (const [userId, user] of sortedTeamData) {
-            const teamProjection = calculateTeamProjection(
-              managerInfo[userId].starters || [],
-              week,
-              p_data
-            );
-            const opponentId = matchupData[week][userId]?.opponent_id;
-            console.log("manager, ", matchupData[week][userId]?.opponent);
-            const opponentProjection = calculateTeamProjection(
-              managerInfo[opponentId]?.starters || [],
-              week,
-              p_data
-            );
-
-            const winProbability = calculateWinProbability(
-              teamProjection,
-              opponentProjection
-            );
-
-            if (winProbability > 0) {
-              simulatedResults[userId].wins += 1;
-            } else if (winProbability < 0) {
-              simulatedResults[opponentId].wins += 1;
-            }
-          }
-        }
-
-        const sortedSimulatedResults = Object.entries(simulatedResults).sort(
-          (a, b) => b[1].wins - a[1].wins
-        );
-
-        for (let j = 0; j < playoffSpots; j++) {
-          results[sortedSimulatedResults[j][0]].playoffCount += 1;
-        }
-      }
-
-      const updatedManagerInfo = { ...managerInfo };
-
-      Object.entries(results).forEach(([userId, result]) => {
-        updatedManagerInfo[userId].playoffOdds =
-          (result.playoffCount / totalSimulations) * 100;
-        updatedManagerInfo[userId].playoffCount = result.playoffCount;
-      });
-
-      // Cache the simulation results
-      setCachedSimulations(updatedManagerInfo);
-
-      return updatedManagerInfo;
-    } else {
-      // Use cached simulations and adjust for each subsequent simulation
-      const totalSimulations = 100;
-      const adjustedManagerInfo = JSON.parse(JSON.stringify(cachedSimulations));
-
-      for (let i = 0; i < totalSimulations; i++) {
-        for (let week = 1; week < playoffStartWeek; week++) {
-          for (const [userId, user] of sortedTeamData) {
-            const teamProjection = calculateTeamProjection(
-              managerInfo[userId].starters || [],
-              week,
-              p_data
-            );
-            const opponentId = matchupData[week][userId]?.opponent_id;
-            console.log("manager, ", matchupData[week][userId]?.opponent);
-            const opponentProjection = calculateTeamProjection(
-              managerInfo[opponentId]?.starters || [],
-              week,
-              p_data
-            );
-
-            const winProbability = calculateWinProbability(
-              teamProjection,
-              opponentProjection
-            );
-
-            if (winProbability > 0) {
-              adjustedManagerInfo[userId].wins += 1;
-            } else if (winProbability < 0) {
-              adjustedManagerInfo[opponentId].wins += 1;
-            }
-          }
-        }
-      }
-
-      Object.entries(adjustedManagerInfo).forEach(([userId, user]) => {
-        user.playoffOdds = (user.playoffCount / totalSimulations) * 100;
-      });
-
-      return adjustedManagerInfo;
+      remainingRegularSeasonWeeks.push(games);
+      remainingRegularSeasonWeekNumbers.push(week);
     }
+
+    // this league's divisions, if it uses any - division winners get
+    // playoff/bye priority in the simulation
+    let divisions: SimDivision[] | undefined;
+    if (leagueSettings.settings.divisions > 1) {
+      const byDivision: { [id: number]: number[] } = {};
+      rostersData.forEach((roster: any) => {
+        const divisionId = roster.settings?.division;
+        if (!divisionId) return;
+        (byDivision[divisionId] ||= []).push(Number(roster.roster_id));
+      });
+      divisions = Object.entries(byDivision).map(([id, ids]) => ({
+        id: Number(id),
+        rosterIds: ids,
+      }));
+    }
+
+    const odds = simulatePlayoffOdds({
+      rosterIds,
+      currentRecord,
+      remainingRegularSeasonWeeks,
+      remainingRegularSeasonWeekNumbers,
+      // one representative week per round (division/wildcard, conference,
+      // championship) - see src/lib/playoffSimulator.ts for why a two-game
+      // round doesn't need two separate week numbers
+      playoffWeekNumbers: [
+        playoffStartWeek,
+        playoffStartWeek + 1,
+        playoffStartWeek + 2,
+      ],
+      getRating: (rosterId, week) =>
+        calculateTeamProjection(
+          managerInfo[userIdByRosterId[rosterId]]?.starters || [],
+          week,
+          p_data
+        ),
+      playoffTeams: leagueSettings.settings.playoff_teams || 6,
+      twoGameRounds: leagueSettings.settings.playoff_round_type === 2,
+      divisions,
+    });
+
+    const updatedManagerInfo = { ...managerInfo };
+    rosterIds.forEach((rosterId) => {
+      updatedManagerInfo[userIdByRosterId[rosterId]].playoffOdds =
+        odds[rosterId].makePlayoffs;
+    });
+
+    return updatedManagerInfo;
   };
 
   const calculateTeamProjection = (
