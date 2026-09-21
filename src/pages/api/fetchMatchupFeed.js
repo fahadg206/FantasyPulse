@@ -43,6 +43,16 @@ const ESPN_SCOREBOARD_URL =
 const ESPN_SUMMARY_URL =
   "https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary";
 
+// Sleeper and ESPN don't always agree on team abbreviations - verified
+// against both providers' live data: Washington is "WAS" in Sleeper's
+// player data (what `players[].team` below is built from) but "WSH" in
+// ESPN's scoreboard. Every other team matched exactly. Without this,
+// Washington's games would never be recognized as relevant and its
+// players would never appear in the feed.
+function toSleeperAbbreviation(espnAbbreviation) {
+  return espnAbbreviation === "WSH" ? "WAS" : espnAbbreviation;
+}
+
 function cleanNameString(name) {
   return (name || "")
     .toLowerCase()
@@ -190,7 +200,9 @@ export default async function handler(req, res) {
         event.competitions?.[0]?.competitors?.map(
           (c) => c.team?.abbreviation
         ) || [];
-      return competitors.some((abbr) => teamsInvolved.has(abbr));
+      return competitors.some((abbr) =>
+        teamsInvolved.has(toSleeperAbbreviation(abbr))
+      );
     });
 
     const gamesByEvent = await Promise.all(
@@ -368,14 +380,17 @@ export default async function handler(req, res) {
       }
     }
 
-    // Chronological order across every game in this feed: within the same
-    // period a lower clock value is later in real time; across periods, a
-    // higher period number is later. Cross-game interleaving is inherently
-    // approximate without real timestamps (games run concurrently), so
-    // ties fall back to fetch order.
+    // Newest first, like a real feed (and like the reference screenshot -
+    // its top item was an OT play, the most recent thing that happened).
+    // Within the same period a lower clock value is later in real time;
+    // across periods, a higher period number is later - period 5 is OT,
+    // which comes after all of regulation, so it belongs at the top, not
+    // the bottom. Cross-game interleaving is inherently approximate
+    // without real timestamps (games run concurrently), so ties fall back
+    // to fetch order.
     feed.sort((a, b) => {
-      if (a.period !== b.period) return a.period - b.period;
-      return b.clockSecondsRemaining - a.clockSecondsRemaining;
+      if (a.period !== b.period) return b.period - a.period;
+      return a.clockSecondsRemaining - b.clockSecondsRemaining;
     });
 
     return res.status(200).json({ plays: feed });

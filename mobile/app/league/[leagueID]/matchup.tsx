@@ -5,7 +5,13 @@ import { Feather } from "@expo/vector-icons";
 import { sleeper } from "../../../lib/api";
 import getMatchupData, { ScheduleData, Starter } from "../../../lib/getMatchupData";
 import { getTopPerformers, TopPerformer, displayName } from "../../../lib/getTopPerformers";
-import useTimeChecks from "../../../lib/useTimeChecks";
+import {
+  getNflGameStatusByTeam,
+  computeFantasyTeamGameState,
+  combineMatchupGameState,
+  isPastMondayNightCutoff,
+  NflTeamGameState,
+} from "../../../lib/nflGameStatus";
 import SchedulePoll from "../../../components/SchedulePoll";
 import MatchupPredictorRing from "../../../components/MatchupPredictorRing";
 import { getTeamColor, getTeamLogo } from "../../../lib/nflTeams";
@@ -59,9 +65,7 @@ export default function MatchupDetail() {
   const [scoringSettings, setScoringSettings] = useState<{ [stat: string]: number }>({});
   const [feedOpen, setFeedOpen] = useState(false);
   const [playersDataForFeed, setPlayersDataForFeed] = useState<Record<string, any>>({});
-
-  const { isSundayAfternoon, isSundayEvening, isSundayNight, isMondayNight } = useTimeChecks();
-  const preGameEnded = isSundayAfternoon || isSundayEvening || isSundayNight || isMondayNight;
+  const [nflGameStatusByTeam, setNflGameStatusByTeam] = useState<Record<string, NflTeamGameState>>({});
 
   useEffect(() => {
     if (!leagueID || !matchupID || !week) return;
@@ -79,6 +83,12 @@ export default function MatchupDetail() {
         setSlots((league.roster_positions as string[]).filter((p) => p !== "BN" && p !== "IR" && p !== "TAXI"));
         setScheduleData(updatedScheduleData);
         setPlayersDataForFeed(playersData || {});
+
+        getNflGameStatusByTeam(week, nflState.season)
+          .then((statusByTeam) => {
+            if (!cancelled) setNflGameStatusByTeam(statusByTeam);
+          })
+          .catch((error) => console.error("Error fetching NFL game status:", error));
         const teams = matchupMap.get(matchupID);
         const t1 = teams?.[0]?.user_id ?? null;
         const t2 = teams?.[1]?.user_id ?? null;
@@ -162,14 +172,34 @@ export default function MatchupDetail() {
 
   const team1Points = parseFloat(team1.team_points || "0");
   const team2Points = parseFloat(team2.team_points || "0");
-  const preGame = team1Points === 0 && team2Points === 0;
-  const s1 = team1.starters_points || [];
-  const s2 = team2.starters_points || [];
-  const liveGame = !preGame && (s1.includes(0) || s2.includes(0));
-  const postGame = !preGame && !liveGame && (preGameEnded || (displayWeek !== undefined && displayWeek > week));
 
   const starters1 = team1.starters_full_data ?? [];
   const starters2 = team2.starters_full_data ?? [];
+
+  // Live/final by each starter's real NFL game status, not by whether their
+  // fantasy points happen to be 0 yet - a player can finish a game with a
+  // genuine 0, which the old points-based check couldn't tell apart from
+  // "hasn't played". A lineup with any empty slot never counts as final.
+  const rosterFullySet = (slots: Starter[]) =>
+    slots.length > 0 && slots.every((s) => s && Object.keys(s).length > 0);
+  const team1GameState = computeFantasyTeamGameState(
+    starters1.map((s) => s.team),
+    nflGameStatusByTeam,
+    rosterFullySet(starters1)
+  );
+  const team2GameState = computeFantasyTeamGameState(
+    starters2.map((s) => s.team),
+    nflGameStatusByTeam,
+    rosterFullySet(starters2)
+  );
+  const matchupGameState = combineMatchupGameState(
+    team1GameState,
+    team2GameState,
+    isPastMondayNightCutoff()
+  );
+  const preGame = matchupGameState === "pre";
+  const liveGame = matchupGameState === "live";
+  const postGame = matchupGameState === "final";
   const bench1 = (team1.bench_full_data ?? []).filter((s) => Object.keys(s).length > 0);
   const bench2 = (team2.bench_full_data ?? []).filter((s) => Object.keys(s).length > 0);
   const total1 = team1.wins !== undefined ? `${team1.wins}-${team1.losses}` : "0-0";

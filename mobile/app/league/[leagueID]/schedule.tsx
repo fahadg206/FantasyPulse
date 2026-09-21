@@ -7,8 +7,14 @@ import { sleeper, backend } from "../../../lib/api";
 import getMatchupData, { MatchupMapData, ScheduleData } from "../../../lib/getMatchupData";
 import { getSeasonTotals, getTopNForTeam, SeasonTotals, TopPerformer } from "../../../lib/getTopPerformers";
 import { getTeamLogo } from "../../../lib/nflTeams";
-import useTimeChecks from "../../../lib/useTimeChecks";
 import AnimatedNumber from "../../../components/AnimatedNumber";
+import {
+  getNflGameStatusByTeam,
+  computeFantasyTeamGameState,
+  combineMatchupGameState,
+  isPastMondayNightCutoff,
+  NflTeamGameState,
+} from "../../../lib/nflGameStatus";
 
 type MatchupEntry = [string, MatchupMapData[]];
 type GameStatus = "live" | "upcoming" | "final";
@@ -60,6 +66,8 @@ export default function Schedule() {
   const [initialized, setInitialized] = useState(false);
   const [playersData, setPlayersData] = useState<any>(null);
   const [seasonTotals, setSeasonTotals] = useState<SeasonTotals>({});
+  const [season, setSeason] = useState<string>();
+  const [nflGameStatusByTeam, setNflGameStatusByTeam] = useState<Record<string, NflTeamGameState>>({});
 
   useEffect(() => {
     if (!leagueID) return;
@@ -75,9 +83,6 @@ export default function Schedule() {
       .then(setSeasonTotals)
       .catch((e) => console.error("Error fetching season totals:", e));
   }, [leagueID, displayWeek]);
-
-  const { isSundayAfternoon, isSundayEvening, isSundayNight, isMondayNight } = useTimeChecks();
-  const preGameEnded = isSundayAfternoon || isSundayEvening || isSundayNight;
 
   useEffect(() => {
     if (!leagueID) return;
@@ -96,12 +101,19 @@ export default function Schedule() {
           setInitialized(true);
         }
         setDisplayWeek(nflState.display_week);
+        setSeason(nflState.season);
 
         const { matchupMap, updatedScheduleData } = await getMatchupData(leagueID, week, playersData);
         if (cancelled) return;
 
         setMatchups(Array.from(matchupMap.entries()));
         setScheduleData(updatedScheduleData);
+
+        getNflGameStatusByTeam(week, nflState.season)
+          .then((statusByTeam) => {
+            if (!cancelled) setNflGameStatusByTeam(statusByTeam);
+          })
+          .catch((error) => console.error("Error fetching NFL game status:", error));
       } catch (error) {
         console.error("Error fetching matchup data:", error);
       } finally {
@@ -134,19 +146,37 @@ export default function Schedule() {
       const [team1, team2] = teams;
       if (!team1 || !team2) return null;
 
-      const isPastWeek = displayWeek !== undefined && displayWeek > counter;
-      const isFutureWeek = displayWeek !== undefined && displayWeek < counter;
       const team1Points = parseFloat(team1.team_points || "0");
       const team2Points = parseFloat(team2.team_points || "0");
-      const starters1Points = scheduleData[team1.user_id ?? ""]?.starters_points || [];
-      const starters2Points = scheduleData[team2.user_id ?? ""]?.starters_points || [];
-      const team1Played = starters1Points.length > 0 && starters1Points.every((p) => p !== 0);
-      const team2Played = starters2Points.length > 0 && starters2Points.every((p) => p !== 0);
 
-      const preGame = (team1Points === 0 && team2Points === 0) || isFutureWeek;
-      const liveGame = !preGame && !isPastWeek && (starters1Points.includes(0) || starters2Points.includes(0));
-      const postGame = isPastWeek || (!liveGame && team1Played && team2Played && preGameEnded) || isMondayNight;
-      const status: GameStatus = liveGame ? "live" : postGame ? "final" : preGame ? "upcoming" : "live";
+      // Live/final by each starter's real NFL game status, not by whether
+      // their fantasy points happen to be 0 yet - a player can finish a
+      // game with a genuine 0, which the old points-based check couldn't
+      // tell apart from "hasn't played". A lineup with any empty slot
+      // never counts as final.
+      const starters1Full = scheduleData[team1.user_id ?? ""]?.starters_full_data ?? [];
+      const starters2Full = scheduleData[team2.user_id ?? ""]?.starters_full_data ?? [];
+      const rosterFullySet = (slots: typeof starters1Full) =>
+        slots.length > 0 && slots.every((s) => s && Object.keys(s).length > 0);
+      const team1GameState = computeFantasyTeamGameState(
+        starters1Full.map((s) => s.team),
+        nflGameStatusByTeam,
+        rosterFullySet(starters1Full)
+      );
+      const team2GameState = computeFantasyTeamGameState(
+        starters2Full.map((s) => s.team),
+        nflGameStatusByTeam,
+        rosterFullySet(starters2Full)
+      );
+      const matchupGameState = combineMatchupGameState(
+        team1GameState,
+        team2GameState,
+        isPastMondayNightCutoff()
+      );
+      const preGame = matchupGameState === "pre";
+      const liveGame = matchupGameState === "live";
+      const postGame = matchupGameState === "final";
+      const status: GameStatus = liveGame ? "live" : postGame ? "final" : "upcoming";
 
       const team1Leading = !preGame && team1Points >= team2Points;
       const team2Leading = !preGame && team2Points >= team1Points;

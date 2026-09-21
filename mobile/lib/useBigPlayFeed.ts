@@ -113,7 +113,9 @@ export default function useBigPlayFeed({
         if (!isFirstFetch) {
           const fresh = incoming.filter((p) => !seenIds.has(p.id));
           if (fresh.length > 0) {
-            setLatestPlay(fresh[fresh.length - 1]);
+            // incoming is newest-first, so the most recent new play is the
+            // first one, not the last
+            setLatestPlay(fresh[0]);
           }
         }
         incoming.forEach((p) => seenIds.add(p.id));
