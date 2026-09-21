@@ -46,7 +46,11 @@ export interface PowerRankingTeamInput {
 export interface PowerRankingResult {
   rosterId: number;
   userId: string;
+  /** overall rank, 1 = best - by the full blended powerScore (strength + record + assets) */
   rank: number;
+  /** starter rank, 1 = best - by this-season starting lineup strength alone,
+   * independent of record or long-term assets */
+  starterRank: number;
   tier: PowerRankingTier;
   powerScore: number; // 0-100
   strengthScore: number; // 0-100 percentile, this-season roster strength
@@ -154,6 +158,7 @@ export function computePowerRankings(
       rosterId: team.rosterId,
       userId: team.userId,
       rank: 0,
+      starterRank: 0,
       tier: "Middle of the Pack",
       powerScore,
       strengthScore,
@@ -173,6 +178,15 @@ export function computePowerRankings(
       leagueSettings.isDynasty
     );
   });
+
+  // starter rank: independent ordering by this-season starting lineup
+  // strength alone, so a team can be e.g. "Overall #2, Starters #6" if
+  // their record/assets are carrying them more than their current lineup
+  [...results]
+    .sort((a, b) => b.strengthScore - a.strengthScore)
+    .forEach((result, index) => {
+      result.starterRank = index + 1;
+    });
 
   return results;
 }

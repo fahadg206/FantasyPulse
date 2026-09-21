@@ -7,6 +7,7 @@ import PlayerCard from "../../../components/PlayerCard";
 import { displayName } from "../../../lib/getTopPerformers";
 import { getManagerHistory, ManagerAllTimeStats } from "../../../lib/getManagerHistory";
 import { getCurrentSeasonExtras, CurrentSeasonExtras } from "../../../lib/getCurrentSeasonExtras";
+import { PowerRankingTier } from "../../../lib/powerRankings";
 
 type WeekResult = {
   week: number;
@@ -25,6 +26,14 @@ const RESULT_COLOR: Record<WeekResult["result"], string> = {
   win: "#16a34a",
   loss: "#af1222",
   pending: "#9ca3af",
+};
+
+const TIER_STYLE: Record<PowerRankingTier, { bg: string; text: string }> = {
+  Contender: { bg: "bg-green-500/20", text: "text-green-400" },
+  "Playoff Contender": { bg: "bg-blue-500/20", text: "text-blue-400" },
+  "Middle of the Pack": { bg: "bg-yellow-500/20", text: "text-yellow-400" },
+  Rebuild: { bg: "bg-red-500/20", text: "text-red-400" },
+  "No Chance": { bg: "bg-red-500/20", text: "text-red-400" },
 };
 
 export default function LeagueManagers() {
@@ -150,9 +159,6 @@ export default function LeagueManagers() {
     [selectedManager]
   );
   const results = weeklyResults[selectedId ?? ""] ?? [];
-  const played = results.filter((r) => r.result !== "pending");
-  const pointsFor = played.reduce((sum, r) => sum + r.myPoints, 0);
-  const pointsAgainst = played.reduce((sum, r) => sum + r.oppPoints, 0);
 
   if (!leagueID) return null;
 
@@ -205,12 +211,40 @@ export default function LeagueManagers() {
                 className="w-[76px] h-[76px] rounded-full mb-2 border-2 border-brand"
               />
               <Text className="text-xl font-bold text-white">{selectedManager.name}</Text>
-              <Text className="text-gray-400 text-[12px] mt-0.5">Fantasy Manager</Text>
+
+              <View className="flex-row flex-wrap items-center justify-center gap-1.5 mt-2 px-6">
+                {currentExtrasLoading ? (
+                  <ActivityIndicator color="#af1222" size="small" />
+                ) : (
+                  <>
+                    {currentExtras?.tier && (
+                      <View className={`px-2.5 py-1 rounded-full ${TIER_STYLE[currentExtras.tier.tier].bg}`}>
+                        <Text className={`text-[10px] font-bold ${TIER_STYLE[currentExtras.tier.tier].text}`}>
+                          {currentExtras.tier.tier}
+                        </Text>
+                      </View>
+                    )}
+                    {allStats?.badges.map((badge) => (
+                      <View key={badge} className="px-2.5 py-1 rounded-full bg-white/10 border border-white/15">
+                        <Text className="text-[10px] font-semibold text-gray-200">{badge}</Text>
+                      </View>
+                    ))}
+                  </>
+                )}
+              </View>
 
               <View className="flex-row mt-4 gap-6">
                 <StatTile label="RECORD" value={`${selectedManager.wins ?? 0}-${selectedManager.losses ?? 0}`} />
-                <StatTile label="PTS FOR" value={pointsFor.toFixed(0)} />
-                <StatTile label="PTS AGN" value={pointsAgainst.toFixed(0)} />
+                <RankStatTile
+                  label="STARTER RANK"
+                  rank={currentExtras?.tier?.starterRank}
+                  total={managerIds.length}
+                />
+                <RankStatTile
+                  label="OVERALL RANK"
+                  rank={currentExtras?.tier?.rank}
+                  total={managerIds.length}
+                />
               </View>
             </View>
 
@@ -266,15 +300,6 @@ export default function LeagueManagers() {
                     value={`+${allStats.picksGained} / -${allStats.picksLost}`}
                   />
                 </View>
-                {allStats.badges.length > 0 && (
-                  <View className="flex-row flex-wrap gap-1.5 mt-2.5">
-                    {allStats.badges.map((badge) => (
-                      <View key={badge} className="px-2.5 py-1 rounded-full bg-brand/10">
-                        <Text className="text-[10px] font-semibold text-brand">{badge}</Text>
-                      </View>
-                    ))}
-                  </View>
-                )}
               </View>
             )}
 
@@ -287,13 +312,6 @@ export default function LeagueManagers() {
               ) : (
                 <View className="gap-2.5">
                   <View className="flex-row flex-wrap gap-2.5">
-                    {currentExtras?.tier && (
-                      <AllTimeTile
-                        label="TIER"
-                        value={currentExtras.tier.tier}
-                        sub={`Rank #${currentExtras.tier.rank}`}
-                      />
-                    )}
                     <AllTimeTile
                       label="AVG ROSTER AGE"
                       value={currentExtras?.avgRosterAge != null ? String(currentExtras.avgRosterAge) : "N/A"}
@@ -410,6 +428,18 @@ function StatTile({ label, value }: { label: string; value: string }) {
     <View className="items-center">
       <Text style={{ fontVariant: ["tabular-nums"] }} className="text-white text-[18px] font-bold">
         {value}
+      </Text>
+      <Text className="text-gray-500 text-[9px] font-bold tracking-wider mt-0.5">{label}</Text>
+    </View>
+  );
+}
+
+function RankStatTile({ label, rank, total }: { label: string; rank?: number; total: number }) {
+  const color = rank !== undefined && total > 1 ? rankColor(rank, total) : "#6b7280";
+  return (
+    <View className="items-center">
+      <Text style={{ fontVariant: ["tabular-nums"], color }} className="text-[18px] font-bold">
+        {rank !== undefined ? `#${rank}` : "--"}
       </Text>
       <Text className="text-gray-500 text-[9px] font-bold tracking-wider mt-0.5">{label}</Text>
     </View>

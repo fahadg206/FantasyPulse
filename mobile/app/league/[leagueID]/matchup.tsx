@@ -229,6 +229,47 @@ export default function MatchupDetail() {
           <BigPlayToast play={matchupLatestPlay} />
         </View>
 
+        {/* Feed sits right up top with the score, not buried below the
+            rosters - it's about this game happening right now. */}
+        <View className="mt-4">
+          <Pressable
+            onPress={() => setFeedOpen((open) => !open)}
+            className="flex-row items-center justify-between bg-white/5 border border-white/10 rounded-2xl px-3.5 py-3"
+          >
+            <View className="flex-row items-center gap-2">
+              <View className="w-6 h-6 rounded-full bg-brand/20 items-center justify-center">
+                <Feather name="activity" size={13} color="#e2465a" />
+              </View>
+              <Text className="text-[13px] font-bold text-white">Feed</Text>
+              {!feedOpen && matchupLatestPlay && (
+                <View className="w-[6px] h-[6px] rounded-full bg-[#22c55e]" />
+              )}
+            </View>
+            <Feather name={feedOpen ? "chevron-up" : "chevron-down"} size={16} color="#9ca3af" />
+          </Pressable>
+          {feedOpen && season && (
+            <View className="mt-2.5">
+              <MatchupFeed
+                week={week}
+                season={season}
+                team1={{
+                  userId: team1Id ?? "",
+                  name: team1.name,
+                  starterSleeperIds: starters1.map((s) => s.id).filter(Boolean) as string[],
+                }}
+                team2={{
+                  userId: team2Id ?? "",
+                  name: team2.name,
+                  starterSleeperIds: starters2.map((s) => s.id).filter(Boolean) as string[],
+                }}
+                playersData={playersDataForFeed}
+                scoringSettings={scoringSettings}
+                forceDark
+              />
+            </View>
+          )}
+        </View>
+
         {/* Matchup Predictor */}
         {(proj1 > 0 || proj2 > 0) && (
           <View className="mt-5">
@@ -298,36 +339,6 @@ export default function MatchupDetail() {
             </View>
           </>
         )}
-
-        <View className="mt-4 px-4">
-          <Pressable
-            onPress={() => setFeedOpen((open) => !open)}
-            className="flex-row items-center gap-1.5 py-2"
-          >
-            <Feather name="activity" size={14} color="#9ca3af" />
-            <Text className="text-[12px] font-semibold text-gray-500 dark:text-gray-400">
-              {feedOpen ? "Hide Feed" : "Feed"}
-            </Text>
-          </Pressable>
-          {feedOpen && season && (
-            <MatchupFeed
-              week={week}
-              season={season}
-              team1={{
-                userId: team1Id ?? "",
-                name: team1.name,
-                starterSleeperIds: starters1.map((s) => s.id).filter(Boolean) as string[],
-              }}
-              team2={{
-                userId: team2Id ?? "",
-                name: team2.name,
-                starterSleeperIds: starters2.map((s) => s.id).filter(Boolean) as string[],
-              }}
-              playersData={playersDataForFeed}
-              scoringSettings={scoringSettings}
-            />
-          )}
-        </View>
       </View>
     </ScrollView>
   );

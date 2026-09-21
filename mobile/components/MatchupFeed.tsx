@@ -17,6 +17,10 @@ interface MatchupFeedProps {
   team2: BigPlayFeedTeamInput;
   playersData: { [sleeperId: string]: PlayerMeta };
   scoringSettings: { [stat: string]: number };
+  /** forces the dark card palette regardless of system color scheme - for
+   * embedding in an always-dark header (matchup.tsx's ESPN-style banner)
+   * instead of the light/dark-adaptive default */
+  forceDark?: boolean;
 }
 
 const FANTASY_TEAM_COLOR: Record<"team1" | "team2", string> = {
@@ -34,6 +38,7 @@ export default function MatchupFeed({
   team2,
   playersData,
   scoringSettings,
+  forceDark = false,
 }: MatchupFeedProps) {
   const { plays, latestPlay, loading } = useBigPlayFeed({
     week,
@@ -47,13 +52,16 @@ export default function MatchupFeed({
   const teamName = (fantasyTeam: "team1" | "team2") =>
     fantasyTeam === "team1" ? team1.name : team2.name;
 
+  const cardBg = forceDark ? "bg-[#17171a]" : "bg-[#f2f2f2] dark:bg-[#1a1a1a]";
+  const mutedText = forceDark ? "text-gray-400" : "text-gray-500 dark:text-gray-400";
+  const bodyText = forceDark ? "text-gray-300" : "text-gray-600 dark:text-gray-300";
+  const headlineText = forceDark ? "text-white" : "text-black dark:text-white";
+
   if (loading) {
     return (
       <View className="items-center py-6">
         <ActivityIndicator color="#af1222" />
-        <Text className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-          Loading scoring plays...
-        </Text>
+        <Text className={`mt-2 text-xs ${mutedText}`}>Loading scoring plays...</Text>
       </View>
     );
   }
@@ -61,7 +69,7 @@ export default function MatchupFeed({
   if (plays.length === 0) {
     return (
       <View className="py-6">
-        <Text className="text-center text-xs text-gray-500 dark:text-gray-400">
+        <Text className={`text-center text-xs ${mutedText}`}>
           No scoring plays yet from either team's starters.
         </Text>
       </View>
@@ -69,66 +77,84 @@ export default function MatchupFeed({
   }
 
   return (
-    <View className="gap-2 py-2">
+    <View className="gap-2.5">
       <View className="items-end">
         <BigPlayToast play={latestPlay} />
       </View>
-      {plays.map((play: FeedPlay) => (
-        <MotiView
-          key={play.id}
-          from={{ opacity: 0, translateY: -12 }}
-          animate={{ opacity: 1, translateY: 0 }}
-          transition={{ type: "timing", duration: 300 }}
-          className="rounded-xl bg-[#f2f2f2] dark:bg-[#1a1a1a] p-3"
-        >
-          <View className="flex-row items-center justify-between mb-1">
-            <Text className="text-[10px] text-gray-500 dark:text-gray-400">
-              {play.awayTeam} {play.awayScore}-{play.homeScore} {play.homeTeam}
-            </Text>
-            <Text className="text-[10px] text-gray-500 dark:text-gray-400">
-              Q{play.period} {play.clock}
-            </Text>
-          </View>
-          <View className="flex-row items-center justify-between mb-1">
-            <Text className="font-bold text-sm text-black dark:text-white">
-              {play.playType}
-            </Text>
-            {play.pointsDelta !== null && (
-              <Text
-                className={`text-sm font-bold ${
-                  play.pointsDelta >= 0 ? "text-green-500" : "text-red-500"
-                }`}
-              >
-                {play.pointsDelta >= 0 ? "+" : ""}
-                {play.pointsDelta.toFixed(1)}
-              </Text>
-            )}
-          </View>
-          <View className="flex-row items-center gap-2 mb-1">
-            <Image
-              source={{
-                uri: `https://sleepercdn.com/content/nfl/players/thumb/${play.player.sleeperId}.jpg`,
+      {plays.map((play: FeedPlay) => {
+        const isPositive = (play.pointsDelta ?? 0) >= 0;
+        return (
+          <MotiView
+            key={play.id}
+            from={{ opacity: 0, translateY: -10 }}
+            animate={{ opacity: 1, translateY: 0 }}
+            transition={{ type: "timing", duration: 300 }}
+            className={`flex-row rounded-2xl overflow-hidden ${cardBg}`}
+          >
+            {/* Team-colored accent bar, and points color, at a glance */}
+            <View
+              style={{
+                backgroundColor: play.pointsDelta !== null
+                  ? isPositive
+                    ? "#22c55e"
+                    : "#ef4444"
+                  : FANTASY_TEAM_COLOR[play.player.fantasyTeam],
               }}
-              className="w-8 h-8 rounded-full bg-slate-300"
+              className="w-[4px]"
             />
-            <View>
-              <Text className="text-xs font-medium text-black dark:text-white">
-                {play.player.fn} {play.player.ln}{" "}
-                <Text className="text-gray-500 dark:text-gray-400">
-                  {play.player.pos} · {play.player.team}
+            <View className="flex-1 p-3">
+              <View className="flex-row items-center justify-between mb-1.5">
+                <Text className={`text-[10px] font-semibold ${mutedText}`}>
+                  {play.awayTeam} {play.awayScore}-{play.homeScore} {play.homeTeam}
                 </Text>
-              </Text>
-              <Text
-                className="text-[10px] font-semibold self-start px-1.5 rounded-full text-white mt-0.5 overflow-hidden"
-                style={{ backgroundColor: FANTASY_TEAM_COLOR[play.player.fantasyTeam] }}
-              >
-                {teamName(play.player.fantasyTeam)}
-              </Text>
+                <Text className={`text-[10px] ${mutedText}`}>
+                  Q{play.period} {play.clock}
+                </Text>
+              </View>
+
+              <View className="flex-row items-center gap-2.5">
+                <Image
+                  source={{
+                    uri: `https://sleepercdn.com/content/nfl/players/thumb/${play.player.sleeperId}.jpg`,
+                  }}
+                  className="w-11 h-11 rounded-full bg-slate-300"
+                />
+                <View className="flex-1">
+                  <View className="flex-row items-center justify-between">
+                    <Text className={`font-bold text-[13px] ${headlineText}`} numberOfLines={1}>
+                      {play.playType}
+                    </Text>
+                    {play.pointsDelta !== null && (
+                      <Text
+                        className={`text-[15px] font-extrabold ${isPositive ? "text-green-500" : "text-red-500"}`}
+                      >
+                        {isPositive ? "+" : ""}
+                        {play.pointsDelta.toFixed(1)}
+                      </Text>
+                    )}
+                  </View>
+                  <View className="flex-row items-center gap-1.5 mt-0.5">
+                    <Text className={`text-[12px] font-semibold ${headlineText}`} numberOfLines={1}>
+                      {play.player.fn} {play.player.ln}
+                    </Text>
+                    <Text className={`text-[10px] ${mutedText}`}>
+                      {play.player.pos} · {play.player.team}
+                    </Text>
+                  </View>
+                  <View
+                    className="self-start px-1.5 py-0.5 rounded-full mt-1"
+                    style={{ backgroundColor: FANTASY_TEAM_COLOR[play.player.fantasyTeam] }}
+                  >
+                    <Text className="text-[9px] font-bold text-white">{teamName(play.player.fantasyTeam)}</Text>
+                  </View>
+                </View>
+              </View>
+
+              <Text className={`text-[11px] mt-2 ${bodyText}`}>{play.text}</Text>
             </View>
-          </View>
-          <Text className="text-xs text-gray-600 dark:text-gray-300">{play.text}</Text>
-        </MotiView>
-      ))}
+          </MotiView>
+        );
+      })}
     </View>
   );
 }
