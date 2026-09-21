@@ -17,6 +17,12 @@ export default function More() {
 
   const items: MenuItem[] = [
     {
+      label: "Fantasy Profile",
+      description: "Your stats across every league, and managers you follow",
+      icon: <Ionicons name="person-circle" size={20} color="#af1222" />,
+      path: `/profile`,
+    },
+    {
       label: "League Managers",
       description: "Browse rosters and weekly results by manager",
       icon: <Ionicons name="people" size={20} color="#af1222" />,
