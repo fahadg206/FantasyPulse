@@ -43,6 +43,5 @@ scripts/player-value-crawler/__pycache__/
 .vscode/
 *.code-workspace
 
-# not part of this repo: separate mobile app / local backup archive
-/mobile/
+# local backup archive, not part of this repo
 /fantasypulse.zip
