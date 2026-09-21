@@ -11,6 +11,7 @@ import { Spinner } from "@nextui-org/react";
 import { BsDot } from "react-icons/bs";
 import helmet from "../../../images/helmet2.png";
 import useTimeChecks from "../../../libs/getTimes";
+import GmScoutPanel from "../../../components/GmScoutPanel";
 
 interface ScheduleData {
   [userId: string]: {
@@ -76,6 +77,7 @@ export default function Page() {
 
   const [selectedManagerData, setSelectedManagerData] = useState();
   const [playersData, setPlayersData] = React.useState([]);
+  const [activeTab, setActiveTab] = useState<"results" | "scout">("results");
 
   const REACT_APP_LEAGUE_ID: string | null =
     localStorage.getItem("selectedLeagueID");
@@ -412,34 +414,77 @@ export default function Page() {
     </div>
   );
 
+  const activeManagerUserId = selectedManager || defaultManager;
+  const activeManagerDisplay = scheduleDataFinal[activeManagerUserId];
+
   return (
     <div className="w-[95vw] xl:w-[60vw] mb-3">
       <LeagueManagersSelection />
-      <div className="text-center font-bold mb-2 flex justify-center items-center">
-        <p>Weekly Results</p>
-        <div className="ml-10 flex  justify-center items-center text-[9px] font-bold">
-          <div className="flex items-center">
-            <BsDot size={20} className=" text-[green]" />
-            Win
-          </div>
-          <div className="flex items-center">
-            <BsDot size={20} className=" text-[#af1222]" />
-            Loss
-          </div>
-          <div className="flex items-center">
-            <BsDot size={20} className=" text-[#727070]" />
-            Not Played Yet
-          </div>
-        </div>
+
+      <div className="flex justify-center gap-4 mb-3 text-sm font-bold">
+        <button
+          onClick={() => setActiveTab("results")}
+          className={
+            activeTab === "results"
+              ? "text-[#af1222] border-b-2 border-[#af1222] pb-1"
+              : "text-gray-500 dark:text-gray-400 pb-1"
+          }
+        >
+          Weekly Results
+        </button>
+        <button
+          onClick={() => setActiveTab("scout")}
+          className={
+            activeTab === "scout"
+              ? "text-[#af1222] border-b-2 border-[#af1222] pb-1"
+              : "text-gray-500 dark:text-gray-400 pb-1"
+          }
+        >
+          GM Scout
+        </button>
       </div>
-      <div className="flex overflow-hidden py-1">
-        <TranslateWrapper>
-          <LogoItemsTop />
-        </TranslateWrapper>
-        <TranslateWrapper>
-          <LogoItemsTop />
-        </TranslateWrapper>
-      </div>
+
+      {activeTab === "results" ? (
+        <>
+          <div className="text-center font-bold mb-2 flex justify-center items-center">
+            <p>Weekly Results</p>
+            <div className="ml-10 flex  justify-center items-center text-[9px] font-bold">
+              <div className="flex items-center">
+                <BsDot size={20} className=" text-[green]" />
+                Win
+              </div>
+              <div className="flex items-center">
+                <BsDot size={20} className=" text-[#af1222]" />
+                Loss
+              </div>
+              <div className="flex items-center">
+                <BsDot size={20} className=" text-[#727070]" />
+                Not Played Yet
+              </div>
+            </div>
+          </div>
+          <div className="flex overflow-hidden py-1">
+            <TranslateWrapper>
+              <LogoItemsTop />
+            </TranslateWrapper>
+            <TranslateWrapper>
+              <LogoItemsTop />
+            </TranslateWrapper>
+          </div>
+        </>
+      ) : (
+        REACT_APP_LEAGUE_ID &&
+        activeManagerUserId && (
+          <div className="flex justify-center">
+            <GmScoutPanel
+              leagueId={REACT_APP_LEAGUE_ID}
+              managerUserId={activeManagerUserId}
+              managerName={activeManagerDisplay?.name || "Manager"}
+              managerAvatar={activeManagerDisplay?.avatar || ""}
+            />
+          </div>
+        )
+      )}
     </div>
   );
 }
