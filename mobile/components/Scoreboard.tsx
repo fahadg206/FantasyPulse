@@ -6,6 +6,7 @@ import { sleeper, backend } from "../lib/api";
 import getMatchupData, { MatchupMapData } from "../lib/getMatchupData";
 import useTimeChecks from "../lib/useTimeChecks";
 import { syncLeagueStorageFiles } from "../lib/syncLeagueStorage";
+import AnimatedNumber from "./AnimatedNumber";
 
 type MatchupEntry = [string, MatchupMapData[]];
 
@@ -224,12 +225,12 @@ function ScoreRow({
         </Text>
       </View>
       {showScore ? (
-        <Text
+        <AnimatedNumber
+          value={parseFloat(points || "0")}
+          decimals={1}
           style={{ fontVariant: ["tabular-nums"] }}
           className={`text-[16px] ${emphasize ? "font-bold text-white" : "font-semibold text-gray-500"}`}
-        >
-          {parseFloat(points || "0").toFixed(1)}
-        </Text>
+        />
       ) : (
         <Text className="text-[10px] text-gray-500">--</Text>
       )}

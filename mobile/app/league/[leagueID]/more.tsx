@@ -23,6 +23,12 @@ export default function More() {
       path: `/league/${leagueID}/leaguemanagers`,
     },
     {
+      label: "Power Rankings",
+      description: "Every team ranked and sorted into tiers",
+      icon: <Ionicons name="trophy" size={20} color="#af1222" />,
+      path: `/league/${leagueID}/powerrankings`,
+    },
+    {
       label: "Rivalry",
       description: "Head-to-head history between two managers",
       icon: <Ionicons name="pulse" size={20} color="#af1222" />,

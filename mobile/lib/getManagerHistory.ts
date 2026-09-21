@@ -1,5 +1,6 @@
 import { sleeper } from "./api";
 import { rankTeams, determinePlayoffTeams } from "./whatIfSimulation";
+import { pickFlowFromTrade, classifyBadges, GmScoutBadge } from "./gmScoutMath";
 
 export interface SeasonRecord {
   season: string;
@@ -33,6 +34,10 @@ export interface ManagerAllTimeStats {
   bestSeason: SeasonRecord | null;
   worstSeason: SeasonRecord | null;
   totalTransactions: number;
+  totalTrades: number;
+  picksGained: number;
+  picksLost: number;
+  badges: GmScoutBadge[];
   totalPointsFor: number;
   playoffAppearances: number;
   // Filled in after all managers are computed - 1-indexed, 1 is best.
@@ -71,6 +76,9 @@ export async function getManagerHistory(leagueId: string): Promise<Record<string
       bestFinish: Finish | null;
       bestFinishSeason: string | null;
       totalTransactions: number;
+      totalTrades: number;
+      picksGained: number;
+      picksLost: number;
       playoffAppearances: number;
     }
   > = {};
@@ -108,6 +116,9 @@ export async function getManagerHistory(leagueId: string): Promise<Record<string
             bestFinish: null,
             bestFinishSeason: null,
             totalTransactions: 0,
+            totalTrades: 0,
+            picksGained: 0,
+            picksLost: 0,
             playoffAppearances: 0,
           };
         }
@@ -212,6 +223,20 @@ export async function getManagerHistory(leagueId: string): Promise<Record<string
           const userId = rosterToUser[rosterId];
           if (byUser[userId]) byUser[userId].totalTransactions += 1;
         }
+
+        // trade-specific: who traded, and who gained/lost draft picks -
+        // verified against real trade transactions (owner_id/
+        // previous_owner_id on each draft_pick) before this went live.
+        if (t.type === "trade") {
+          for (const rosterId of (t.roster_ids ?? []) as number[]) {
+            const userId = rosterToUser[rosterId];
+            if (!byUser[userId]) continue;
+            byUser[userId].totalTrades += 1;
+            const flow = pickFlowFromTrade(t.draft_picks, rosterId);
+            byUser[userId].picksGained += flow.gained;
+            byUser[userId].picksLost += flow.lost;
+          }
+        }
       }
 
       currentLeagueId = leagueRes.data.previous_league_id;
@@ -243,6 +268,14 @@ export async function getManagerHistory(leagueId: string): Promise<Record<string
       bestSeason: sortedSeasons[0] ?? null,
       worstSeason: sortedSeasons[sortedSeasons.length - 1] ?? null,
       totalTransactions: u.totalTransactions,
+      totalTrades: u.totalTrades,
+      picksGained: u.picksGained,
+      picksLost: u.picksLost,
+      badges: classifyBadges({
+        totalTrades: u.totalTrades,
+        netPickFlow: u.picksGained - u.picksLost,
+        seasonsTracked: u.seasons.length,
+      }),
       totalPointsFor: u.totalPointsFor,
       playoffAppearances: u.playoffAppearances,
       ranks: { winPct: 1, bestFinish: 1, bestSeason: 1, transactions: 1, playoffAppearances: 1 },

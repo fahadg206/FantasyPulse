@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { View, Text, Image, ScrollView, ActivityIndicator } from "react-native";
+import { View, Text, Image, ScrollView, ActivityIndicator, Pressable } from "react-native";
 import { useLocalSearchParams } from "expo-router";
+import { Feather } from "@expo/vector-icons";
 import { sleeper } from "../../../lib/api";
 import getMatchupData, { ScheduleData, Starter } from "../../../lib/getMatchupData";
 import { getTopPerformers, TopPerformer, displayName } from "../../../lib/getTopPerformers";
@@ -8,6 +9,10 @@ import useTimeChecks from "../../../lib/useTimeChecks";
 import SchedulePoll from "../../../components/SchedulePoll";
 import MatchupPredictorRing from "../../../components/MatchupPredictorRing";
 import { getTeamColor, getTeamLogo } from "../../../lib/nflTeams";
+import AnimatedNumber from "../../../components/AnimatedNumber";
+import BigPlayToast from "../../../components/BigPlayToast";
+import MatchupFeed from "../../../components/MatchupFeed";
+import useBigPlayFeed from "../../../lib/useBigPlayFeed";
 
 const POSITION_COLOR: Record<string, string> = {
   QB: "#ef4444",
@@ -50,6 +55,10 @@ export default function MatchupDetail() {
     team1: [],
     team2: [],
   });
+  const [season, setSeason] = useState<string>();
+  const [scoringSettings, setScoringSettings] = useState<{ [stat: string]: number }>({});
+  const [feedOpen, setFeedOpen] = useState(false);
+  const [playersDataForFeed, setPlayersDataForFeed] = useState<Record<string, any>>({});
 
   const { isSundayAfternoon, isSundayEvening, isSundayNight, isMondayNight } = useTimeChecks();
   const preGameEnded = isSundayAfternoon || isSundayEvening || isSundayNight || isMondayNight;
@@ -65,8 +74,11 @@ export default function MatchupDetail() {
         if (cancelled) return;
         const currentWeek = nflState.display_week ?? 1;
         setDisplayWeek(currentWeek);
+        setSeason(nflState.season);
+        setScoringSettings(league.scoring_settings || {});
         setSlots((league.roster_positions as string[]).filter((p) => p !== "BN" && p !== "IR" && p !== "TAXI"));
         setScheduleData(updatedScheduleData);
+        setPlayersDataForFeed(playersData || {});
         const teams = matchupMap.get(matchupID);
         const t1 = teams?.[0]?.user_id ?? null;
         const t2 = teams?.[1]?.user_id ?? null;
@@ -106,6 +118,30 @@ export default function MatchupDetail() {
     };
   }, [leagueID, matchupID, week]);
 
+  const team1 = team1Id ? scheduleData[team1Id] : undefined;
+  const team2 = team2Id ? scheduleData[team2Id] : undefined;
+
+  // Called unconditionally (before any early return below) so this hook's
+  // call order never changes between renders - it just stays disabled
+  // until there's a real matchup and season to poll for.
+  const { latestPlay: matchupLatestPlay } = useBigPlayFeed({
+    week,
+    season: season ?? "",
+    team1: {
+      userId: team1Id ?? "",
+      name: team1?.name ?? "",
+      starterSleeperIds: (team1?.starters_full_data ?? []).map((s) => s.id).filter(Boolean) as string[],
+    },
+    team2: {
+      userId: team2Id ?? "",
+      name: team2?.name ?? "",
+      starterSleeperIds: (team2?.starters_full_data ?? []).map((s) => s.id).filter(Boolean) as string[],
+    },
+    playersData: playersDataForFeed,
+    scoringSettings,
+    enabled: !loading && !!team1Id && !!team2Id && !!season,
+  });
+
   if (!leagueID || !matchupID || !week) return null;
 
   if (loading) {
@@ -115,9 +151,6 @@ export default function MatchupDetail() {
       </View>
     );
   }
-
-  const team1 = team1Id ? scheduleData[team1Id] : undefined;
-  const team2 = team2Id ? scheduleData[team2Id] : undefined;
 
   if (!team1 || !team2) {
     return (
@@ -172,24 +205,28 @@ export default function MatchupDetail() {
                   {liveGame ? "LIVE" : postGame ? "FINAL" : `WEEK ${week}`}
                 </Text>
                 <View className="flex-row items-center gap-3">
-                  <Text
+                  <AnimatedNumber
+                    value={team1Points}
+                    decimals={1}
                     style={{ fontVariant: ["tabular-nums"] }}
                     className={`text-[26px] font-bold ${team1Points >= team2Points ? "text-white" : "text-gray-500"}`}
-                  >
-                    {team1Points.toFixed(1)}
-                  </Text>
+                  />
                   <Text className="text-gray-600 text-[16px]">-</Text>
-                  <Text
+                  <AnimatedNumber
+                    value={team2Points}
+                    decimals={1}
                     style={{ fontVariant: ["tabular-nums"] }}
                     className={`text-[26px] font-bold ${team2Points >= team1Points ? "text-white" : "text-gray-500"}`}
-                  >
-                    {team2Points.toFixed(1)}
-                  </Text>
+                  />
                 </View>
               </>
             )}
           </View>
           <TeamHeader name={team2.name} avatar={team2.avatar} record={total2} align="right" />
+        </View>
+
+        <View className="items-center mt-3">
+          <BigPlayToast play={matchupLatestPlay} />
         </View>
 
         {/* Matchup Predictor */}
@@ -261,6 +298,36 @@ export default function MatchupDetail() {
             </View>
           </>
         )}
+
+        <View className="mt-4 px-4">
+          <Pressable
+            onPress={() => setFeedOpen((open) => !open)}
+            className="flex-row items-center gap-1.5 py-2"
+          >
+            <Feather name="activity" size={14} color="#9ca3af" />
+            <Text className="text-[12px] font-semibold text-gray-500 dark:text-gray-400">
+              {feedOpen ? "Hide Feed" : "Feed"}
+            </Text>
+          </Pressable>
+          {feedOpen && season && (
+            <MatchupFeed
+              week={week}
+              season={season}
+              team1={{
+                userId: team1Id ?? "",
+                name: team1.name,
+                starterSleeperIds: starters1.map((s) => s.id).filter(Boolean) as string[],
+              }}
+              team2={{
+                userId: team2Id ?? "",
+                name: team2.name,
+                starterSleeperIds: starters2.map((s) => s.id).filter(Boolean) as string[],
+              }}
+              playersData={playersDataForFeed}
+              scoringSettings={scoringSettings}
+            />
+          )}
+        </View>
       </View>
     </ScrollView>
   );

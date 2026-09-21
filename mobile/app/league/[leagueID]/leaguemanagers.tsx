@@ -6,6 +6,7 @@ import getMatchupData, { ScheduleData, Starter } from "../../../lib/getMatchupDa
 import PlayerCard from "../../../components/PlayerCard";
 import { displayName } from "../../../lib/getTopPerformers";
 import { getManagerHistory, ManagerAllTimeStats } from "../../../lib/getManagerHistory";
+import { getCurrentSeasonExtras, CurrentSeasonExtras } from "../../../lib/getCurrentSeasonExtras";
 
 type WeekResult = {
   week: number;
@@ -34,6 +35,8 @@ export default function LeagueManagers() {
   const [weeklyResults, setWeeklyResults] = useState<Record<string, WeekResult[]>>({});
   const [loading, setLoading] = useState(true);
   const [allTimeStats, setAllTimeStats] = useState<Record<string, ManagerAllTimeStats>>({});
+  const [currentExtras, setCurrentExtras] = useState<CurrentSeasonExtras | null>(null);
+  const [currentExtrasLoading, setCurrentExtrasLoading] = useState(false);
 
   useEffect(() => {
     if (!leagueID) return;
@@ -117,6 +120,28 @@ export default function LeagueManagers() {
       cancelled = true;
     };
   }, [leagueID]);
+
+  // GM Scout's current-season-only extras (tier, avg roster age, rookie on
+  // roster, most recent add) - kept as its own effect, keyed to whichever
+  // manager is selected, since it's a heavier fetch (the full Sleeper
+  // player blob + power rankings for the whole league) not worth doing for
+  // every manager up front.
+  useEffect(() => {
+    if (!leagueID || !selectedId) return;
+    let cancelled = false;
+    setCurrentExtrasLoading(true);
+    getCurrentSeasonExtras(leagueID, selectedId)
+      .then((result) => {
+        if (!cancelled) setCurrentExtras(result);
+      })
+      .catch((error) => console.error("Error loading GM scout extras:", error))
+      .finally(() => {
+        if (!cancelled) setCurrentExtrasLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [leagueID, selectedId]);
 
   const allStats = selectedId ? allTimeStats[selectedId] : undefined;
   const selectedManager = selectedId ? scheduleData[selectedId] : undefined;
@@ -232,9 +257,87 @@ export default function LeagueManagers() {
                     label="WORST SEASON"
                     value={allStats.worstSeason ? `${allStats.worstSeason.season}: ${allStats.worstSeason.wins}-${allStats.worstSeason.losses}` : "N/A"}
                   />
+                  <AllTimeTile
+                    label="TRADES"
+                    value={String(allStats.totalTrades)}
+                  />
+                  <AllTimeTile
+                    label="PICK FLOW"
+                    value={`+${allStats.picksGained} / -${allStats.picksLost}`}
+                  />
                 </View>
+                {allStats.badges.length > 0 && (
+                  <View className="flex-row flex-wrap gap-1.5 mt-2.5">
+                    {allStats.badges.map((badge) => (
+                      <View key={badge} className="px-2.5 py-1 rounded-full bg-brand/10">
+                        <Text className="text-[10px] font-semibold text-brand">{badge}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
               </View>
             )}
+
+            <View className="px-4 pt-5">
+              <Text className="font-bold mb-2.5 text-black dark:text-white text-[15px]">
+                GM Scout <Text className="text-gray-400 font-normal text-[12px]">this season</Text>
+              </Text>
+              {currentExtrasLoading ? (
+                <ActivityIndicator color="#af1222" />
+              ) : (
+                <View className="gap-2.5">
+                  <View className="flex-row flex-wrap gap-2.5">
+                    {currentExtras?.tier && (
+                      <AllTimeTile
+                        label="TIER"
+                        value={currentExtras.tier.tier}
+                        sub={`Rank #${currentExtras.tier.rank}`}
+                      />
+                    )}
+                    <AllTimeTile
+                      label="AVG ROSTER AGE"
+                      value={currentExtras?.avgRosterAge != null ? String(currentExtras.avgRosterAge) : "N/A"}
+                    />
+                  </View>
+                  {(currentExtras?.rookieOnRoster || currentExtras?.recentlyAcquired) && (
+                    <View className="flex-row flex-wrap gap-2.5">
+                      {currentExtras.rookieOnRoster && (
+                        <View className="flex-row items-center gap-2 bg-[#f0eeee] dark:bg-[#141416] rounded-2xl p-2.5" style={{ width: "48%" }}>
+                          <Image
+                            source={{
+                              uri: `https://sleepercdn.com/content/nfl/players/thumb/${currentExtras.rookieOnRoster.sleeperId}.jpg`,
+                            }}
+                            className="w-8 h-8 rounded-full bg-slate-300"
+                          />
+                          <View className="flex-1">
+                            <Text className="text-gray-500 text-[9px] font-bold tracking-wider">ROOKIE ON ROSTER</Text>
+                            <Text numberOfLines={1} className="text-black dark:text-white text-[12px] font-bold">
+                              {currentExtras.rookieOnRoster.fn} {currentExtras.rookieOnRoster.ln}
+                            </Text>
+                          </View>
+                        </View>
+                      )}
+                      {currentExtras.recentlyAcquired && (
+                        <View className="flex-row items-center gap-2 bg-[#f0eeee] dark:bg-[#141416] rounded-2xl p-2.5" style={{ width: "48%" }}>
+                          <Image
+                            source={{
+                              uri: `https://sleepercdn.com/content/nfl/players/thumb/${currentExtras.recentlyAcquired.sleeperId}.jpg`,
+                            }}
+                            className="w-8 h-8 rounded-full bg-slate-300"
+                          />
+                          <View className="flex-1">
+                            <Text className="text-gray-500 text-[9px] font-bold tracking-wider">RECENTLY ACQUIRED</Text>
+                            <Text numberOfLines={1} className="text-black dark:text-white text-[12px] font-bold">
+                              {currentExtras.recentlyAcquired.fn} {currentExtras.recentlyAcquired.ln}
+                            </Text>
+                          </View>
+                        </View>
+                      )}
+                    </View>
+                  )}
+                </View>
+              )}
+            </View>
 
             <View className="px-4 pt-5">
               <Text className="font-bold mb-2.5 text-black dark:text-white text-[15px]">Starting Lineup</Text>

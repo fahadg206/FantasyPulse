@@ -78,6 +78,26 @@ export const backend = {
       if (!r.ok) throw new Error("Failed to fetch summaries");
       return r.json();
     }),
+
+  // bulk Sleeper-ID-keyed KTC value dump, for power rankings' dynasty
+  // asset-value component - same endpoint the web Power Rankings page uses
+  fetchAllPlayerValues: (): Promise<Record<string, any>> =>
+    fetch(`${APP_ORIGIN}/api/fetchAllPlayerValues`).then((r) => r.json()),
+
+  // real NFL scoring plays + turnovers for a matchup's starters, with each
+  // play's fantasy point impact - same endpoint the web schedule page's
+  // matchup feed uses
+  fetchMatchupFeed: (
+    week: number,
+    season: string | number,
+    players: unknown[],
+    scoringSettings: Record<string, number>
+  ) =>
+    fetch(`${APP_ORIGIN}/api/fetchMatchupFeed`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ week, season, players, scoringSettings }),
+    }).then((r) => r.json()),
 };
 
 // Firestore collection names + shapes, mirrored from the web app.

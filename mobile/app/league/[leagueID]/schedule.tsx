@@ -8,6 +8,7 @@ import getMatchupData, { MatchupMapData, ScheduleData } from "../../../lib/getMa
 import { getSeasonTotals, getTopNForTeam, SeasonTotals, TopPerformer } from "../../../lib/getTopPerformers";
 import { getTeamLogo } from "../../../lib/nflTeams";
 import useTimeChecks from "../../../lib/useTimeChecks";
+import AnimatedNumber from "../../../components/AnimatedNumber";
 
 type MatchupEntry = [string, MatchupMapData[]];
 type GameStatus = "live" | "upcoming" | "final";
@@ -305,12 +306,12 @@ function ScheduleTeamRow({
       </View>
       <View className="items-end">
         {showScore ? (
-          <Text
+          <AnimatedNumber
+            value={parseFloat(points || "0")}
+            decimals={1}
             style={{ fontVariant: ["tabular-nums"] }}
             className={`text-[19px] ${emphasize ? "font-bold text-white" : "font-semibold text-gray-500"}`}
-          >
-            {parseFloat(points || "0").toFixed(1)}
-          </Text>
+          />
         ) : (
           <Text className="text-[12px] text-gray-500">--</Text>
         )}
