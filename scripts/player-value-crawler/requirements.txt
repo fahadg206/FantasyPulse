@@ -1,0 +1,6 @@
+requests
+beautifulsoup4
+sleeper-wrapper
+pymongo
+certifi
+tqdm

@@ -34,3 +34,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# player value crawler
+scripts/player-value-crawler/players_data.json
+scripts/player-value-crawler/__pycache__/
