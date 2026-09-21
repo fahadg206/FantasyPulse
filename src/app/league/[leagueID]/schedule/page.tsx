@@ -20,6 +20,8 @@ import {
 import useTimeChecks from "../../../libs/getTimes";
 import { useRouter } from "next/navigation";
 import { players } from "@/server/playerInfo";
+import MatchupFeed from "../../../components/MatchupFeed";
+import { BiSolidNews } from "react-icons/bi";
 
 interface NflState {
   season: string;
@@ -104,6 +106,19 @@ export default function Schedule() {
   const [snfEnd, setSnfEnd] = useState(false);
   const [nflState, setNflState] = useState<NflState>();
   const [playersData, setPlayersData] = React.useState([]);
+  const [expandedFeeds, setExpandedFeeds] = useState<Set<string>>(new Set());
+
+  const toggleFeed = (matchupID: string) => {
+    setExpandedFeeds((prev) => {
+      const next = new Set(prev);
+      if (next.has(matchupID)) {
+        next.delete(matchupID);
+      } else {
+        next.add(matchupID);
+      }
+      return next;
+    });
+  };
   const [checkTimeFunction, setCheckTimeFunction] = useState<
     (() => void) | undefined
   >(undefined);
@@ -673,6 +688,35 @@ export default function Schedule() {
             {/* {liveGame && showLiveText} */}
           </div>
         </Element>
+
+        <button
+          onClick={() => toggleFeed(matchupID)}
+          className="flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400 hover:text-[#af1222] dark:hover:text-[#af1222]"
+        >
+          <BiSolidNews />
+          {expandedFeeds.has(matchupID) ? "Hide Feed" : "Feed"}
+        </button>
+
+        {expandedFeeds.has(matchupID) &&
+          team1?.user_id &&
+          team2?.user_id &&
+          nflState?.season && (
+            <MatchupFeed
+              week={counter}
+              season={nflState.season}
+              team1={{
+                userId: team1.user_id,
+                name: team1.name,
+                starterSleeperIds: team1.starters || [],
+              }}
+              team2={{
+                userId: team2.user_id,
+                name: team2.name,
+                starterSleeperIds: team2.starters || [],
+              }}
+              playersData={playersData as { [sleeperId: string]: any }}
+            />
+          )}
       </div>
     );
   });
