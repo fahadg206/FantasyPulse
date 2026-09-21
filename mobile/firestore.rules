@@ -38,18 +38,18 @@ service cloud.firestore {
 
     // posts.ts: feed posts + matchup/trade comments, all in one
     // collection. Anyone signed in (incl. anonymous, read-only browsing)
-    // can read. Creating a post must be as yourself, OR as the "system"
-    // author used by ensureSystemPost for auto-announced trades/final
-    // scores - any signed-in client may write those, matching how the
-    // trades/matchup screens call it for whichever user happens to view
-    // them first. Updates are restricted to just the like/repost/reply
-    // counters, not the post content, so no one can rewrite someone
-    // else's post while toggling a like.
+    // can read. Creating a post must be as yourself, OR as "boogie" (the
+    // Boogie The Writer persona ensureSystemPost uses for auto-announced
+    // trades/waiver moves/final scores) - any signed-in client may write
+    // those, matching how the trades/matchup screens call it for whichever
+    // user happens to view them first. Updates are restricted to just the
+    // like/repost/reply counters, not the post content, so no one can
+    // rewrite someone else's post while toggling a like.
     match /posts/{postId} {
       allow read: if request.auth != null;
       allow create: if request.auth != null
         && (request.resource.data.authorUid == request.auth.uid
-            || request.resource.data.authorUid == "system");
+            || request.resource.data.authorUid == "boogie");
       allow update: if request.auth != null
         && request.resource.data.diff(resource.data).affectedKeys()
              .hasOnly(['likeCount', 'repostCount', 'replyCount']);

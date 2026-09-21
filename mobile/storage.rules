@@ -1,0 +1,45 @@
+rules_version = '2';
+
+// This project's Firebase Storage bucket didn't have a rules file in the
+// repo before this - covers every path either app (web or mobile) writes
+// to directly from the client.
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Pre-existing web app feature (src/app/components/Scoreboard.tsx,
+    // ScoreboardNav.tsx, libs/getUserData.tsx): cached schedule text
+    // snapshots per league, not tied to any one user. Left open to any
+    // signed-in (incl. anonymous) session, matching how it worked with no
+    // rules at all before now.
+    match /files/{fileName} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Post image attachments (lib/mediaUpload.ts + posts.ts's imageUrl) -
+    // one folder per author uid. Only the owning uid can upload into their
+    // own folder; anyone signed in can view images in the feed. Capped at
+    // 8MB and must actually be an image.
+    match /postImages/{uid}/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.size < 8 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    // Profile pictures (lib/socialAuth.ts's avatar field) - one file per
+    // uid, defaults to the linked Sleeper avatar URL (no Storage upload
+    // needed) unless the user uploads their own here.
+    match /avatars/{uid} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

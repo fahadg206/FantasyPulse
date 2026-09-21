@@ -1,16 +1,15 @@
 import { useEffect, useState } from "react";
-import { View, Text, TextInput, Pressable, ActivityIndicator } from "react-native";
+import { View, Text, Pressable, ActivityIndicator } from "react-native";
 import { useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import type { User } from "firebase/auth";
 import { onAuthChange, isReadOnly, getUserProfile, UserProfile } from "../lib/socialAuth";
 import { getPostsForTarget, createPost, isPostLiked, isPostReposted, Post } from "../lib/posts";
 import PostCard from "./PostCard";
-
-const MAX_POST_LENGTH = 280;
+import ComposeBox from "./ComposeBox";
 
 interface CommentsSectionProps {
-  targetType: "matchup" | "trade";
+  targetType: "matchup" | "trade" | "waiver";
   targetId: string;
   leagueId: string;
   targetLabel: string;
@@ -27,8 +26,6 @@ export default function CommentsSection({ targetType, targetId, leagueId, target
   const [comments, setComments] = useState<Post[]>([]);
   const [interactionState, setInteractionState] = useState<Record<string, { liked: boolean; reposted: boolean }>>({});
   const [loading, setLoading] = useState(true);
-  const [text, setText] = useState("");
-  const [posting, setPosting] = useState(false);
 
   useEffect(() => onAuthChange(setAuthUser), []);
 
@@ -70,28 +67,22 @@ export default function CommentsSection({ targetType, targetId, leagueId, target
     };
   }, [targetType, targetId, authUser]);
 
-  const submit = async () => {
-    if (!profile || !text.trim()) return;
-    setPosting(true);
-    try {
-      const post = await createPost({
-        authorUid: profile.uid,
-        authorUsername: profile.username,
-        authorDisplayName: profile.displayName,
-        text,
-        leagueId,
-        targetType,
-        targetId,
-        targetLabel,
-      });
-      setComments((prev) => [...prev, post]);
-      setInteractionState((prev) => ({ ...prev, [post.id]: { liked: false, reposted: false } }));
-      setText("");
-    } catch (error) {
-      console.error("Error posting comment:", error);
-    } finally {
-      setPosting(false);
-    }
+  const submit = async (text: string, imageUrl?: string) => {
+    if (!profile) return;
+    const post = await createPost({
+      authorUid: profile.uid,
+      authorUsername: profile.username,
+      authorDisplayName: profile.displayName,
+      authorAvatar: profile.avatar,
+      text,
+      imageUrl,
+      leagueId,
+      targetType,
+      targetId,
+      targetLabel,
+    });
+    setComments((prev) => [...prev, post]);
+    setInteractionState((prev) => ({ ...prev, [post.id]: { liked: false, reposted: false } }));
   };
 
   return (
@@ -119,23 +110,7 @@ export default function CommentsSection({ targetType, targetId, leagueId, target
       )}
 
       {profile ? (
-        <View className="flex-row items-center gap-2 px-4 py-3">
-          <TextInput
-            value={text}
-            onChangeText={setText}
-            placeholder="Add a comment..."
-            placeholderTextColor="#6b7280"
-            maxLength={MAX_POST_LENGTH}
-            className="flex-1 bg-white/5 border border-white/10 rounded-full px-4 py-2.5 text-white text-[13px]"
-          />
-          <Pressable
-            onPress={submit}
-            disabled={posting || !text.trim()}
-            className={`w-9 h-9 rounded-full items-center justify-center ${text.trim() ? "bg-brand" : "bg-brand/30"}`}
-          >
-            {posting ? <ActivityIndicator color="#fff" size="small" /> : <Feather name="send" size={15} color="#fff" />}
-          </Pressable>
-        </View>
+        <ComposeBox profile={profile} placeholder="Add a comment..." compact onSubmit={submit} />
       ) : (
         <Pressable
           onPress={() => router.push("/profile")}

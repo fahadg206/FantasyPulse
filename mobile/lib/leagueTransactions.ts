@@ -14,7 +14,7 @@ export interface TxTeam {
   avatar?: string;
 }
 
-export type AddDropEvent = { kind: "add" | "drop"; team: TxTeam; asset: TxAsset; timestamp: number };
+export type AddDropEvent = { kind: "add" | "drop"; team: TxTeam; asset: TxAsset; timestamp: number; id: string };
 export type TradeEvent = (
   | { kind: "trade2"; teamA: TxTeam; teamB: TxTeam; aGives: TxAsset[]; aGets: TxAsset[] }
   | { kind: "tradeMulti"; parts: { team: TxTeam; receives: TxAsset[] }[] }
@@ -109,6 +109,7 @@ export async function buildLeagueTransactions(leagueId: string): Promise<TickerE
           team: rosterToTeam[rid] ?? { name: "A team" },
           asset: assetFromPlayer(pid, playersData),
           timestamp,
+          id: `${t.transaction_id}_${pid}`,
         });
       }
       for (const pid in t.drops || {}) {
@@ -118,6 +119,7 @@ export async function buildLeagueTransactions(leagueId: string): Promise<TickerE
           team: rosterToTeam[rid] ?? { name: "A team" },
           asset: assetFromPlayer(pid, playersData),
           timestamp,
+          id: `${t.transaction_id}_${pid}`,
         });
       }
     }

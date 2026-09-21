@@ -9,6 +9,7 @@ import {
 } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore/lite";
 import { auth, db } from "./firebase";
+import { pickImage, uploadImageAsync } from "./mediaUpload";
 
 // Real accounts, on top of the app-wide anonymous session that already
 // exists in firebase.ts (kept as-is for the existing poll/article features
@@ -39,6 +40,11 @@ export interface UserProfile {
   sleeperUserId?: string;
   bio?: string;
   avatar?: string;
+  // True once the user has uploaded their own picture - until then, linking
+  // a Sleeper account sets `avatar` to that account's Sleeper picture by
+  // default, and re-linking keeps refreshing it to match. Uploading a real
+  // photo sets this and it's never overwritten automatically again.
+  avatarIsCustom?: boolean;
   createdAt: string;
 }
 
@@ -220,11 +226,29 @@ export async function linkSleeperAccount(uid: string, sleeperUsername: string): 
   if (!res.ok) throw new Error("Couldn't find that Sleeper username.");
   const sleeperUser = await res.json();
   if (!sleeperUser?.user_id) throw new Error("Couldn't find that Sleeper username.");
-  await setDoc(
-    doc(db, "profiles", uid),
-    { sleeperUsername: sleeperUser.username ?? sleeperUsername.trim(), sleeperUserId: sleeperUser.user_id },
-    { merge: true }
-  );
+
+  const updates: Record<string, unknown> = {
+    sleeperUsername: sleeperUser.username ?? sleeperUsername.trim(),
+    sleeperUserId: sleeperUser.user_id,
+  };
+
+  // Default the profile picture to the Sleeper account's own avatar, unless
+  // the user has already uploaded a real photo here.
+  const current = await getUserProfile(uid);
+  if (!current?.avatarIsCustom && sleeperUser.avatar) {
+    updates.avatar = `https://sleepercdn.com/avatars/thumbs/${sleeperUser.avatar}`;
+  }
+
+  await setDoc(doc(db, "profiles", uid), updates, { merge: true });
+}
+
+/** picks an image from the library, uploads it as this user's profile picture, and marks it custom so re-linking Sleeper never overwrites it again */
+export async function uploadAndSetAvatar(uid: string): Promise<string | null> {
+  const localUri = await pickImage({ square: true });
+  if (!localUri) return null;
+  const url = await uploadImageAsync(localUri, `avatars/${uid}`);
+  await setDoc(doc(db, "profiles", uid), { avatar: url, avatarIsCustom: true }, { merge: true });
+  return url;
 }
 
 /** true when there's no real (non-anonymous) signed-in user - the app's default, read-only state */

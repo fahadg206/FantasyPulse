@@ -21,6 +21,21 @@ import { db } from "./firebase";
 // about - the same way replying to something on Twitter is still a tweet
 // that shows up in the timeline. One system instead of two.
 
+// A "post sized" scoreboard, embedded in a post the same way a tweet embeds
+// a card - two teams, their scores, and whether it's final, rendered by
+// PostCard as a compact score strip instead of plain text.
+export interface MatchupCard {
+  leagueId: string;
+  week: number;
+  team1Name: string;
+  team1Score: number;
+  team1Avatar?: string;
+  team2Name: string;
+  team2Score: number;
+  team2Avatar?: string;
+  isFinal: boolean;
+}
+
 export interface Post {
   id: string;
   authorUid: string;
@@ -28,10 +43,12 @@ export interface Post {
   authorDisplayName: string;
   authorAvatar?: string;
   text: string;
+  imageUrl?: string;
+  matchupCard?: MatchupCard;
   createdAt: string;
   createdAtMs: number;
   leagueId?: string;
-  targetType?: "matchup" | "trade";
+  targetType?: "matchup" | "trade" | "waiver";
   targetId?: string;
   targetLabel?: string;
   likeCount: number;
@@ -45,8 +62,9 @@ export interface CreatePostInput {
   authorDisplayName: string;
   authorAvatar?: string;
   text: string;
+  imageUrl?: string;
   leagueId?: string;
-  targetType?: "matchup" | "trade";
+  targetType?: "matchup" | "trade" | "waiver";
   targetId?: string;
   targetLabel?: string;
 }
@@ -72,6 +90,7 @@ export async function createPost(input: CreatePostInput): Promise<Post> {
     authorDisplayName: input.authorDisplayName,
     authorAvatar: input.authorAvatar ?? null,
     text,
+    imageUrl: input.imageUrl ?? null,
     createdAt: now.toISOString(),
     createdAtMs: now.getTime(),
     leagueId: input.leagueId ?? null,
@@ -85,7 +104,16 @@ export async function createPost(input: CreatePostInput): Promise<Post> {
 
   const ref = await addDoc(collection(db, "posts"), data);
 
-  return { id: ref.id, ...data, authorAvatar: input.authorAvatar, leagueId: input.leagueId, targetType: input.targetType, targetId: input.targetId, targetLabel: input.targetLabel };
+  return {
+    id: ref.id,
+    ...data,
+    authorAvatar: input.authorAvatar,
+    imageUrl: input.imageUrl,
+    leagueId: input.leagueId,
+    targetType: input.targetType,
+    targetId: input.targetId,
+    targetLabel: input.targetLabel,
+  };
 }
 
 /** the public feed - every post, newest first, across every league */
@@ -97,7 +125,7 @@ export async function getFeedPosts(limitCount = 30): Promise<Post[]> {
 
 /** comments attached to one specific matchup or trade, oldest first (reading top to bottom like a thread) */
 export async function getPostsForTarget(
-  targetType: "matchup" | "trade",
+  targetType: "matchup" | "trade" | "waiver",
   targetId: string
 ): Promise<Post[]> {
   const q = query(
@@ -110,22 +138,28 @@ export async function getPostsForTarget(
   return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Post, "id">) }));
 }
 
-// Posts authored by the app itself - a completed trade or a final matchup
-// score, auto-announced into the feed/comment thread so those threads
-// aren't empty until a real user happens to post about it. Uses a
-// deterministic doc id (derived from the trade/matchup it's about) and
-// checks existence before writing, so it's safe to call this every time
-// any client views that trade/matchup - the first viewer creates it, every
-// later call is a no-op read, and it can never be created twice even if
-// two clients race on the same id, since the id (not the write) is what's
-// unique.
-export const SYSTEM_AUTHOR_UID = "system";
+// Posts authored by "Boogie The Writer" - the same Fantasy Pulse staff
+// writer persona already used for the Articles feature (see ShowAuthors.tsx
+// and fetchPreview.js) - here playing beat reporter for the league's own
+// breaking news: trades, waiver moves, and final scores, auto-announced
+// into the feed/comment thread so those threads aren't empty until a real
+// user happens to post about it. Uses a deterministic doc id (derived from
+// the trade/matchup it's about) and checks existence before writing, so
+// it's safe to call this every time any client views that trade/matchup -
+// the first viewer creates it, every later call is a no-op read, and it
+// can never be created twice even if two clients race on the same id,
+// since the id (not the write) is what's unique.
+export const BOOGIE_UID = "boogie";
+/** @deprecated kept as an alias - use BOOGIE_UID */
+export const SYSTEM_AUTHOR_UID = BOOGIE_UID;
 
 export interface EnsureSystemPostInput {
   id: string;
   text: string;
+  imageUrl?: string;
+  matchupCard?: MatchupCard;
   leagueId?: string;
-  targetType: "matchup" | "trade";
+  targetType: "matchup" | "trade" | "waiver";
   targetId: string;
   targetLabel?: string;
   createdAtMs?: number;
@@ -138,11 +172,13 @@ export async function ensureSystemPost(input: EnsureSystemPostInput): Promise<vo
 
   const now = input.createdAtMs ?? Date.now();
   await setDoc(ref, {
-    authorUid: SYSTEM_AUTHOR_UID,
-    authorUsername: "fantasypulse",
-    authorDisplayName: "Fantasy Pulse",
+    authorUid: BOOGIE_UID,
+    authorUsername: "boogiethewriter",
+    authorDisplayName: "Boogie The Writer",
     authorAvatar: null,
     text: input.text,
+    imageUrl: input.imageUrl ?? null,
+    matchupCard: input.matchupCard ?? null,
     createdAt: new Date(now).toISOString(),
     createdAtMs: now,
     leagueId: input.leagueId ?? null,

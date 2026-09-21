@@ -7,6 +7,8 @@ import type { User } from "firebase/auth";
 import { onAuthChange, isReadOnly, getUserProfileByUsername, UserProfile } from "../../lib/socialAuth";
 import { getFantasyProfileStats, FantasyProfileStats } from "../../lib/fantasyProfile";
 import { followUser, unfollowUser, isFollowing, getFollowingUids, getFollowerUids } from "../../lib/follows";
+import ProfileActivity from "../../components/ProfileActivity";
+import Avatar from "../../components/Avatar";
 
 const CURRENT_SEASON = "2026";
 
@@ -96,12 +98,8 @@ export default function PublicProfile() {
       </View>
       <ScrollView contentContainerClassName="px-5 pt-4 pb-12" showsVerticalScrollIndicator={false}>
         <View className="items-center mb-6">
-          <View className="w-[76px] h-[76px] rounded-full bg-brand/20 items-center justify-center mb-2">
-            <Text className="text-brand text-[28px] font-bold">
-              {profile.displayName.charAt(0).toUpperCase()}
-            </Text>
-          </View>
-          <Text className="text-white text-[20px] font-bold">{profile.displayName}</Text>
+          <Avatar uid={profile.uid} url={profile.avatar} name={profile.displayName} size={80} />
+          <Text className="text-white text-[20px] font-bold mt-2">{profile.displayName}</Text>
           <Text className="text-gray-500 text-[13px]">@{profile.username}</Text>
           {profile.bio && <Text className="text-gray-300 text-[13px] mt-2 text-center px-6">{profile.bio}</Text>}
 
@@ -140,43 +138,7 @@ export default function PublicProfile() {
         ) : statsLoading ? (
           <ActivityIndicator color="#af1222" className="mt-4" />
         ) : stats ? (
-          <View>
-            <View className="bg-[#141416] rounded-2xl border border-white/10 p-4 mb-4">
-              <Text className="text-[10px] font-bold tracking-widest text-gray-500 mb-2">
-                {stats.season} SEASON - {stats.totals.leaguesCount} LEAGUES
-              </Text>
-              <View className="flex-row justify-between">
-                <View className="items-center">
-                  <Text className="text-white font-bold text-[16px]">
-                    {stats.totals.wins}-{stats.totals.losses}
-                  </Text>
-                  <Text className="text-gray-500 text-[10px] mt-0.5">Record</Text>
-                </View>
-                <View className="items-center">
-                  <Text className="text-white font-bold text-[16px]">{stats.totals.pointsFor.toFixed(0)}</Text>
-                  <Text className="text-gray-500 text-[10px] mt-0.5">Points For</Text>
-                </View>
-              </View>
-            </View>
-            {stats.leagues.map((l) => (
-              <View
-                key={l.leagueId}
-                className="flex-row items-center justify-between bg-[#141416] rounded-xl border border-white/10 px-4 py-3 mb-2"
-              >
-                <View className="flex-1 mr-2">
-                  <Text numberOfLines={1} className="text-white font-semibold text-[13px]">
-                    {l.leagueName}
-                  </Text>
-                  <Text className="text-gray-500 text-[11px]">
-                    Rank #{l.rank} of {l.totalTeams}
-                  </Text>
-                </View>
-                <Text style={{ fontVariant: ["tabular-nums"] }} className="text-white font-bold text-[13px]">
-                  {l.wins}-{l.losses}
-                </Text>
-              </View>
-            ))}
-          </View>
+          <ProfileActivity sleeperUserId={profile.sleeperUserId} stats={stats} />
         ) : null}
       </ScrollView>
     </SafeAreaView>

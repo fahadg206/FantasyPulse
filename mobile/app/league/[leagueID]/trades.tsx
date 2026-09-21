@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { View, Text, Pressable, ScrollView, ActivityIndicator } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { Feather } from "@expo/vector-icons";
-import { buildLeagueTransactions, TradeEvent, TxAsset } from "../../../lib/leagueTransactions";
+import { buildLeagueTransactions, TradeEvent, AddDropEvent, TxAsset } from "../../../lib/leagueTransactions";
 import { AssetChips } from "../../../components/TransactionsTicker";
 import { formatTwitterTimestamp } from "../../../lib/formatTime";
 import CommentsSection from "../../../components/CommentsSection";
@@ -19,11 +19,18 @@ function assetListText(assets: TxAsset[]): string {
   return assets.map((a) => a.label).join(", ");
 }
 
+// Boogie The Writer's breaking-news voice - the same beat-reporter tone as
+// the Articles feature, here covering the league's actual transaction wire.
 function tradeSystemText(event: TradeEvent): string {
   if (event.kind === "trade2") {
-    return `Trade complete: ${event.teamA.name} sends ${assetListText(event.aGives)} to ${event.teamB.name} for ${assetListText(event.aGets)}.`;
+    return `🚨 TRADE: ${event.teamA.name} sends ${assetListText(event.aGives)} to ${event.teamB.name} for ${assetListText(event.aGets)}. Deal is official.`;
   }
-  return `Trade complete: ${event.parts.map((p) => `${p.team.name} receives ${assetListText(p.receives)}`).join(" · ")}.`;
+  return `🚨 TRADE: ${event.parts.map((p) => `${p.team.name} lands ${assetListText(p.receives)}`).join(" | ")}. Deal is official.`;
+}
+
+function addSystemText(event: AddDropEvent): string {
+  const posTeam = event.asset.pos ? ` (${event.asset.pos}${event.asset.team ? ` - ${event.asset.team}` : ""})` : "";
+  return `📈 ${event.team.name} adds ${event.asset.label}${posTeam} off waivers.`;
 }
 
 function TradeCard({ event, leagueId }: { event: TradeEvent; leagueId: string }) {
@@ -90,12 +97,13 @@ export default function Trades() {
       .then((events) => {
         if (cancelled) return;
         const tradeEvents = events.filter((e): e is TradeEvent => e.kind === "trade2" || e.kind === "tradeMulti");
+        const addEvents = events.filter((e): e is AddDropEvent => e.kind === "add");
         setTrades(tradeEvents);
 
-        // Announce each completed trade into the feed/comment thread the
-        // first time anyone views this screen after it happens - cheap and
-        // safe to re-run on every visit since ensureSystemPost is a no-op
-        // once the post already exists.
+        // Announce every trade and waiver add into the feed/Boogie's beat -
+        // the first time anyone views this screen after it happens - cheap
+        // and safe to re-run on every visit since ensureSystemPost is a
+        // no-op once the post already exists.
         for (const event of tradeEvents) {
           ensureSystemPost({
             id: `trade_${leagueID}_${event.id}`,
@@ -106,6 +114,17 @@ export default function Trades() {
             targetLabel: tradeLabel(event),
             createdAtMs: event.timestamp,
           }).catch((error) => console.error("Error posting trade to feed:", error));
+        }
+        for (const event of addEvents) {
+          ensureSystemPost({
+            id: `add_${leagueID}_${event.id}`,
+            text: addSystemText(event),
+            leagueId: leagueID,
+            targetType: "waiver",
+            targetId: event.id,
+            targetLabel: `${event.team.name} - Waiver Wire`,
+            createdAtMs: event.timestamp,
+          }).catch((error) => console.error("Error posting waiver add to feed:", error));
         }
       })
       .catch((error) => console.error("Error loading trades:", error))

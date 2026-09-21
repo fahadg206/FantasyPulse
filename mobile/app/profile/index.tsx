@@ -25,10 +25,13 @@ import {
   requestPasswordReset,
   completeProfile,
   validateUsername,
+  uploadAndSetAvatar,
   UserProfile,
 } from "../../lib/socialAuth";
 import { getFantasyProfileStats, FantasyProfileStats } from "../../lib/fantasyProfile";
 import { getFollowingUids, getFollowerUids } from "../../lib/follows";
+import ProfileActivity from "../../components/ProfileActivity";
+import Avatar from "../../components/Avatar";
 
 const CURRENT_SEASON = "2026";
 
@@ -123,12 +126,8 @@ export default function ProfileHome() {
     <SafeAreaView className="flex-1 bg-[#0c0c0e]">
       <ScrollView contentContainerClassName="px-5 pt-8 pb-12" showsVerticalScrollIndicator={false}>
         <View className="items-center mb-6">
-          <View className="w-[76px] h-[76px] rounded-full bg-brand/20 items-center justify-center mb-2">
-            <Text className="text-brand text-[28px] font-bold">
-              {(profile?.displayName || "?").charAt(0).toUpperCase()}
-            </Text>
-          </View>
-          <Text className="text-white text-[20px] font-bold">{profile?.displayName}</Text>
+          <AvatarUploadButton profile={profile} onUploaded={(avatar) => setProfile((p) => (p ? { ...p, avatar, avatarIsCustom: true } : p))} />
+          <Text className="text-white text-[20px] font-bold mt-2">{profile?.displayName}</Text>
           <Text className="text-gray-500 text-[13px]">@{profile?.username}</Text>
 
           <View className="flex-row gap-6 mt-4">
@@ -151,7 +150,7 @@ export default function ProfileHome() {
         ) : statsLoading ? (
           <ActivityIndicator color="#af1222" className="mt-6" />
         ) : stats ? (
-          <FantasyProfileStatsView stats={stats} />
+          <ProfileActivity sleeperUserId={profile.sleeperUserId} stats={stats} />
         ) : null}
 
         <FindManagerCard />
@@ -224,6 +223,36 @@ function CompleteProfileCard({ authUser, onDone }: { authUser: User; onDone: (pr
   );
 }
 
+function AvatarUploadButton({ profile, onUploaded }: { profile: UserProfile; onUploaded: (url: string) => void }) {
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const onPress = async () => {
+    setError(null);
+    setUploading(true);
+    try {
+      const url = await uploadAndSetAvatar(profile.uid);
+      if (url) onUploaded(url);
+    } catch (e: any) {
+      setError(e.message || "Couldn't upload that photo.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <View className="items-center">
+      <Pressable onPress={onPress} disabled={uploading} className="relative">
+        <Avatar uid={profile.uid} url={profile.avatar} name={profile.displayName} size={80} />
+        <View className="absolute bottom-0 right-0 w-7 h-7 rounded-full bg-brand items-center justify-center border-2 border-[#0c0c0e]">
+          {uploading ? <ActivityIndicator color="#fff" size="small" /> : <Feather name="camera" size={13} color="#fff" />}
+        </View>
+      </Pressable>
+      {error && <Text className="text-red-400 text-[11px] mt-1.5">{error}</Text>}
+    </View>
+  );
+}
+
 function LinkSleeperCard({ uid, onLinked }: { uid: string; onLinked: () => void }) {
   const [username, setUsername] = useState("");
   const [loading, setLoading] = useState(false);
@@ -265,66 +294,6 @@ function LinkSleeperCard({ uid, onLinked }: { uid: string; onLinked: () => void 
       >
         {loading ? <ActivityIndicator color="#fff" /> : <Text className="text-white font-bold">Link Account</Text>}
       </Pressable>
-    </View>
-  );
-}
-
-function FantasyProfileStatsView({ stats }: { stats: FantasyProfileStats }) {
-  return (
-    <View>
-      <View className="bg-[#141416] rounded-2xl border border-white/10 p-4 mb-4">
-        <Text className="text-[10px] font-bold tracking-widest text-gray-500 mb-2">
-          {stats.season} SEASON - {stats.totals.leaguesCount} LEAGUES
-        </Text>
-        <View className="flex-row justify-between">
-          <StatBlock label="Record" value={`${stats.totals.wins}-${stats.totals.losses}`} />
-          <StatBlock label="Points For" value={stats.totals.pointsFor.toFixed(0)} />
-          <StatBlock
-            label="Win %"
-            value={
-              stats.totals.wins + stats.totals.losses > 0
-                ? `${((stats.totals.wins / (stats.totals.wins + stats.totals.losses)) * 100).toFixed(0)}%`
-                : "-"
-            }
-          />
-        </View>
-      </View>
-
-      <Text className="text-white font-bold text-[14px] mb-2">By League</Text>
-      {stats.leagues.map((l) => (
-        <View
-          key={l.leagueId}
-          className="flex-row items-center justify-between bg-[#141416] rounded-xl border border-white/10 px-4 py-3 mb-2"
-        >
-          <View className="flex-1 mr-2">
-            <Text numberOfLines={1} className="text-white font-semibold text-[13px]">
-              {l.leagueName}
-            </Text>
-            <Text className="text-gray-500 text-[11px]">
-              Rank #{l.rank} of {l.totalTeams}
-            </Text>
-          </View>
-          <View className="items-end">
-            <Text style={{ fontVariant: ["tabular-nums"] }} className="text-white font-bold text-[13px]">
-              {l.wins}-{l.losses}
-            </Text>
-            <Text style={{ fontVariant: ["tabular-nums"] }} className="text-gray-500 text-[11px]">
-              {l.pointsFor.toFixed(1)} pts
-            </Text>
-          </View>
-        </View>
-      ))}
-    </View>
-  );
-}
-
-function StatBlock({ label, value }: { label: string; value: string }) {
-  return (
-    <View className="items-center">
-      <Text style={{ fontVariant: ["tabular-nums"] }} className="text-white font-bold text-[16px]">
-        {value}
-      </Text>
-      <Text className="text-gray-500 text-[10px] mt-0.5">{label}</Text>
     </View>
   );
 }

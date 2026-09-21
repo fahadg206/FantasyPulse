@@ -174,12 +174,23 @@ export default function MatchupDetail() {
     const pts2 = parseFloat(team2.team_points || "0");
     const winner = pts1 === pts2 ? null : pts1 > pts2 ? team1.name : team2.name;
     const text = winner
-      ? `Final: ${team1.name} ${pts1.toFixed(2)} - ${team2.name} ${pts2.toFixed(2)}. ${winner} wins.`
-      : `Final: ${team1.name} ${pts1.toFixed(2)} - ${team2.name} ${pts2.toFixed(2)}. It's a tie.`;
+      ? `🏈 FINAL: ${team1.name} ${pts1.toFixed(2)} - ${team2.name} ${pts2.toFixed(2)}. ${winner} takes it.`
+      : `🏈 FINAL: ${team1.name} ${pts1.toFixed(2)} - ${team2.name} ${pts2.toFixed(2)}. Deadlocked.`;
 
     ensureSystemPost({
       id: `matchup_${leagueID}_${week}_${matchupID}`,
       text,
+      matchupCard: {
+        leagueId: leagueID,
+        week,
+        team1Name: team1.name,
+        team1Score: pts1,
+        team1Avatar: typeof team1.avatar === "string" ? team1.avatar : undefined,
+        team2Name: team2.name,
+        team2Score: pts2,
+        team2Avatar: typeof team2.avatar === "string" ? team2.avatar : undefined,
+        isFinal: true,
+      },
       leagueId: leagueID,
       targetType: "matchup",
       targetId: `${week}:${matchupID}`,
