@@ -136,6 +136,22 @@ function NavBar(props: MyProps) {
               <p className="ml-2">Standings</p>
             </div>
           </Link>
+          <Link
+            href={`/league/${localStorage.getItem(
+              "selectedLeagueID"
+            )}/powerRankings`}
+          >
+            <div className="flex items-center w-[90px]">
+              <NavItem
+                selected={selected === 9}
+                id={9}
+                setSelected={setSelected}
+              >
+                <FaRankingStar />
+              </NavItem>
+              <p className="ml-2">Power Rankings</p>
+            </div>
+          </Link>
 
           <Link
             href={`/league/${localStorage.getItem(
@@ -334,6 +350,19 @@ function NavBar(props: MyProps) {
                   <span className="text-[18px]  flex items-center xl:text-[14px]">
                     <AiOutlineOrderedList size={18} className="mr-1 " />{" "}
                     Standings
+                  </span>
+                </Link>
+              </li>
+              <li className="pb-6 text-center    hover:bg-[#AF1222]  hover:transition hover:ease-in-out hover:rounded ">
+                <Link
+                  href={`/league/${localStorage.getItem(
+                    "selectedLeagueID"
+                  )}/powerRankings`}
+                  onClick={() => setNavbar(!navbar)}
+                >
+                  <span className="text-[18px]  flex items-center xl:text-[14px]">
+                    <FaRankingStar size={18} className="mr-1 " /> Power
+                    Rankings
                   </span>
                 </Link>
               </li>
