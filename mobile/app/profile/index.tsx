@@ -22,8 +22,7 @@ import {
   getUserProfile,
   linkSleeperAccount,
   getUserProfileByUsername,
-  sendUsernameRecoveryCode,
-  verifyUsernameRecoveryCode,
+  requestPasswordReset,
   UserProfile,
 } from "../../lib/socialAuth";
 import { getFantasyProfileStats, FantasyProfileStats } from "../../lib/fantasyProfile";
@@ -297,13 +296,13 @@ function SignInUpScreen() {
   const [mode, setMode] = useState<"signin" | "signup" | "recover">("signin");
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [phoneNumber, setPhoneNumber] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   if (mode === "recover") {
-    return <ForgotUsernameFlow onDone={() => setMode("signin")} />;
+    return <ForgotAccountFlow onDone={() => setMode("signin")} />;
   }
 
   const submit = async () => {
@@ -311,7 +310,7 @@ function SignInUpScreen() {
     setError(null);
     try {
       if (mode === "signup") {
-        await signUp(username, password, phoneNumber, displayName);
+        await signUp(username, password, email, displayName);
       } else {
         await signIn(username, password);
       }
@@ -351,7 +350,7 @@ function SignInUpScreen() {
           <TextInput
             value={username}
             onChangeText={setUsername}
-            placeholder="Username"
+            placeholder={mode === "signup" ? "Username" : "Username or email"}
             placeholderTextColor="#6b7280"
             autoCapitalize="none"
             autoCorrect={false}
@@ -359,11 +358,13 @@ function SignInUpScreen() {
           />
           {mode === "signup" && (
             <TextInput
-              value={phoneNumber}
-              onChangeText={setPhoneNumber}
-              placeholder="Phone number"
+              value={email}
+              onChangeText={setEmail}
+              placeholder="Email"
               placeholderTextColor="#6b7280"
-              keyboardType="phone-pad"
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
               className="bg-white/5 border border-white/10 rounded-xl px-3.5 py-3 text-white mb-2.5"
             />
           )}
@@ -377,8 +378,8 @@ function SignInUpScreen() {
           />
           {mode === "signup" && (
             <Text className="text-gray-600 text-[11px] mb-2.5 px-1">
-              Your phone number is only used if you ever forget your username - we'll text a
-              code to confirm it's you, then remind you.
+              Your email is only used to sign in and to recover your account if you ever forget
+              your username or password.
             </Text>
           )}
 
@@ -387,10 +388,7 @@ function SignInUpScreen() {
           <Pressable
             onPress={submit}
             disabled={
-              loading ||
-              !username.trim() ||
-              !password ||
-              (mode === "signup" && !phoneNumber.trim())
+              loading || !username.trim() || !password || (mode === "signup" && !email.trim())
             }
             className="bg-brand rounded-xl py-3.5 items-center mt-2"
           >
@@ -405,7 +403,7 @@ function SignInUpScreen() {
 
           {mode === "signin" && (
             <Pressable onPress={() => setMode("recover")} className="items-center mt-4">
-              <Text className="text-gray-400 text-[13px]">Forgot your username?</Text>
+              <Text className="text-gray-400 text-[13px]">Forgot your username or password?</Text>
             </Pressable>
           )}
 
@@ -429,38 +427,21 @@ function SignInUpScreen() {
   );
 }
 
-function ForgotUsernameFlow({ onDone }: { onDone: () => void }) {
-  const [step, setStep] = useState<"phone" | "code" | "result">("phone");
-  const [phoneNumber, setPhoneNumber] = useState("");
-  const [code, setCode] = useState("");
-  const [foundUsername, setFoundUsername] = useState<string | null>(null);
+function ForgotAccountFlow({ onDone }: { onDone: () => void }) {
+  const [email, setEmail] = useState("");
+  const [sent, setSent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const sendCode = async () => {
-    if (!phoneNumber.trim()) return;
+  const send = async () => {
+    if (!email.trim()) return;
     setLoading(true);
     setError(null);
     try {
-      await sendUsernameRecoveryCode(phoneNumber);
-      setStep("code");
+      await requestPasswordReset(email);
+      setSent(true);
     } catch (e: any) {
-      setError(e.message || "Couldn't send a code right now.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const verifyCode = async () => {
-    if (!code.trim()) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const username = await verifyUsernameRecoveryCode(phoneNumber, code.trim());
-      setFoundUsername(username);
-      setStep("result");
-    } catch (e: any) {
-      setError(e.message || "That code didn't work.");
+      setError(e.message || "Couldn't send that right now.");
     } finally {
       setLoading(false);
     }
@@ -477,72 +458,45 @@ function ForgotUsernameFlow({ onDone }: { onDone: () => void }) {
         <ScrollView contentContainerClassName="flex-grow px-6 justify-center" keyboardShouldPersistTaps="handled">
           <View className="items-center mb-6">
             <View className="w-[56px] h-[56px] rounded-full bg-brand/20 items-center justify-center mb-3">
-              <Feather name="message-circle" size={24} color="#e2465a" />
+              <Feather name="mail" size={24} color="#e2465a" />
             </View>
-            <Text className="text-white text-[20px] font-bold">Forgot Your Username?</Text>
+            <Text className="text-white text-[20px] font-bold">Forgot Your Account?</Text>
             <Text className="text-gray-500 text-[13px] mt-1 text-center px-4">
-              {step === "phone" && "Enter the phone number you signed up with. We'll text you a code."}
-              {step === "code" && `Enter the code we texted to ${phoneNumber}.`}
-              {step === "result" && "Here's your username."}
+              {sent
+                ? `If an account uses ${email}, a reset link is on its way. Follow it, set a new password, then sign back in with this email - your username shows right in the app.`
+                : "Enter the email you signed up with. We'll send a link to set a new password."}
             </Text>
           </View>
 
-          {step === "phone" && (
+          {!sent ? (
             <>
               <TextInput
-                value={phoneNumber}
-                onChangeText={setPhoneNumber}
-                placeholder="Phone number"
+                value={email}
+                onChangeText={setEmail}
+                placeholder="Email"
                 placeholderTextColor="#6b7280"
-                keyboardType="phone-pad"
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="email-address"
                 className="bg-white/5 border border-white/10 rounded-xl px-3.5 py-3 text-white mb-2.5"
               />
               {error && <Text className="text-red-400 text-[13px] mb-2">{error}</Text>}
               <Pressable
-                onPress={sendCode}
-                disabled={loading || !phoneNumber.trim()}
+                onPress={send}
+                disabled={loading || !email.trim()}
                 className="bg-brand rounded-xl py-3.5 items-center mt-2"
               >
-                {loading ? <ActivityIndicator color="#fff" /> : <Text className="text-white font-bold text-[15px]">Send Code</Text>}
+                {loading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text className="text-white font-bold text-[15px]">Send Reset Link</Text>
+                )}
               </Pressable>
             </>
-          )}
-
-          {step === "code" && (
-            <>
-              <TextInput
-                value={code}
-                onChangeText={setCode}
-                placeholder="6-digit code"
-                placeholderTextColor="#6b7280"
-                keyboardType="number-pad"
-                maxLength={6}
-                className="bg-white/5 border border-white/10 rounded-xl px-3.5 py-3 text-white mb-2.5 text-center text-[18px] tracking-widest"
-              />
-              {error && <Text className="text-red-400 text-[13px] mb-2">{error}</Text>}
-              <Pressable
-                onPress={verifyCode}
-                disabled={loading || !code.trim()}
-                className="bg-brand rounded-xl py-3.5 items-center mt-2"
-              >
-                {loading ? <ActivityIndicator color="#fff" /> : <Text className="text-white font-bold text-[15px]">Verify</Text>}
-              </Pressable>
-              <Pressable onPress={() => setStep("phone")} className="items-center mt-4">
-                <Text className="text-gray-400 text-[13px]">Use a different number</Text>
-              </Pressable>
-            </>
-          )}
-
-          {step === "result" && (
-            <>
-              <View className="bg-[#141416] rounded-2xl border border-white/10 p-5 items-center mb-4">
-                <Text className="text-gray-500 text-[11px] font-bold tracking-widest mb-1">YOUR USERNAME</Text>
-                <Text className="text-white text-[22px] font-bold">@{foundUsername}</Text>
-              </View>
-              <Pressable onPress={onDone} className="bg-brand rounded-xl py-3.5 items-center">
-                <Text className="text-white font-bold text-[15px]">Back to Sign In</Text>
-              </Pressable>
-            </>
+          ) : (
+            <Pressable onPress={onDone} className="bg-brand rounded-xl py-3.5 items-center">
+              <Text className="text-white font-bold text-[15px]">Back to Sign In</Text>
+            </Pressable>
           )}
         </ScrollView>
       </KeyboardAvoidingView>

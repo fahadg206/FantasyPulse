@@ -98,29 +98,6 @@ export const backend = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ week, season, players, scoringSettings }),
     }).then((r) => r.json()),
-
-  // "forgot your username" recovery, step 1 - sends a 6-digit SMS code via
-  // Twilio (server-side only; no phone-auth SDK on this client at all)
-  sendUsernameRecoveryOtp: (phoneNumber: string): Promise<{ ok: true }> =>
-    fetch(`${APP_ORIGIN}/api/sendUsernameRecoveryOtp`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phoneNumber }),
-    }).then(async (r) => {
-      if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.message || "Failed to send code");
-      return r.json();
-    }),
-
-  // step 2 - verify the code, get back the username tied to that phone number
-  verifyUsernameRecoveryOtp: (phoneNumber: string, code: string): Promise<{ username: string }> =>
-    fetch(`${APP_ORIGIN}/api/verifyUsernameRecoveryOtp`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phoneNumber, code }),
-    }).then(async (r) => {
-      if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.message || "Failed to verify code");
-      return r.json();
-    }),
 };
 
 // Firestore collection names + shapes, mirrored from the web app.

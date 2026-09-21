@@ -1,22 +1,30 @@
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  sendPasswordResetEmail,
   signOut as firebaseSignOut,
   onAuthStateChanged,
   type User,
 } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore/lite";
 import { auth, db } from "./firebase";
-import { backend } from "./api";
 
 // Real accounts, on top of the app-wide anonymous session that already
 // exists in firebase.ts (kept as-is for the existing poll/article features
-// that just need "some" authenticated request). Firebase Auth's native
-// identifier is an email, but the ask was a username/password login - so a
-// chosen username maps to a synthetic "<username>@fantasypulse.app"
-// address under the hood, tracked via a usernames/{lowercaseUsername}
-// lookup doc. Real password hashing/storage is entirely Firebase's job;
-// nothing here ever touches a raw password beyond handing it to the SDK.
+// that just need "some" authenticated request). Real password
+// hashing/storage is entirely Firebase's job; nothing here ever touches a
+// raw password beyond handing it to the SDK.
+//
+// A real email is the actual Firebase Auth identifier (no synthetic email
+// trick), so account recovery can ride entirely on Firebase's own built-in
+// password-reset email - free, sent from Firebase's own infrastructure,
+// no third-party service or backend route needed at all. Signing in
+// accepts either the username or the email; if someone forgets their
+// username, resetting their password by email and signing back in with
+// that email (shown right in the app afterward, alongside their username)
+// solves it without needing a separate "remind me of my username" flow.
+// (This replaces an earlier phone-number/SMS design - see git history -
+// dropped once a free option surfaced that needed no new infrastructure.)
 //
 // "Read-only" (the app's default, unauthenticated state) means the current
 // user is either null or still on the anonymous session - see isReadOnly.
@@ -25,7 +33,7 @@ export interface UserProfile {
   uid: string;
   username: string;
   displayName: string;
-  phoneNumber?: string;
+  email: string;
   sleeperUsername?: string;
   sleeperUserId?: string;
   bio?: string;
@@ -34,13 +42,14 @@ export interface UserProfile {
 }
 
 const USERNAME_PATTERN = /^[a-z0-9_]{3,20}$/;
-
-function syntheticEmail(username: string): string {
-  return `${username}@fantasypulse.app`;
-}
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function normalizeUsername(username: string): string {
   return username.trim().toLowerCase();
+}
+
+export function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
 }
 
 export function validateUsername(username: string): string | null {
@@ -50,24 +59,9 @@ export function validateUsername(username: string): string | null {
   return null;
 }
 
-// Mirrors the same normalization in sendUsernameRecoveryOtp.js /
-// verifyUsernameRecoveryOtp.js server-side, so a number entered at signup
-// resolves to the same key a later recovery lookup uses. Assumes a US
-// number when no country code is given - this app's audience is US-based
-// fantasy football leagues.
-export function normalizePhoneNumber(raw: string): string {
-  const digits = (raw || "").replace(/[^\d+]/g, "");
-  if (digits.startsWith("+")) return digits;
-  const bare = digits.replace(/\D/g, "");
-  if (bare.length === 10) return `+1${bare}`;
-  if (bare.length === 11 && bare.startsWith("1")) return `+${bare}`;
-  return `+${bare}`;
-}
-
-export function validatePhoneNumber(raw: string): string | null {
-  const normalized = normalizePhoneNumber(raw);
-  if (!/^\+\d{10,15}$/.test(normalized)) {
-    return "Enter a valid phone number, e.g. (555) 123-4567.";
+export function validateEmail(email: string): string | null {
+  if (!EMAIL_PATTERN.test(normalizeEmail(email))) {
+    return "Enter a valid email address.";
   }
   return null;
 }
@@ -77,79 +71,81 @@ export async function isUsernameTaken(username: string): Promise<boolean> {
   return snap.exists();
 }
 
-export async function isPhoneNumberTaken(phoneNumber: string): Promise<boolean> {
-  const snap = await getDoc(doc(db, "phoneNumbers", normalizePhoneNumber(phoneNumber)));
-  return snap.exists();
-}
-
 export async function signUp(
   username: string,
   password: string,
-  phoneNumber: string,
+  email: string,
   displayName?: string
 ): Promise<UserProfile> {
-  const normalized = normalizeUsername(username);
-  const validationError = validateUsername(normalized);
-  if (validationError) throw new Error(validationError);
+  const normalizedUsername = normalizeUsername(username);
+  const usernameError = validateUsername(normalizedUsername);
+  if (usernameError) throw new Error(usernameError);
   if (password.length < 6) throw new Error("Password must be at least 6 characters.");
 
-  const normalizedPhone = normalizePhoneNumber(phoneNumber);
-  const phoneError = validatePhoneNumber(phoneNumber);
-  if (phoneError) throw new Error(phoneError);
+  const normalizedEmail = normalizeEmail(email);
+  const emailError = validateEmail(normalizedEmail);
+  if (emailError) throw new Error(emailError);
 
-  if (await isUsernameTaken(normalized)) throw new Error("That username is already taken.");
-  if (await isPhoneNumberTaken(normalizedPhone)) {
-    throw new Error("That phone number is already linked to an account.");
+  if (await isUsernameTaken(normalizedUsername)) {
+    throw new Error("That username is already taken.");
   }
 
-  const credential = await createUserWithEmailAndPassword(
-    auth,
-    syntheticEmail(normalized),
-    password
-  );
+  let credential;
+  try {
+    credential = await createUserWithEmailAndPassword(auth, normalizedEmail, password);
+  } catch (error: any) {
+    if (error?.code === "auth/email-already-in-use") {
+      throw new Error("That email is already registered.");
+    }
+    throw error;
+  }
 
   const profile: UserProfile = {
     uid: credential.user.uid,
-    username: normalized,
-    displayName: displayName?.trim() || normalized,
-    phoneNumber: normalizedPhone,
+    username: normalizedUsername,
+    displayName: displayName?.trim() || normalizedUsername,
+    email: normalizedEmail,
     createdAt: new Date().toISOString(),
   };
 
   await setDoc(doc(db, "profiles", credential.user.uid), profile);
-  await setDoc(doc(db, "usernames", normalized), { uid: credential.user.uid });
-  await setDoc(doc(db, "phoneNumbers", normalizedPhone), { uid: credential.user.uid });
+  await setDoc(doc(db, "usernames", normalizedUsername), { uid: credential.user.uid });
 
   return profile;
 }
 
-/** step 1 of "forgot your username": request an SMS code be sent to this phone number */
-export async function sendUsernameRecoveryCode(phoneNumber: string): Promise<void> {
-  await backend.sendUsernameRecoveryOtp(normalizePhoneNumber(phoneNumber));
-}
+export async function signIn(usernameOrEmail: string, password: string): Promise<UserProfile> {
+  const trimmed = usernameOrEmail.trim();
+  let email: string;
 
-/** step 2: verify the code and get back the username tied to this phone number, if any */
-export async function verifyUsernameRecoveryCode(
-  phoneNumber: string,
-  code: string
-): Promise<string> {
-  const { username } = await backend.verifyUsernameRecoveryOtp(
-    normalizePhoneNumber(phoneNumber),
-    code
-  );
-  return username;
-}
+  if (trimmed.includes("@")) {
+    email = normalizeEmail(trimmed);
+  } else {
+    const existing = await getUserProfileByUsername(trimmed);
+    if (!existing) throw new Error("No account found with that username.");
+    email = existing.email;
+  }
 
-export async function signIn(username: string, password: string): Promise<UserProfile> {
-  const normalized = normalizeUsername(username);
-  const credential = await signInWithEmailAndPassword(
-    auth,
-    syntheticEmail(normalized),
-    password
-  );
+  const credential = await signInWithEmailAndPassword(auth, email, password);
   const profile = await getUserProfile(credential.user.uid);
   if (!profile) throw new Error("Account found, but its profile is missing.");
   return profile;
+}
+
+/** Firebase's own built-in reset email - free, no third-party service. Solves both "forgot password" and "forgot username" (sign back in with the email afterward, and the username shows right in the app). */
+export async function requestPasswordReset(email: string): Promise<void> {
+  const normalized = normalizeEmail(email);
+  const emailError = validateEmail(normalized);
+  if (emailError) throw new Error(emailError);
+  try {
+    await sendPasswordResetEmail(auth, normalized);
+  } catch (error: any) {
+    // Don't reveal whether an account exists for this email - same
+    // outcome either way, matching how the rest of this app's recovery
+    // flow treats unregistered input.
+    if (error?.code === "auth/user-not-found") return;
+    throw error;
+  }
 }
 
 export async function signOutUser(): Promise<void> {
