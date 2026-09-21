@@ -159,7 +159,15 @@ export default async function getMatchupData(leagueId: string, week: number, pla
               firstPlayer.opponent_id = userData.user_id;
               matchupMap.set(userData.matchup_id, [firstPlayer]);
               userData.opponent = firstPlayer.name;
-              userData.opponent_id = userData.user_id;
+              // This used to be userData.user_id - a team's own id, not its
+              // opponent's - so every team's opponent_id pointed at itself.
+              // getWeekGames() in whatIfSimulation.ts is the one consumer
+              // that pairs teams via this exact field (schedule.tsx and
+              // matchup.tsx instead use the matchupMap grouping built right
+              // here, which was never affected), so this alone was enough
+              // to silently turn the playoff-odds Monte Carlo into every
+              // team "playing" a mirror of itself for every unplayed week.
+              userData.opponent_id = firstPlayer.user_id;
               matchupMap.get(userData.matchup_id)?.push(userData);
             }
           }

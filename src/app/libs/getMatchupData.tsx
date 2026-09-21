@@ -246,7 +246,14 @@ export default async function getMatchupData(league_id: any, week: number) {
               firstPlayer.opponent_id = userData.user_id;
               matchupMap.set(userData.matchup_id, [firstPlayer]);
               userData.opponent = firstPlayer.name;
-              userData.opponent_id = userData.user_id;
+              // This used to be userData.user_id - a team's own id, not its
+              // opponent's - so every team's opponent_id pointed at itself.
+              // The playoff simulator (src/lib/playoffSimulator.ts, wired
+              // in via standings/page.tsx) pairs teams via this exact
+              // field, so this alone was enough to silently turn its
+              // Monte Carlo into every team "playing" a mirror of itself
+              // for every remaining week.
+              userData.opponent_id = firstPlayer.user_id;
               matchupMap.get(userData.matchup_id)?.push(userData);
             }
           }
