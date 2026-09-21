@@ -2,16 +2,28 @@ import { useEffect, useState } from "react";
 import { View, Text, Pressable, ScrollView, ActivityIndicator } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { Feather } from "@expo/vector-icons";
-import { buildLeagueTransactions, TradeEvent } from "../../../lib/leagueTransactions";
+import { buildLeagueTransactions, TradeEvent, TxAsset } from "../../../lib/leagueTransactions";
 import { AssetChips } from "../../../components/TransactionsTicker";
 import { formatTwitterTimestamp } from "../../../lib/formatTime";
 import CommentsSection from "../../../components/CommentsSection";
+import { ensureSystemPost } from "../../../lib/posts";
 
 function tradeLabel(event: TradeEvent): string {
   if (event.kind === "trade2") {
     return `Trade: ${event.teamA.name} & ${event.teamB.name}`;
   }
   return `Trade: ${event.parts.map((p) => p.team.name).join(", ")}`;
+}
+
+function assetListText(assets: TxAsset[]): string {
+  return assets.map((a) => a.label).join(", ");
+}
+
+function tradeSystemText(event: TradeEvent): string {
+  if (event.kind === "trade2") {
+    return `Trade complete: ${event.teamA.name} sends ${assetListText(event.aGives)} to ${event.teamB.name} for ${assetListText(event.aGets)}.`;
+  }
+  return `Trade complete: ${event.parts.map((p) => `${p.team.name} receives ${assetListText(p.receives)}`).join(" · ")}.`;
 }
 
 function TradeCard({ event, leagueId }: { event: TradeEvent; leagueId: string }) {
@@ -77,7 +89,24 @@ export default function Trades() {
     buildLeagueTransactions(leagueID)
       .then((events) => {
         if (cancelled) return;
-        setTrades(events.filter((e): e is TradeEvent => e.kind === "trade2" || e.kind === "tradeMulti"));
+        const tradeEvents = events.filter((e): e is TradeEvent => e.kind === "trade2" || e.kind === "tradeMulti");
+        setTrades(tradeEvents);
+
+        // Announce each completed trade into the feed/comment thread the
+        // first time anyone views this screen after it happens - cheap and
+        // safe to re-run on every visit since ensureSystemPost is a no-op
+        // once the post already exists.
+        for (const event of tradeEvents) {
+          ensureSystemPost({
+            id: `trade_${leagueID}_${event.id}`,
+            text: tradeSystemText(event),
+            leagueId: leagueID,
+            targetType: "trade",
+            targetId: event.id,
+            targetLabel: tradeLabel(event),
+            createdAtMs: event.timestamp,
+          }).catch((error) => console.error("Error posting trade to feed:", error));
+        }
       })
       .catch((error) => console.error("Error loading trades:", error))
       .finally(() => {

@@ -20,6 +20,7 @@ import BigPlayToast from "../../../components/BigPlayToast";
 import MatchupFeed from "../../../components/MatchupFeed";
 import CommentsSection from "../../../components/CommentsSection";
 import useBigPlayFeed from "../../../lib/useBigPlayFeed";
+import { ensureSystemPost } from "../../../lib/posts";
 
 const POSITION_COLOR: Record<string, string> = {
   QB: "#ef4444",
@@ -152,6 +153,39 @@ export default function MatchupDetail() {
     scoringSettings,
     enabled: !loading && !!team1Id && !!team2Id && !!season,
   });
+
+  // Announce the final score into the feed the first time anyone views this
+  // matchup after it goes final - ensureSystemPost is a no-op if it's
+  // already been posted, so it's safe to let this re-check on every render
+  // where the game state could have just flipped to final. Declared before
+  // the early returns below (rules-of-hooks), so it recomputes final-ness
+  // itself from state rather than reusing the derived consts further down.
+  useEffect(() => {
+    if (loading || !team1 || !team2 || !leagueID || !matchupID) return;
+    const rosterFullySet = (s: Starter[]) => s.length > 0 && s.every((x) => x && Object.keys(x).length > 0);
+    const s1 = team1.starters_full_data ?? [];
+    const s2 = team2.starters_full_data ?? [];
+    const state1 = computeFantasyTeamGameState(s1.map((s) => s.team), nflGameStatusByTeam, rosterFullySet(s1));
+    const state2 = computeFantasyTeamGameState(s2.map((s) => s.team), nflGameStatusByTeam, rosterFullySet(s2));
+    const isFinal = combineMatchupGameState(state1, state2, isPastMondayNightCutoff()) === "final";
+    if (!isFinal) return;
+
+    const pts1 = parseFloat(team1.team_points || "0");
+    const pts2 = parseFloat(team2.team_points || "0");
+    const winner = pts1 === pts2 ? null : pts1 > pts2 ? team1.name : team2.name;
+    const text = winner
+      ? `Final: ${team1.name} ${pts1.toFixed(2)} - ${team2.name} ${pts2.toFixed(2)}. ${winner} wins.`
+      : `Final: ${team1.name} ${pts1.toFixed(2)} - ${team2.name} ${pts2.toFixed(2)}. It's a tie.`;
+
+    ensureSystemPost({
+      id: `matchup_${leagueID}_${week}_${matchupID}`,
+      text,
+      leagueId: leagueID,
+      targetType: "matchup",
+      targetId: `${week}:${matchupID}`,
+      targetLabel: `${team1.name} vs ${team2.name} - Week ${week}`,
+    }).catch((error) => console.error("Error posting final score to feed:", error));
+  }, [loading, team1, team2, leagueID, matchupID, week, nflGameStatusByTeam]);
 
   if (!leagueID || !matchupID || !week) return null;
 

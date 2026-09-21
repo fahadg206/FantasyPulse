@@ -3,7 +3,7 @@ import { View, Text, Pressable, Share } from "react-native";
 import { useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import type { Post } from "../lib/posts";
-import { toggleLike, toggleRepost } from "../lib/posts";
+import { toggleLike, toggleRepost, SYSTEM_AUTHOR_UID } from "../lib/posts";
 import { formatTwitterTimestamp } from "../lib/formatTime";
 
 // Styled to match Twitter's own mobile feed row as closely as this app's
@@ -38,6 +38,11 @@ export default function PostCard({
   const [repostCount, setRepostCount] = useState(post.repostCount);
 
   const canInteract = !!currentUid;
+  // Auto-announced posts (a completed trade, a final score) come from the
+  // app itself rather than a real user, so there's no profile to visit -
+  // shown instead as a verified-style account, same idea as Twitter's
+  // official accounts.
+  const isSystem = post.authorUid === SYSTEM_AUTHOR_UID;
 
   const onLike = async () => {
     if (!canInteract || !currentUid) return;
@@ -73,18 +78,33 @@ export default function PostCard({
 
   return (
     <View className="flex-row px-4 py-3 border-b border-white/10">
-      <Pressable onPress={() => router.push(`/profile/${post.authorUsername}`)} hitSlop={4}>
-        <View className="w-[42px] h-[42px] rounded-full bg-brand/20 items-center justify-center mr-3">
-          <Text className="text-brand font-bold text-[16px]">
-            {post.authorDisplayName.charAt(0).toUpperCase()}
-          </Text>
+      <Pressable
+        onPress={isSystem ? undefined : () => router.push(`/profile/${post.authorUsername}`)}
+        disabled={isSystem}
+        hitSlop={4}
+      >
+        <View
+          className={`w-[42px] h-[42px] rounded-full items-center justify-center mr-3 ${
+            isSystem ? "bg-brand" : "bg-brand/20"
+          }`}
+        >
+          {isSystem ? (
+            <Feather name="activity" size={18} color="#fff" />
+          ) : (
+            <Text className="text-brand font-bold text-[16px]">
+              {post.authorDisplayName.charAt(0).toUpperCase()}
+            </Text>
+          )}
         </View>
       </Pressable>
 
       <View className="flex-1">
         <View className="flex-row items-center flex-wrap">
-          <Pressable onPress={() => router.push(`/profile/${post.authorUsername}`)}>
-            <Text className="text-white font-bold text-[14px]">{post.authorDisplayName}</Text>
+          <Pressable onPress={isSystem ? undefined : () => router.push(`/profile/${post.authorUsername}`)} disabled={isSystem}>
+            <View className="flex-row items-center gap-1">
+              <Text className="text-white font-bold text-[14px]">{post.authorDisplayName}</Text>
+              {isSystem && <Feather name="check-circle" size={13} color="#af1222" />}
+            </View>
           </Pressable>
           <Text className="text-gray-500 text-[13px] ml-1">
             @{post.authorUsername} · {formatTwitterTimestamp(post.createdAtMs)}

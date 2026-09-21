@@ -110,6 +110,51 @@ export async function getPostsForTarget(
   return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Post, "id">) }));
 }
 
+// Posts authored by the app itself - a completed trade or a final matchup
+// score, auto-announced into the feed/comment thread so those threads
+// aren't empty until a real user happens to post about it. Uses a
+// deterministic doc id (derived from the trade/matchup it's about) and
+// checks existence before writing, so it's safe to call this every time
+// any client views that trade/matchup - the first viewer creates it, every
+// later call is a no-op read, and it can never be created twice even if
+// two clients race on the same id, since the id (not the write) is what's
+// unique.
+export const SYSTEM_AUTHOR_UID = "system";
+
+export interface EnsureSystemPostInput {
+  id: string;
+  text: string;
+  leagueId?: string;
+  targetType: "matchup" | "trade";
+  targetId: string;
+  targetLabel?: string;
+  createdAtMs?: number;
+}
+
+export async function ensureSystemPost(input: EnsureSystemPostInput): Promise<void> {
+  const ref = doc(db, "posts", input.id);
+  const existing = await getDoc(ref);
+  if (existing.exists()) return;
+
+  const now = input.createdAtMs ?? Date.now();
+  await setDoc(ref, {
+    authorUid: SYSTEM_AUTHOR_UID,
+    authorUsername: "fantasypulse",
+    authorDisplayName: "Fantasy Pulse",
+    authorAvatar: null,
+    text: input.text,
+    createdAt: new Date(now).toISOString(),
+    createdAtMs: now,
+    leagueId: input.leagueId ?? null,
+    targetType: input.targetType,
+    targetId: input.targetId,
+    targetLabel: input.targetLabel ?? null,
+    likeCount: 0,
+    replyCount: 0,
+    repostCount: 0,
+  });
+}
+
 function likeDocId(postId: string, uid: string): string {
   return `${postId}_${uid}`;
 }
