@@ -29,18 +29,39 @@ export interface CareerStats {
   championships: number;
 }
 
-// Career totals across every season of every league this manager is
-// currently in - crawls each league's previous_league_id chain (the same
-// pattern getManagerHistory.ts uses for the GM Scout tab), but only pulls
-// out this one manager's numbers rather than building the full-league
-// leaderboard getManagerHistory computes, and counts every championship a
-// manager has actually won (getManagerHistory only tracks the single best
-// finish ever, not how many times).
-export async function getCareerStats(
-  sleeperUserId: string,
-  leagues: Pick<LeagueSeasonStats, "leagueId">[]
-): Promise<CareerStats> {
-  if (leagues.length === 0) {
+// Sleeper's earliest supported fantasy season - a safe floor for "every
+// season this manager has ever played," short of an API that just lists a
+// user's full history directly (Sleeper doesn't expose one).
+const EARLIEST_SLEEPER_SEASON = 2017;
+
+// Career totals across literally every league this manager has ever been
+// in - not just the ones they're still in now. Enumerates every season
+// from EARLIEST_SLEEPER_SEASON through the current one via Sleeper's
+// per-season "leagues this user is in" endpoint, which already returns
+// that exact season's league_id for each league directly - no need to
+// chain-walk previous_league_id the way getManagerHistory.ts does for a
+// single league, and it also naturally reaches a league the manager left
+// or that later folded, which a chain starting from their current leagues
+// never could. Counts every championship a manager has actually won
+// (getManagerHistory only tracks the single best finish ever, not how
+// many times).
+export async function getCareerStats(sleeperUserId: string, currentSeason: string): Promise<CareerStats> {
+  const endYear = parseInt(currentSeason, 10) || new Date().getFullYear();
+  const seasons = Array.from(
+    { length: Math.max(0, endYear - EARLIEST_SLEEPER_SEASON + 1) },
+    (_, i) => String(EARLIEST_SLEEPER_SEASON + i)
+  );
+
+  const seasonLeagueLists = await Promise.all(
+    seasons.map((season) =>
+      fetchJson(`${SLEEPER}/user/${sleeperUserId}/leagues/nfl/${season}`).catch(() => [])
+    )
+  );
+  const leagueIds = Array.from(
+    new Set(seasonLeagueLists.flat().map((l: any) => l.league_id as string).filter(Boolean))
+  );
+
+  if (leagueIds.length === 0) {
     return { seasonsPlayed: 0, wins: 0, losses: 0, ties: 0, winPct: 0, playoffAppearances: 0, championships: 0 };
   }
 
@@ -52,65 +73,57 @@ export async function getCareerStats(
   let championships = 0;
 
   await Promise.all(
-    leagues.map(async (league) => {
-      let currentLeagueId: string | null = league.leagueId;
+    leagueIds.map(async (leagueId) => {
+      try {
+        const [leagueInfo, rosters, bracket] = await Promise.all([
+          fetchJson(`${SLEEPER}/league/${leagueId}`),
+          fetchJson(`${SLEEPER}/league/${leagueId}/rosters`),
+          fetch(`${SLEEPER}/league/${leagueId}/winners_bracket`)
+            .then((r) => r.json())
+            .catch(() => []),
+        ]);
 
-      while (currentLeagueId && currentLeagueId !== "0") {
-        const leagueIdForRequest: string = currentLeagueId;
-        try {
-          const [leagueInfo, rosters, bracket] = await Promise.all([
-            fetchJson(`${SLEEPER}/league/${leagueIdForRequest}`),
-            fetchJson(`${SLEEPER}/league/${leagueIdForRequest}/rosters`),
-            fetch(`${SLEEPER}/league/${leagueIdForRequest}/winners_bracket`)
-              .then((r) => r.json())
-              .catch(() => []),
-          ]);
+        const myRoster = rosters.find((r: any) => r.owner_id === sleeperUserId);
+        const w = myRoster?.settings?.wins ?? 0;
+        const l = myRoster?.settings?.losses ?? 0;
+        const t = myRoster?.settings?.ties ?? 0;
 
-          const myRoster = rosters.find((r: any) => r.owner_id === sleeperUserId);
-          const w = myRoster?.settings?.wins ?? 0;
-          const l = myRoster?.settings?.losses ?? 0;
-          const t = myRoster?.settings?.ties ?? 0;
+        // Only counts a season as "played" once games actually happened -
+        // skips the current in-progress season's 0-0 placeholder record,
+        // same guard getManagerHistory.ts uses.
+        if (myRoster && w + l + t > 0) {
+          wins += w;
+          losses += l;
+          ties += t;
+          seasonsPlayed += 1;
 
-          // Only counts a season as "played" once games actually happened -
-          // skips the current in-progress season's 0-0 placeholder record,
-          // same guard getManagerHistory.ts uses.
-          if (myRoster && w + l + t > 0) {
-            wins += w;
-            losses += l;
-            ties += t;
-            seasonsPlayed += 1;
-
-            const rosterIds = rosters.map((r: any) => String(r.roster_id));
-            const winsMap: Record<string, number> = {};
-            const pointsMap: Record<string, number> = {};
-            const seedMap: Record<string, { division?: number }> = {};
-            for (const r of rosters) {
-              const id = String(r.roster_id);
-              winsMap[id] = r.settings?.wins ?? 0;
-              pointsMap[id] = (r.settings?.fpts ?? 0) + (r.settings?.fpts_decimal ?? 0) / 100;
-              seedMap[id] = { division: r.settings?.division };
-            }
-            const playoffSpots = Math.min(leagueInfo.settings?.playoff_teams ?? 6, rosterIds.length);
-            const divisionsCount = leagueInfo.settings?.divisions ?? 0;
-            const ranked = rankTeams(rosterIds, winsMap, pointsMap);
-            const { qualifiers } = determinePlayoffTeams(ranked, seedMap, divisionsCount, playoffSpots);
-            if (qualifiers.includes(String(myRoster.roster_id))) {
-              playoffAppearances += 1;
-            }
-
-            if (Array.isArray(bracket) && bracket.length > 0) {
-              const championshipGame = bracket.find((g: any) => g.p === 1 && g.w !== undefined);
-              if (championshipGame && championshipGame.w === myRoster.roster_id) {
-                championships += 1;
-              }
-            }
+          const rosterIds = rosters.map((r: any) => String(r.roster_id));
+          const winsMap: Record<string, number> = {};
+          const pointsMap: Record<string, number> = {};
+          const seedMap: Record<string, { division?: number }> = {};
+          for (const r of rosters) {
+            const id = String(r.roster_id);
+            winsMap[id] = r.settings?.wins ?? 0;
+            pointsMap[id] = (r.settings?.fpts ?? 0) + (r.settings?.fpts_decimal ?? 0) / 100;
+            seedMap[id] = { division: r.settings?.division };
+          }
+          const playoffSpots = Math.min(leagueInfo.settings?.playoff_teams ?? 6, rosterIds.length);
+          const divisionsCount = leagueInfo.settings?.divisions ?? 0;
+          const ranked = rankTeams(rosterIds, winsMap, pointsMap);
+          const { qualifiers } = determinePlayoffTeams(ranked, seedMap, divisionsCount, playoffSpots);
+          if (qualifiers.includes(String(myRoster.roster_id))) {
+            playoffAppearances += 1;
           }
 
-          currentLeagueId = leagueInfo.previous_league_id;
-        } catch (error) {
-          console.error(`Error loading career history for league ${leagueIdForRequest}:`, error);
-          break;
+          if (Array.isArray(bracket) && bracket.length > 0) {
+            const championshipGame = bracket.find((g: any) => g.p === 1 && g.w !== undefined);
+            if (championshipGame && championshipGame.w === myRoster.roster_id) {
+              championships += 1;
+            }
+          }
         }
+      } catch (error) {
+        console.error(`Error loading career history for league ${leagueId}:`, error);
       }
     })
   );

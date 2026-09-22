@@ -59,7 +59,7 @@ export default function ProfileActivity({ sleeperUserId, stats }: { sleeperUserI
     getRecentAcquisitions(sleeperUserId, leagues, 5)
       .then((r) => !cancelled && setAcquisitions(r))
       .catch(console.error);
-    getCareerStats(sleeperUserId, leagues)
+    getCareerStats(sleeperUserId, stats.season)
       .then((r) => !cancelled && setCareer(r))
       .catch(console.error);
 
@@ -67,7 +67,7 @@ export default function ProfileActivity({ sleeperUserId, stats }: { sleeperUserI
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sleeperUserId, stats.leagues.map((l) => l.leagueId).join(",")]);
+  }, [sleeperUserId, stats.season, stats.leagues.map((l) => l.leagueId).join(",")]);
 
   return (
     <View>
@@ -78,7 +78,7 @@ export default function ProfileActivity({ sleeperUserId, stats }: { sleeperUserI
           value={career ? `${(career.winPct * 100).toFixed(0)}%` : "-"}
           label="Win Rate"
         />
-        <CareerStat value={career ? career.playoffAppearances : "-"} label="Playoffs" />
+        <CareerStat value={career ? career.playoffAppearances : "-"} label="Playoff Appearances" />
         <CareerStat
           value={!career ? "-" : career.championships > 0 ? `${career.championships} 🏆` : "0"}
           label="Titles"
@@ -132,17 +132,24 @@ export default function ProfileActivity({ sleeperUserId, stats }: { sleeperUserI
           <SectionLabel>TOP ROSTERED PLAYERS</SectionLabel>
           <View className="gap-2.5">
             {topPlayers.map((p) => {
+              const isDef = p.pos === "DEF";
               const logo = getTeamLogo(p.team);
+              const photoUri = isDef ? logo ?? undefined : `https://sleepercdn.com/content/nfl/players/thumb/${p.playerId}.jpg`;
               return (
                 <View key={p.playerId} className="flex-row items-center justify-between">
                   <View className="flex-row items-center gap-2 flex-1 mr-2">
+                    <Image
+                      source={photoUri ? { uri: photoUri } : undefined}
+                      resizeMode={isDef ? "contain" : "cover"}
+                      className={isDef ? "w-[26px] h-[26px]" : "w-[26px] h-[26px] rounded-full bg-white/10"}
+                    />
                     <Text
                       style={{ color: POSITION_COLOR[p.pos ?? ""] ?? "#9ca3af" }}
                       className="text-[10px] font-extrabold w-7"
                     >
                       {p.pos ?? "-"}
                     </Text>
-                    {logo && <Image source={{ uri: logo }} className="w-[18px] h-[18px]" resizeMode="contain" />}
+                    {!isDef && logo && <Image source={{ uri: logo }} className="w-[16px] h-[16px]" resizeMode="contain" />}
                     <Text numberOfLines={1} className="text-white text-[13px] font-semibold flex-1">
                       {p.name}
                     </Text>
