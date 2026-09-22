@@ -10,16 +10,24 @@ import PostCard from "../../components/PostCard";
 import ReplyModal from "../../components/ReplyModal";
 import Avatar from "../../components/Avatar";
 
-// A single post's own thread - what it's replying to isn't shown (posts
-// don't chain further than one level up in this app), just the post itself
-// and its replies, with a reply composer at the bottom. Reachable by
-// tapping the reply icon on any post, in the Feed or in a CommentsSection.
+// A single post's own thread. When the post being viewed is itself a
+// reply, its immediate parent is shown above it (compact, connected by a
+// thread line, tappable to walk up one level) so it actually reads as a
+// thread instead of the reply looking like a random standalone post with
+// no context - this only ever shows one level up, not the whole chain to
+// the root, which is enough for how deep replies actually go here. Below
+// the post: its own replies, with a reply composer at the bottom.
+// Reachable by tapping the reply icon on any post, in the Feed or in a
+// CommentsSection.
 export default function PostThread() {
   const { postId } = useLocalSearchParams<{ postId: string }>();
   const router = useRouter();
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [post, setPost] = useState<Post | null | undefined>(undefined);
+  const [parentPost, setParentPost] = useState<Post | null>(null);
+  /** true when this post replies to something that's since been deleted - shows a placeholder instead of just silently dropping the thread context */
+  const [parentDeleted, setParentDeleted] = useState(false);
   const [replies, setReplies] = useState<Post[]>([]);
   const [interactionState, setInteractionState] = useState<Record<string, { liked: boolean; reposted: boolean }>>({});
   const [loading, setLoading] = useState(true);
@@ -51,8 +59,14 @@ export default function PostThread() {
       setPost(foundPost);
       setReplies(foundReplies);
 
+      const foundParent = foundPost?.parentPostId ? await getPost(foundPost.parentPostId) : null;
+      if (requestIdRef.current !== requestId) return;
+      setParentPost(foundParent);
+      setParentDeleted(!!foundPost?.parentPostId && !foundParent);
+
       if (authUser && !isReadOnly(authUser)) {
         const all = foundPost ? [foundPost, ...foundReplies] : foundReplies;
+        if (foundParent) all.push(foundParent);
         const entries = await Promise.all(
           all.map(async (p) => {
             const [liked, reposted] = await Promise.all([
@@ -105,6 +119,35 @@ export default function PostThread() {
           keyExtractor={(item) => item.id}
           ListHeaderComponent={
             <View>
+              {parentPost && (
+                <View>
+                  <PostCard
+                    post={parentPost}
+                    currentUid={profile?.uid}
+                    liked={interactionState[parentPost.id]?.liked ?? false}
+                    reposted={interactionState[parentPost.id]?.reposted ?? false}
+                    onDeleted={() => {
+                      setParentPost(null);
+                      setParentDeleted(true);
+                    }}
+                  />
+                  {/* Thread connector - same visual language as the reply
+                      composer's own thread line, lined up under the
+                      compact row's avatar column (px-4 + 42px avatar). */}
+                  <View className="flex-row px-4 bg-[#0c0c0e]">
+                    <View style={{ width: 42 }} className="items-center">
+                      <View className="w-[2px] h-[14px] bg-white/15" />
+                    </View>
+                  </View>
+                </View>
+              )}
+              {parentDeleted && (
+                <View className="px-4 py-3 border-b border-white/10">
+                  <Text className="text-gray-500 text-[13px] italic">
+                    Replying to a post that&apos;s no longer available
+                  </Text>
+                </View>
+              )}
               <PostCard
                 post={post}
                 currentUid={profile?.uid}
