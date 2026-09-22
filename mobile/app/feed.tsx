@@ -6,6 +6,7 @@ import { Feather } from "@expo/vector-icons";
 import type { User } from "firebase/auth";
 import { onAuthChange, isReadOnly, getUserProfile, UserProfile } from "../lib/socialAuth";
 import { getFeedPostsForLeague, createPost, isPostLiked, isPostReposted, Post } from "../lib/posts";
+import { storage, StorageKeys } from "../lib/storage";
 import PostCard from "../components/PostCard";
 import ComposeBox from "../components/ComposeBox";
 
@@ -14,7 +15,28 @@ import ComposeBox from "../components/ComposeBox";
 // Boogie announcements or trade posts mixed in.
 export default function Feed() {
   const router = useRouter();
-  const { leagueID } = useLocalSearchParams<{ leagueID: string }>();
+  const { leagueID: leagueIDParam } = useLocalSearchParams<{ leagueID: string }>();
+  // Falls back to whichever league was last selected (SelectLeague.tsx)
+  // if this screen is ever reached with no route param at all - a stale
+  // nav history entry from before this screen carried a leagueID, a deep
+  // link, or a background/foreground cycle that restored old state - so
+  // it degrades to "your last league" instead of a dead end.
+  const [fallbackLeagueID, setFallbackLeagueID] = useState<string | null>(null);
+  const [fallbackChecked, setFallbackChecked] = useState(false);
+  const leagueID = leagueIDParam || fallbackLeagueID || undefined;
+
+  useEffect(() => {
+    if (leagueIDParam) {
+      setFallbackChecked(true);
+      return;
+    }
+    storage
+      .getItem(StorageKeys.selectedLeagueID)
+      .then((id) => setFallbackLeagueID(id))
+      .catch(() => setFallbackLeagueID(null))
+      .finally(() => setFallbackChecked(true));
+  }, [leagueIDParam]);
+
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [posts, setPosts] = useState<Post[]>([]);
@@ -47,7 +69,11 @@ export default function Feed() {
 
   const loadFeed = useCallback(async () => {
     if (!leagueID) {
-      setLoading(false);
+      // Only give up and stop the spinner once the storage fallback has
+      // actually had a chance to resolve - otherwise this fires on the
+      // very first render (before that lookup finishes) and flashes the
+      // "no league" state even when a fallback is about to show up.
+      if (fallbackChecked) setLoading(false);
       return;
     }
     const requestId = ++requestIdRef.current;
@@ -80,7 +106,7 @@ export default function Feed() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authUser, leagueID]);
+  }, [authUser, leagueID, fallbackChecked]);
 
   useEffect(() => {
     loadFeed();
@@ -107,6 +133,13 @@ export default function Feed() {
   };
 
   if (!leagueID) {
+    if (!fallbackChecked) {
+      return (
+        <SafeAreaView className="flex-1 bg-[#0c0c0e] items-center justify-center">
+          <ActivityIndicator color="#af1222" />
+        </SafeAreaView>
+      );
+    }
     return (
       <SafeAreaView className="flex-1 bg-[#0c0c0e] items-center justify-center px-6">
         <Text className="text-gray-500 text-[13px] text-center">
