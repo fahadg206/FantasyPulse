@@ -15,6 +15,7 @@ import {
 } from "../lib/profileActivity";
 import { formatTwitterTimestamp } from "../lib/formatTime";
 import { getTeamLogo } from "../lib/nflTeams";
+import { getStartSitAccuracy, StartSitAccuracy } from "../lib/startSitAccuracy";
 import Avatar from "./Avatar";
 
 const POSITION_COLOR: Record<string, string> = {
@@ -45,6 +46,7 @@ export default function ProfileActivity({ sleeperUserId, stats }: { sleeperUserI
   const [topPlayers, setTopPlayers] = useState<TopRosteredPlayer[] | null>(null);
   const [acquisitions, setAcquisitions] = useState<RecentAcquisition[] | null>(null);
   const [career, setCareer] = useState<CareerStats | null>(null);
+  const [startSit, setStartSit] = useState<StartSitAccuracy | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -61,6 +63,9 @@ export default function ProfileActivity({ sleeperUserId, stats }: { sleeperUserI
       .catch(console.error);
     getCareerStats(sleeperUserId, stats.season)
       .then((r) => !cancelled && setCareer(r))
+      .catch(console.error);
+    getStartSitAccuracy(sleeperUserId, stats.season)
+      .then((r) => !cancelled && setStartSit(r))
       .catch(console.error);
 
     return () => {
@@ -85,6 +90,26 @@ export default function ProfileActivity({ sleeperUserId, stats }: { sleeperUserI
           last
         />
       </View>
+
+      {/* Start/Sit Accuracy - all-time lineup efficiency: points actually
+          started vs. the best possible lineup from the full roster each
+          week, across every league ever played. */}
+      {startSit && startSit.weeksAnalyzed > 0 && (
+        <View className="flex-row items-center justify-between bg-[#141416] rounded-2xl border border-white/10 px-4 py-3.5 mb-4">
+          <View className="flex-1 mr-2">
+            <Text className="text-white font-bold text-[14px]">Start/Sit Accuracy</Text>
+            <Text className="text-gray-500 text-[11px] mt-0.5">
+              All-time lineup efficiency · {startSit.weeksAnalyzed} weeks
+            </Text>
+          </View>
+          <Text
+            style={{ fontVariant: ["tabular-nums"] }}
+            className="text-white font-extrabold text-[22px]"
+          >
+            {(startSit.accuracy * 100).toFixed(1)}%
+          </Text>
+        </View>
+      )}
 
       {/* This Week's Matchups */}
       {matchups === null ? (

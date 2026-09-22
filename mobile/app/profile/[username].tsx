@@ -7,10 +7,114 @@ import type { User } from "firebase/auth";
 import { onAuthChange, isReadOnly, getUserProfileByUsername, ensureAvatarSynced, UserProfile } from "../../lib/socialAuth";
 import { getFantasyProfileStats, FantasyProfileStats } from "../../lib/fantasyProfile";
 import { followUser, unfollowUser, isFollowing, getFollowingUids, getFollowerUids } from "../../lib/follows";
+import { getPostsByAuthor, isPostLiked, isPostReposted, BOOGIE_UID, BOOGIE_USERNAME, Post } from "../../lib/posts";
 import ProfileActivity from "../../components/ProfileActivity";
 import Avatar from "../../components/Avatar";
+import PostCard from "../../components/PostCard";
 
 const CURRENT_SEASON = "2026";
+
+// Boogie isn't a real Firebase account - there's no profiles/{uid} doc to
+// look up - so his profile is handled entirely separately from the real
+// lookup flow below, showing only what he's actually posted himself
+// (trades and final scores, per ensureSystemPost's scope) rather than any
+// Fantasy Profile stats a real manager's page would have.
+function BoogieProfile() {
+  const router = useRouter();
+  const [authUser, setAuthUser] = useState<User | null>(null);
+  const [currentUid, setCurrentUid] = useState<string | undefined>(undefined);
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [interactionState, setInteractionState] = useState<Record<string, { liked: boolean; reposted: boolean }>>({});
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => onAuthChange(setAuthUser), []);
+
+  useEffect(() => {
+    if (!authUser || isReadOnly(authUser)) {
+      setCurrentUid(undefined);
+      return;
+    }
+    setCurrentUid(authUser.uid);
+  }, [authUser]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getPostsByAuthor(BOOGIE_UID)
+      .then(async (result) => {
+        if (cancelled) return;
+        setPosts(result);
+        if (currentUid) {
+          const entries = await Promise.all(
+            result.map(async (p) => {
+              const [liked, reposted] = await Promise.all([isPostLiked(p.id, currentUid), isPostReposted(p.id, currentUid)]);
+              return [p.id, { liked, reposted }] as const;
+            })
+          );
+          if (!cancelled) setInteractionState(Object.fromEntries(entries));
+        }
+      })
+      .catch((error) => console.error("Error loading Boogie's posts:", error))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUid]);
+
+  return (
+    <SafeAreaView className="flex-1 bg-[#0c0c0e]">
+      <View className="flex-row items-center px-4 pt-3 pb-1">
+        <Pressable onPress={() => router.back()} hitSlop={10}>
+          <Feather name="arrow-left" size={20} color="#fff" />
+        </Pressable>
+      </View>
+      <View className="items-center px-5 pt-4 pb-6">
+        <Avatar uid={BOOGIE_UID} name="Boogie The Writer" size={80} />
+        <View className="flex-row items-center gap-1.5 mt-2">
+          <Text className="text-white text-[20px] font-bold">Boogie The Writer</Text>
+          <Feather name="check-circle" size={15} color="#af1222" />
+        </View>
+        <Text className="text-gray-500 text-[13px]">@{BOOGIE_USERNAME}</Text>
+        <Text className="text-gray-300 text-[13px] mt-2 text-center px-6">
+          Fantasy Pulse Senior Staff Writer, covering every trade and final score across the league.
+        </Text>
+      </View>
+
+      {loading ? (
+        <View className="items-center py-10">
+          <ActivityIndicator color="#af1222" />
+        </View>
+      ) : posts.length === 0 ? (
+        <View className="items-center py-10 px-6">
+          <Text className="text-gray-500 text-[13px] text-center">Nothing posted yet.</Text>
+        </View>
+      ) : (
+        <ScrollView showsVerticalScrollIndicator={false}>
+          {posts.map((post) => (
+            <PostCard
+              key={post.id}
+              post={post}
+              currentUid={currentUid}
+              liked={interactionState[post.id]?.liked ?? false}
+              reposted={interactionState[post.id]?.reposted ?? false}
+              onPressReply={() => router.push(`/post/${post.id}`)}
+              onPressTarget={() => {
+                if (post.targetType === "matchup" && post.targetId && post.leagueId) {
+                  const [week, matchupID] = post.targetId.split(":");
+                  router.push({
+                    pathname: "/league/[leagueID]/matchup",
+                    params: { leagueID: post.leagueId, week, matchupID },
+                  } as any);
+                } else if ((post.targetType === "trade" || post.targetType === "waiver") && post.leagueId) {
+                  router.push({ pathname: "/league/[leagueID]/trades", params: { leagueID: post.leagueId } } as any);
+                }
+              }}
+            />
+          ))}
+        </ScrollView>
+      )}
+    </SafeAreaView>
+  );
+}
 
 export default function PublicProfile() {
   const { username } = useLocalSearchParams<{ username: string }>();
@@ -73,6 +177,10 @@ export default function PublicProfile() {
       setFollowBusy(false);
     }
   };
+
+  if (username === BOOGIE_USERNAME) {
+    return <BoogieProfile />;
+  }
 
   if (profile === undefined) {
     return (

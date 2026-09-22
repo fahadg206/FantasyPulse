@@ -1,16 +1,16 @@
 import { View, Text, Image } from "react-native";
 import { Feather } from "@expo/vector-icons";
-import { BOOGIE_UID } from "../lib/posts";
+import { BOOGIE_UID, BOOGIE_AVATAR_URL } from "../lib/posts";
 
-const boogieImg = require("../assets/images/boogie.png");
 const helmetImg = require("../assets/images/helmet2.png");
 
 // One avatar renderer for every place a picture shows up (posts, profile
 // headers, compose boxes, league rows): a real photo when there is one,
-// Boogie's real staff-writer photo for auto-announced posts, the Fantasy
-// Pulse helmet for a league with no picture of its own, and a colored
-// initial circle as the fallback for a user with no picture - so nothing
-// crashes or shows a broken image just because something hasn't set one.
+// Boogie's actual Sleeper account photo (123Cancun - see BOOGIE_AVATAR_URL)
+// for auto-announced posts, the Fantasy Pulse helmet for a league with no
+// picture of its own, and a colored initial circle as the fallback for a
+// user with no picture - so nothing crashes or shows a broken image just
+// because something hasn't set one.
 
 interface AvatarProps {
   uid?: string;
@@ -27,7 +27,7 @@ export default function Avatar({ uid, url, name, size = 42, kind = "user" }: Ava
   if (uid === BOOGIE_UID) {
     return (
       <View style={[dimension, { overflow: "hidden" }]} className="bg-brand/20">
-        <Image source={boogieImg} style={dimension} resizeMode="cover" />
+        <Image source={{ uri: BOOGIE_AVATAR_URL }} style={dimension} resizeMode="cover" />
       </View>
     );
   }

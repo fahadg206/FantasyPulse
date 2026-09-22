@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { View, Text, Image, ScrollView, ActivityIndicator, Pressable } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { Feather } from "@expo/vector-icons";
-import { sleeper } from "../../../lib/api";
+import { sleeper, backend } from "../../../lib/api";
 import getMatchupData, { ScheduleData, Starter } from "../../../lib/getMatchupData";
 import { getTopPerformers, TopPerformer, displayName } from "../../../lib/getTopPerformers";
 import {
@@ -24,6 +24,7 @@ import CommentsSection from "../../../components/CommentsSection";
 import useBigPlayFeed from "../../../lib/useBigPlayFeed";
 import { ensureSystemPost } from "../../../lib/posts";
 import { finalScoreText } from "../../../lib/announceTransactions";
+import { detectRunsAndComebacks, buildMatchupRecap } from "../../../lib/runsAndComebacks";
 
 const POSITION_COLOR: Record<string, string> = {
   QB: "#ef4444",
@@ -174,7 +175,7 @@ export default function MatchupDetail() {
   // the early returns below (rules-of-hooks), so it recomputes final-ness
   // itself from state rather than reusing the derived consts further down.
   useEffect(() => {
-    if (loading || !team1 || !team2 || !leagueID || !matchupID) return;
+    if (loading || !team1 || !team2 || !leagueID || !matchupID || !season) return;
     const rosterFullySet = (s: Starter[]) => s.length > 0 && s.every((x) => x && Object.keys(x).length > 0);
     const s1 = team1.starters_full_data ?? [];
     const s2 = team2.starters_full_data ?? [];
@@ -183,30 +184,62 @@ export default function MatchupDetail() {
     const isFinal = combineMatchupGameState(state1, state2, isPastMondayNightCutoff()) === "final";
     if (!isFinal) return;
 
-    const pts1 = parseFloat(team1.team_points || "0");
-    const pts2 = parseFloat(team2.team_points || "0");
-    const text = finalScoreText(team1.name, pts1, team2.name, pts2);
+    let cancelled = false;
+    (async () => {
+      const pts1 = parseFloat(team1.team_points || "0");
+      const pts2 = parseFloat(team2.team_points || "0");
 
-    ensureSystemPost({
-      id: `matchup_${leagueID}_${week}_${matchupID}`,
-      text,
-      matchupCard: {
+      // The full game's scoring plays, for the run/comeback detection
+      // below - the same players[]/scoringSettings shape useBigPlayFeed
+      // builds, just resolved once here instead of polled.
+      const buildPlayers = (starters: Starter[], fantasyTeam: "team1" | "team2") =>
+        starters
+          .map((s) => {
+            if (!s.id) return null;
+            const meta = playersDataForFeed[s.id];
+            if (!meta || !meta.fn || !meta.ln || !meta.t) return null;
+            return { sleeperId: s.id, fn: meta.fn, ln: meta.ln, pos: meta.pos, team: meta.t, fantasyTeam };
+          })
+          .filter(Boolean);
+      const players = [...buildPlayers(s1, "team1"), ...buildPlayers(s2, "team2")];
+
+      let text = finalScoreText(team1.name, pts1, team2.name, pts2);
+      if (players.length > 0) {
+        try {
+          const feedData = await backend.fetchMatchupFeed(week, season, players, scoringSettings);
+          const runsAndComebacks = detectRunsAndComebacks(feedData.plays || []);
+          text = buildMatchupRecap(team1.name, pts1, team2.name, pts2, runsAndComebacks);
+        } catch (error) {
+          console.error("Error building matchup recap:", error);
+        }
+      }
+      if (cancelled) return;
+
+      ensureSystemPost({
+        id: `matchup_${leagueID}_${week}_${matchupID}`,
+        text,
+        matchupCard: {
+          leagueId: leagueID,
+          week,
+          team1Name: team1.name,
+          team1Score: pts1,
+          team1Avatar: typeof team1.avatar === "string" ? team1.avatar : undefined,
+          team2Name: team2.name,
+          team2Score: pts2,
+          team2Avatar: typeof team2.avatar === "string" ? team2.avatar : undefined,
+          isFinal: true,
+        },
         leagueId: leagueID,
-        week,
-        team1Name: team1.name,
-        team1Score: pts1,
-        team1Avatar: typeof team1.avatar === "string" ? team1.avatar : undefined,
-        team2Name: team2.name,
-        team2Score: pts2,
-        team2Avatar: typeof team2.avatar === "string" ? team2.avatar : undefined,
-        isFinal: true,
-      },
-      leagueId: leagueID,
-      targetType: "matchup",
-      targetId: `${week}:${matchupID}`,
-      targetLabel: `${team1.name} vs ${team2.name} - Week ${week}`,
-    }).catch((error) => console.error("Error posting final score to feed:", error));
-  }, [loading, team1, team2, leagueID, matchupID, week, nflGameStatusByTeam]);
+        targetType: "matchup",
+        targetId: `${week}:${matchupID}`,
+        targetLabel: `${team1.name} vs ${team2.name} - Week ${week}`,
+      }).catch((error) => console.error("Error posting final score to feed:", error));
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, team1, team2, leagueID, matchupID, week, season, scoringSettings, playersDataForFeed, nflGameStatusByTeam]);
 
   if (!leagueID || !matchupID || !week) return null;
 

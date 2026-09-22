@@ -101,20 +101,23 @@ export default function PostCard({
     ]);
   };
 
-  const goToProfile = isBoogie ? undefined : () => router.push(`/profile/${post.authorUsername}`);
+  // Boogie's profile is tappable too now - it's just scoped to only what
+  // he's actually posted, handled by app/profile/[username].tsx
+  // special-casing his username rather than looking up a real account.
+  const goToProfile = () => router.push(`/profile/${post.authorUsername}`);
 
   if (deleting) return null;
 
   return (
     <View className="flex-row px-4 py-3 border-b border-white/10">
-      <Pressable onPress={goToProfile} disabled={isBoogie} hitSlop={4} className="mr-3">
+      <Pressable onPress={goToProfile} hitSlop={4} className="mr-3">
         <Avatar uid={post.authorUid} url={post.authorAvatar} name={post.authorDisplayName} />
       </Pressable>
 
       <View className="flex-1">
         <View className="flex-row items-center justify-between">
           <View className="flex-row items-center flex-wrap flex-1 mr-2">
-            <Pressable onPress={goToProfile} disabled={isBoogie}>
+            <Pressable onPress={goToProfile}>
               <View className="flex-row items-center gap-1">
                 <Text className="text-white font-bold text-[14px]">{post.authorDisplayName}</Text>
                 {isBoogie && <Feather name="check-circle" size={13} color="#af1222" />}
