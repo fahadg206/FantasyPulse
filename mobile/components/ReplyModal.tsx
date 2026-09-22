@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { View, Text, TextInput, Modal, Pressable, Image, KeyboardAvoidingView, Platform, ActivityIndicator } from "react-native";
+import { View, Text, TextInput, Modal, Pressable, Image, KeyboardAvoidingView, Platform, ActivityIndicator, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { getUserProfile, UserProfile } from "../lib/socialAuth";
@@ -85,13 +85,24 @@ export default function ReplyModal({ visible, onClose, post, currentUid, onRepli
 
   const canSubmit = !!profile && (!!text.trim() || !!imageUri) && !posting;
 
+  const onCancel = () => {
+    if (!text.trim() && !imageUri) {
+      onClose();
+      return;
+    }
+    Alert.alert("Discard reply?", undefined, [
+      { text: "Keep editing", style: "cancel" },
+      { text: "Discard", style: "destructive", onPress: onClose },
+    ]);
+  };
+
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
+    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onCancel}>
       <SafeAreaView className="flex-1 bg-[#0c0c0e]">
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1">
           <View className="flex-row items-center justify-between px-4 py-2 border-b border-white/10">
-            <Pressable onPress={onClose} hitSlop={10}>
-              <Feather name="x" size={24} color="#fff" />
+            <Pressable onPress={onCancel} hitSlop={10}>
+              <Text className="text-white text-[16px]">Cancel</Text>
             </Pressable>
             <Pressable
               onPress={submit}
@@ -101,15 +112,21 @@ export default function ReplyModal({ visible, onClose, post, currentUid, onRepli
               {posting ? (
                 <ActivityIndicator color="#fff" size="small" />
               ) : (
-                <Text className="text-white font-bold text-[13px]">Reply</Text>
+                <Text className="text-white font-bold text-[13px]">Post</Text>
               )}
             </Pressable>
           </View>
 
           <View className="flex-1 px-4 pt-4">
-            {/* The post being replied to - compact and muted, for context only */}
-            <View className="flex-row pb-3">
-              <Avatar uid={post.authorUid} url={post.authorAvatar} name={post.authorDisplayName} size={36} />
+            {/* The post being replied to - a left rail (avatar + a connecting
+                line down to the reply avatar below, like a real Twitter
+                thread) with its name/handle/text and the "Replying to"
+                line in the column beside it. */}
+            <View className="flex-row">
+              <View className="items-center" style={{ width: 36 }}>
+                <Avatar uid={post.authorUid} url={post.authorAvatar} name={post.authorDisplayName} size={36} />
+                <View className="flex-1 w-[2px] bg-white/15 mt-2 mb-1" />
+              </View>
               <View className="flex-1 ml-3">
                 <View className="flex-row items-center flex-wrap gap-1">
                   <Text className="text-gray-300 font-bold text-[13px]">{post.authorDisplayName}</Text>
@@ -120,12 +137,11 @@ export default function ReplyModal({ visible, onClose, post, currentUid, onRepli
                     {post.text}
                   </Text>
                 )}
+                <Text className="text-gray-600 text-[13px] mt-3 mb-3">
+                  Replying to <Text className="text-brand">@{post.authorUsername}</Text>
+                </Text>
               </View>
             </View>
-
-            <Text className="text-gray-600 text-[13px] mb-3">
-              Replying to <Text className="text-brand">@{post.authorUsername}</Text>
-            </Text>
 
             {/* Compose row - avatar + a large growing field, filling the rest of the screen */}
             <View className="flex-row flex-1">
