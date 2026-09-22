@@ -165,8 +165,8 @@ export default function Scoreboard({ leagueID }: { leagueID: string }) {
           const preGame = matchupGameState === "pre";
           const liveGame = matchupGameState === "live";
           const postGame = matchupGameState === "final";
-          const team1Leading = !preGame && team1Points >= team2Points;
-          const team2Leading = !preGame && team2Points >= team1Points;
+          const team1Leading = postGame && team1Points >= team2Points;
+          const team2Leading = postGame && team2Points >= team1Points;
 
           return (
             <Pressable

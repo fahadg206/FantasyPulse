@@ -8,6 +8,13 @@ import { displayName } from "../../../lib/getTopPerformers";
 import { getManagerHistory, ManagerAllTimeStats } from "../../../lib/getManagerHistory";
 import { getCurrentSeasonExtras, CurrentSeasonExtras } from "../../../lib/getCurrentSeasonExtras";
 import { PowerRankingTier } from "../../../lib/powerRankings";
+import {
+  getNflGameStatusByTeam,
+  computeFantasyTeamGameState,
+  combineMatchupGameState,
+  isPastMondayNightCutoff,
+  NflTeamGameState,
+} from "../../../lib/nflGameStatus";
 
 type WeekResult = {
   week: number;
@@ -59,6 +66,10 @@ export default function LeagueManagers() {
           backend.fetchPlayers(leagueID),
         ]);
         const week = nflState.season_type === "post" ? 18 : nflState.display_week || 1;
+        const nflGameStatusByTeam = await getNflGameStatusByTeam(week, nflState.season).catch((error) => {
+          console.error("Error fetching NFL game status:", error);
+          return {} as Record<string, NflTeamGameState>;
+        });
 
         const { updatedScheduleData } = await getMatchupData(leagueID, week, playersData);
         if (cancelled) return;
@@ -78,6 +89,34 @@ export default function LeagueManagers() {
           Array.from({ length: weeksToFetch }, (_, i) => i + 1).map((w) => getMatchupData(leagueID, w, playersData))
         );
 
+        // Whether a week counts as decided by each starter's real NFL game
+        // status, not "both scores happen to still read 0" - the same fix
+        // already applied to the matchup screen/dashboard scoreboard/
+        // schedule: a single early scorer while most of the lineup hasn't
+        // played yet used to be enough to flip a week to "win" or "loss"
+        // well before it was actually over. Only the current week needs
+        // this real check - any earlier week is unconditionally done, and
+        // a future week's scores are 0-0 regardless of which check runs.
+        const isWeekFinal = (weekSchedule: ScheduleData, id: string, w: number): boolean => {
+          if (w < week) return true;
+          if (w > week) return false;
+          const me = weekSchedule[id];
+          const opp = me?.opponent_id ? weekSchedule[me.opponent_id] : undefined;
+          const rosterFullySet = (starters: Starter[]) =>
+            starters.length > 0 && starters.every((s) => s && Object.keys(s).length > 0);
+          const myState = computeFantasyTeamGameState(
+            (me?.starters_full_data ?? []).map((s) => s.team),
+            nflGameStatusByTeam,
+            rosterFullySet(me?.starters_full_data ?? [])
+          );
+          const oppState = computeFantasyTeamGameState(
+            (opp?.starters_full_data ?? []).map((s) => s.team),
+            nflGameStatusByTeam,
+            rosterFullySet(opp?.starters_full_data ?? [])
+          );
+          return combineMatchupGameState(myState, oppState, isPastMondayNightCutoff()) === "final";
+        };
+
         weekData.forEach(({ updatedScheduleData: weekSchedule }, i) => {
           const w = i + 1;
           for (const id of ids) {
@@ -86,7 +125,7 @@ export default function LeagueManagers() {
             const opp = weekSchedule[me.opponent_id];
             const myPts = parseFloat(me.team_points || "0");
             const oppPts = parseFloat(opp?.team_points || "0");
-            const pending = myPts === 0 && oppPts === 0;
+            const pending = !isWeekFinal(weekSchedule, id, w);
             results[id].push({
               week: w,
               opponentName: opp?.name ?? "TBD",

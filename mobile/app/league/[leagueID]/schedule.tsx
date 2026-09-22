@@ -178,8 +178,8 @@ export default function Schedule() {
       const postGame = matchupGameState === "final";
       const status: GameStatus = liveGame ? "live" : postGame ? "final" : "upcoming";
 
-      const team1Leading = !preGame && team1Points >= team2Points;
-      const team2Leading = !preGame && team2Points >= team1Points;
+      const team1Leading = postGame && team1Points >= team2Points;
+      const team2Leading = postGame && team2Points >= team1Points;
 
       const team1Full = scheduleData[team1.user_id ?? ""];
       const team2Full = scheduleData[team2.user_id ?? ""];
