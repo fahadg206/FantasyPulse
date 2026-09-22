@@ -36,6 +36,26 @@ export interface MatchupCard {
   isFinal: boolean;
 }
 
+// The embedded card shown when a post is quoting another one, styled the
+// way X renders a quote-tweet - a bordered mini-card with the quoted
+// author, their text, and their image, below the quoting post's own text.
+// Two distinct cases, both rendered the same way visually:
+//   - postId set: an actual post in this app is being quoted. The card is
+//     tappable and navigates to that post's own thread, same as any other
+//     post-to-post reference here.
+//   - postId absent: quoting something outside this app entirely (a real
+//     tweet from someone with no account here, e.g. Boogie's imported
+//     tweets quoting real X users) - display-only, not tappable, since
+//     there's nowhere in this app for it to navigate to.
+export interface QuotedPostRef {
+  postId?: string;
+  authorDisplayName: string;
+  authorUsername?: string;
+  authorAvatar?: string;
+  text: string;
+  imageUrl?: string;
+}
+
 export interface Post {
   id: string;
   authorUid: string;
@@ -45,6 +65,7 @@ export interface Post {
   text: string;
   imageUrl?: string;
   matchupCard?: MatchupCard;
+  quotedPost?: QuotedPostRef;
   createdAt: string;
   createdAtMs: number;
   leagueId?: string;
@@ -65,6 +86,7 @@ export interface CreatePostInput {
   authorAvatar?: string;
   text: string;
   imageUrl?: string;
+  quotedPost?: QuotedPostRef;
   leagueId?: string;
   targetType?: "matchup" | "trade" | "waiver";
   targetId?: string;
@@ -94,6 +116,7 @@ export async function createPost(input: CreatePostInput): Promise<Post> {
     authorAvatar: input.authorAvatar ?? null,
     text,
     imageUrl: input.imageUrl ?? null,
+    quotedPost: input.quotedPost ?? null,
     createdAt: now.toISOString(),
     createdAtMs: now.getTime(),
     leagueId: input.leagueId ?? null,
@@ -122,6 +145,7 @@ export async function createPost(input: CreatePostInput): Promise<Post> {
     ...data,
     authorAvatar: input.authorAvatar,
     imageUrl: input.imageUrl,
+    quotedPost: input.quotedPost,
     leagueId: input.leagueId,
     targetType: input.targetType,
     targetId: input.targetId,

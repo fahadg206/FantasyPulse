@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { View, Text, Pressable, Image, Share, Alert } from "react-native";
+import { View, Text, Pressable, Share, Alert } from "react-native";
 import { useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import type { Post } from "../lib/posts";
@@ -7,6 +7,7 @@ import { toggleLike, toggleRepost, deletePost, BOOGIE_UID, BOOGIE_USERNAME } fro
 import { formatTwitterTimestamp, formatAbsoluteTimestamp } from "../lib/formatTime";
 import Avatar from "./Avatar";
 import ReplyModal from "./ReplyModal";
+import PostImage from "./PostImage";
 
 // Styled to match Twitter's own mobile feed row as closely as this app's
 // data supports: flush full-width row (no rounded card, unlike the rest of
@@ -177,14 +178,9 @@ export default function PostCard({
 
         {post.matchupCard && <MatchupCardView card={post.matchupCard} />}
 
-        {post.imageUrl && (
-          <Image
-            source={{ uri: post.imageUrl }}
-            className="w-full rounded-2xl mb-3 bg-white/5"
-            style={{ aspectRatio: 16 / 9 }}
-            resizeMode="cover"
-          />
-        )}
+        {post.imageUrl && <PostImage uri={post.imageUrl} className="w-full rounded-2xl mb-3 bg-white/5" />}
+
+        {post.quotedPost && <QuotedPostCard quoted={post.quotedPost} className="mb-3" />}
 
         {post.targetLabel && (
           <Pressable
@@ -276,14 +272,9 @@ export default function PostCard({
 
         {post.matchupCard && <MatchupCardView card={post.matchupCard} />}
 
-        {post.imageUrl && (
-          <Image
-            source={{ uri: post.imageUrl }}
-            className="w-full rounded-2xl mt-2.5 bg-white/5"
-            style={{ aspectRatio: 16 / 9 }}
-            resizeMode="cover"
-          />
-        )}
+        {post.imageUrl && <PostImage uri={post.imageUrl} className="w-full rounded-2xl mt-2.5 bg-white/5" />}
+
+        {post.quotedPost && <QuotedPostCard quoted={post.quotedPost} className="mt-2.5" />}
 
         {post.targetLabel && (
           <Pressable
@@ -340,6 +331,41 @@ export default function PostCard({
 
 // A compact "tweeted scoreboard" - the post-sized version of a matchup,
 // styled like a sports score alert rather than a plain sentence.
+// A quote-tweet, rendered as X does: a bordered mini-card holding the
+// quoted author, their text, and their image, sitting below the quoting
+// post's own content. Tappable and navigates to that post's own thread
+// only when quoted.postId is set (an actual post in this app) - quoting
+// something outside the app entirely (Boogie's imported tweets, quoting
+// real X users with no account here) has nowhere to navigate to, so that
+// case renders identically but isn't pressable.
+function QuotedPostCard({ quoted, className }: { quoted: NonNullable<Post["quotedPost"]>; className?: string }) {
+  const router = useRouter();
+  const isInternal = !!quoted.postId;
+
+  const content = (
+    <View className={`rounded-2xl border border-white/10 overflow-hidden p-3 ${className ?? ""}`}>
+      <View className="flex-row items-center gap-2 mb-1.5">
+        <Avatar url={quoted.authorAvatar} name={quoted.authorDisplayName} size={20} />
+        <Text numberOfLines={1} className="text-white text-[13px] font-bold flex-1">
+          {quoted.authorDisplayName}
+        </Text>
+        {quoted.authorUsername && (
+          <Text numberOfLines={1} className="text-gray-500 text-[12px]">
+            @{quoted.authorUsername}
+          </Text>
+        )}
+      </View>
+      {!!quoted.text && <Text className="text-gray-300 text-[13px] leading-[18px]">{quoted.text}</Text>}
+      {quoted.imageUrl && (
+        <PostImage uri={quoted.imageUrl} className="w-full rounded-xl mt-2 bg-white/5" />
+      )}
+    </View>
+  );
+
+  if (!isInternal) return content;
+  return <Pressable onPress={() => router.push(`/post/${quoted.postId}`)}>{content}</Pressable>;
+}
+
 function MatchupCardView({ card }: { card: Post["matchupCard"] }) {
   if (!card) return null;
   const team1Winning = card.team1Score > card.team2Score;
