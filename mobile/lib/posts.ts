@@ -13,6 +13,8 @@ import {
   getDocs,
 } from "firebase/firestore/lite";
 import { db } from "./firebase";
+import { notify } from "./notifications";
+import { getUserProfile } from "./socialAuth";
 
 // One unified model for both "comment on a specific matchup/trade" and
 // "post to the public feed": a post with no target is a standalone feed
@@ -134,10 +136,23 @@ export async function createPost(input: CreatePostInput): Promise<Post> {
   if (input.parentPostId) {
     const parentRef = doc(db, "posts", input.parentPostId);
     const parentSnap = await getDoc(parentRef);
-    const currentReplyCount = (parentSnap.data()?.replyCount as number) ?? 0;
+    const parent = parentSnap.data();
+    const currentReplyCount = (parent?.replyCount as number) ?? 0;
     await updateDoc(parentRef, { replyCount: currentReplyCount + 1 }).catch((error) =>
       console.error("Error updating parent reply count:", error)
     );
+    if (parent?.authorUid) {
+      notify({
+        recipientUid: parent.authorUid,
+        type: "reply",
+        actorUid: input.authorUid,
+        actorDisplayName: input.authorDisplayName,
+        actorUsername: input.authorUsername,
+        actorAvatar: input.authorAvatar,
+        postId: input.parentPostId,
+        postTextPreview: text,
+      }).catch((error) => console.error("Error sending reply notification:", error));
+    }
   }
 
   return {
@@ -339,6 +354,26 @@ export async function toggleLike(postId: string, uid: string): Promise<boolean> 
 
   await setDoc(likeRef, { postId, uid, createdAt: new Date().toISOString() });
   await updateDoc(postRef, { likeCount: currentCount + 1 });
+
+  const authorUid = postSnap.data()?.authorUid as string | undefined;
+  if (authorUid) {
+    getUserProfile(uid)
+      .then((liker) => {
+        if (!liker) return;
+        return notify({
+          recipientUid: authorUid,
+          type: "like",
+          actorUid: uid,
+          actorDisplayName: liker.displayName,
+          actorUsername: liker.username,
+          actorAvatar: liker.avatar,
+          postId,
+          postTextPreview: postSnap.data()?.text as string | undefined,
+        });
+      })
+      .catch((error) => console.error("Error sending like notification:", error));
+  }
+
   return true;
 }
 
@@ -366,5 +401,25 @@ export async function toggleRepost(postId: string, uid: string): Promise<boolean
 
   await setDoc(repostRef, { postId, uid, createdAt: new Date().toISOString() });
   await updateDoc(postRef, { repostCount: currentCount + 1 });
+
+  const authorUid = postSnap.data()?.authorUid as string | undefined;
+  if (authorUid) {
+    getUserProfile(uid)
+      .then((reposter) => {
+        if (!reposter) return;
+        return notify({
+          recipientUid: authorUid,
+          type: "repost",
+          actorUid: uid,
+          actorDisplayName: reposter.displayName,
+          actorUsername: reposter.username,
+          actorAvatar: reposter.avatar,
+          postId,
+          postTextPreview: postSnap.data()?.text as string | undefined,
+        });
+      })
+      .catch((error) => console.error("Error sending repost notification:", error));
+  }
+
   return true;
 }

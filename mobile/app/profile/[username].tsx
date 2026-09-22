@@ -4,9 +4,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import type { User } from "firebase/auth";
-import { onAuthChange, isReadOnly, getUserProfileByUsername, ensureAvatarSynced, UserProfile } from "../../lib/socialAuth";
+import { onAuthChange, isReadOnly, getUserProfile, getUserProfileByUsername, ensureAvatarSynced, UserProfile } from "../../lib/socialAuth";
 import { getFantasyProfileStats, FantasyProfileStats } from "../../lib/fantasyProfile";
 import { followUser, unfollowUser, isFollowing, getFollowingUids, getFollowerUids } from "../../lib/follows";
+import { getOrCreateConversation } from "../../lib/messages";
 import { getPostsByAuthor, isPostLiked, isPostReposted, BOOGIE_UID, BOOGIE_USERNAME, BOOGIE_SLEEPER_USER_ID, Post } from "../../lib/posts";
 import ProfileActivity from "../../components/ProfileActivity";
 import ProfileTabbedPosts from "../../components/ProfileTabbedPosts";
@@ -153,6 +154,7 @@ export default function PublicProfile() {
   const [following, setFollowing] = useState(false);
   const [followsYou, setFollowsYou] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
+  const [messageBusy, setMessageBusy] = useState(false);
   const [followCounts, setFollowCounts] = useState({ following: 0, followers: 0 });
 
   useEffect(() => onAuthChange(setAuthUser), []);
@@ -206,6 +208,24 @@ export default function PublicProfile() {
       console.error("Error toggling follow:", error);
     } finally {
       setFollowBusy(false);
+    }
+  };
+
+  const openMessage = async () => {
+    if (!authUser || isReadOnly(authUser) || !profile || messageBusy) return;
+    setMessageBusy(true);
+    try {
+      const me = await getUserProfile(authUser.uid);
+      if (!me) return;
+      const conversationId = await getOrCreateConversation(
+        { uid: me.uid, displayName: me.displayName, username: me.username, avatar: me.avatar },
+        { uid: profile.uid, displayName: profile.displayName, username: profile.username, avatar: profile.avatar }
+      );
+      router.push({ pathname: "/messages/[conversationId]", params: { conversationId } } as any);
+    } catch (error) {
+      console.error("Error starting conversation:", error);
+    } finally {
+      setMessageBusy(false);
     }
   };
 
@@ -274,19 +294,30 @@ export default function PublicProfile() {
         </View>
 
         {canFollow && (
-          <Pressable
-            onPress={toggleFollow}
-            disabled={followBusy}
-            className={`mt-4 px-6 py-2.5 rounded-full ${following ? "bg-transparent border border-white/20" : "bg-brand"}`}
-          >
-            {followBusy ? (
-              <ActivityIndicator color={following ? "#fff" : "#fff"} size="small" />
-            ) : (
-              <Text className={`font-bold text-[13px] ${following ? "text-white" : "text-white"}`}>
-                {following ? "Following" : "Follow"}
-              </Text>
-            )}
-          </Pressable>
+          <View className="flex-row gap-2 mt-4">
+            <Pressable
+              onPress={openMessage}
+              disabled={messageBusy}
+              className="px-5 py-2.5 rounded-full border border-white/20 items-center justify-center"
+            >
+              {messageBusy ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Feather name="mail" size={15} color="#fff" />
+              )}
+            </Pressable>
+            <Pressable
+              onPress={toggleFollow}
+              disabled={followBusy}
+              className={`px-6 py-2.5 rounded-full ${following ? "bg-transparent border border-white/20" : "bg-brand"}`}
+            >
+              {followBusy ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text className="font-bold text-[13px] text-white">{following ? "Following" : "Follow"}</Text>
+              )}
+            </Pressable>
+          </View>
         )}
       </View>
 

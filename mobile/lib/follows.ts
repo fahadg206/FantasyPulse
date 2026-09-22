@@ -1,5 +1,7 @@
 import { doc, getDoc, setDoc, deleteDoc, collection, query, where, getDocs } from "firebase/firestore/lite";
 import { db } from "./firebase";
+import { getUserProfile } from "./socialAuth";
+import { notify } from "./notifications";
 
 // The social graph: which app users (by Firebase uid, from socialAuth.ts's
 // profiles) follow which. One doc per relationship, keyed so it's directly
@@ -16,6 +18,22 @@ export async function followUser(followerUid: string, followedUid: string): Prom
     followedUid,
     createdAt: new Date().toISOString(),
   });
+
+  // Best-effort - the follow itself has already succeeded above regardless
+  // of whether this lookup/write works.
+  getUserProfile(followerUid)
+    .then((follower) => {
+      if (!follower) return;
+      return notify({
+        recipientUid: followedUid,
+        type: "follow",
+        actorUid: followerUid,
+        actorDisplayName: follower.displayName,
+        actorUsername: follower.username,
+        actorAvatar: follower.avatar,
+      });
+    })
+    .catch((error) => console.error("Error sending follow notification:", error));
 }
 
 export async function unfollowUser(followerUid: string, followedUid: string): Promise<void> {
