@@ -239,14 +239,20 @@ export default function PublicProfile() {
           {profile.bio && <Text className="text-gray-300 text-[13px] mt-2 text-center px-6">{profile.bio}</Text>}
 
           <View className="flex-row gap-6 mt-4">
-            <View className="items-center">
+            <Pressable
+              onPress={() => router.push({ pathname: "/profile/connections", params: { username: profile.username, type: "following" } })}
+              className="items-center"
+            >
               <Text className="text-white font-bold text-[15px]">{followCounts.following}</Text>
               <Text className="text-gray-500 text-[11px]">Following</Text>
-            </View>
-            <View className="items-center">
+            </Pressable>
+            <Pressable
+              onPress={() => router.push({ pathname: "/profile/connections", params: { username: profile.username, type: "followers" } })}
+              className="items-center"
+            >
               <Text className="text-white font-bold text-[15px]">{followCounts.followers}</Text>
               <Text className="text-gray-500 text-[11px]">Followers</Text>
-            </View>
+            </Pressable>
           </View>
 
           {canFollow && (
