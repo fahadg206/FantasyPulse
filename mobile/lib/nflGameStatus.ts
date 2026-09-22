@@ -100,6 +100,8 @@ export interface LiveGameDetail {
   state: NflTeamGameState;
   opponentAbbr?: string;
   isHome: boolean;
+  /** this game's real kickoff time, ISO - the one thing worth showing per-player before kickoff, when there's no live state yet to report */
+  kickoff?: string;
   teamScore: number;
   opponentScore: number;
   period: number;
@@ -151,6 +153,7 @@ export async function getLiveGameDetailsByTeam(
         state,
         opponentAbbr: opponent?.team?.abbreviation,
         isHome: competitor.homeAway === "home",
+        kickoff: comp?.date,
         teamScore: Number(competitor.score ?? 0),
         opponentScore: Number(opponent?.score ?? 0),
         period,

@@ -14,6 +14,7 @@ import {
   LiveGameDetail,
 } from "../../../lib/nflGameStatus";
 import { getWeeklyPlayerStats, formatBoxScoreLine, RawPlayerStats } from "../../../lib/playerBoxScore";
+import { formatGameKickoff } from "../../../lib/formatTime";
 import SchedulePoll from "../../../components/SchedulePoll";
 import MatchupPredictorRing from "../../../components/MatchupPredictorRing";
 import { getTeamColor, getTeamLogo } from "../../../lib/nflTeams";
@@ -621,13 +622,23 @@ function getPlayerDetailContent(
   liveGameDetailsByTeam: Record<string, LiveGameDetail>,
   weeklyPlayerStats: Record<string, RawPlayerStats>
 ): PlayerDetailContent | null {
-  if (!player || !player.team || player.pos === "DEF" || player.pos === "K") return null;
+  if (!player || !player.team) return null;
   const detail = liveGameDetailsByTeam[player.team];
-  if (!detail || detail.state === "pre") return null;
+  if (!detail) return null;
 
-  const isLive = detail.state === "in";
   const opp = detail.opponentAbbr ?? "";
   const vsAt = detail.isHome ? "vs" : "@";
+
+  // Pre-kickoff, there's no live/final result to report yet - the useful
+  // thing to show instead is when this player's own game actually kicks
+  // off and who it's against, same as the day/time/opponent line real
+  // matchup previews show per player.
+  if (detail.state === "pre") {
+    const resultLine = detail.kickoff ? `${formatGameKickoff(detail.kickoff)} ${vsAt} ${opp}` : `${vsAt} ${opp}`;
+    return { isLive: false, resultLine, boxScoreLine: null, showFieldBar: false, yardLine: 0 };
+  }
+
+  const isLive = detail.state === "in";
   const resultLine = isLive
     ? `Q${detail.period} ${detail.displayClock} ${detail.teamScore}-${detail.opponentScore} ${vsAt} ${opp}`
     : `${detail.teamScore > detail.opponentScore ? "W" : detail.teamScore < detail.opponentScore ? "L" : "T"} ${detail.teamScore}-${detail.opponentScore} ${vsAt} ${opp}`;

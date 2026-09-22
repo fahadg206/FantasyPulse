@@ -21,6 +21,14 @@ export function formatTwitterTimestamp(ms: number): string {
   });
 }
 
+/** "Sun 10:00 AM" - a game's kickoff, in the device's own local time (the ISO timestamp ESPN gives is UTC, `Date` converts it automatically). Used on the matchup detail page for a starter whose game hasn't kicked off yet, when there's no live state to show instead. */
+export function formatGameKickoff(iso: string): string {
+  const date = new Date(iso);
+  const weekday = date.toLocaleDateString("en-US", { weekday: "short" });
+  const time = date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  return `${weekday} ${time}`;
+}
+
 /** "9:41 PM · 8/22/26" - the full timestamp shown on a post's own expanded/detail view, not the relative one used in a feed row */
 export function formatAbsoluteTimestamp(ms: number): string {
   const date = new Date(ms);
