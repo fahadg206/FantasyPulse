@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { View, Text, Image, ScrollView, ActivityIndicator, Pressable } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { Feather } from "@expo/vector-icons";
@@ -6,12 +6,14 @@ import { sleeper } from "../../../lib/api";
 import getMatchupData, { ScheduleData, Starter } from "../../../lib/getMatchupData";
 import { getTopPerformers, TopPerformer, displayName } from "../../../lib/getTopPerformers";
 import {
-  getNflGameStatusByTeam,
+  getLiveGameDetailsByTeam,
   computeFantasyTeamGameState,
   combineMatchupGameState,
   isPastMondayNightCutoff,
   NflTeamGameState,
+  LiveGameDetail,
 } from "../../../lib/nflGameStatus";
+import { getWeeklyPlayerStats, formatBoxScoreLine, RawPlayerStats } from "../../../lib/playerBoxScore";
 import SchedulePoll from "../../../components/SchedulePoll";
 import MatchupPredictorRing from "../../../components/MatchupPredictorRing";
 import { getTeamColor, getTeamLogo } from "../../../lib/nflTeams";
@@ -68,7 +70,12 @@ export default function MatchupDetail() {
   const [scoringSettings, setScoringSettings] = useState<{ [stat: string]: number }>({});
   const [feedOpen, setFeedOpen] = useState(false);
   const [playersDataForFeed, setPlayersDataForFeed] = useState<Record<string, any>>({});
-  const [nflGameStatusByTeam, setNflGameStatusByTeam] = useState<Record<string, NflTeamGameState>>({});
+  const [liveGameDetailsByTeam, setLiveGameDetailsByTeam] = useState<Record<string, LiveGameDetail>>({});
+  const [weeklyPlayerStats, setWeeklyPlayerStats] = useState<Record<string, RawPlayerStats>>({});
+  const nflGameStatusByTeam: Record<string, NflTeamGameState> = useMemo(
+    () => Object.fromEntries(Object.entries(liveGameDetailsByTeam).map(([abbr, detail]) => [abbr, detail.state])),
+    [liveGameDetailsByTeam]
+  );
 
   useEffect(() => {
     if (!leagueID || !matchupID || !week) return;
@@ -87,11 +94,16 @@ export default function MatchupDetail() {
         setScheduleData(updatedScheduleData);
         setPlayersDataForFeed(playersData || {});
 
-        getNflGameStatusByTeam(week, nflState.season)
-          .then((statusByTeam) => {
-            if (!cancelled) setNflGameStatusByTeam(statusByTeam);
+        getLiveGameDetailsByTeam(week, nflState.season)
+          .then((details) => {
+            if (!cancelled) setLiveGameDetailsByTeam(details);
           })
           .catch((error) => console.error("Error fetching NFL game status:", error));
+        getWeeklyPlayerStats(nflState.season, week)
+          .then((stats) => {
+            if (!cancelled) setWeeklyPlayerStats(stats);
+          })
+          .catch((error) => console.error("Error fetching weekly player stats:", error));
         const teams = matchupMap.get(matchupID);
         const t1 = teams?.[0]?.user_id ?? null;
         const t2 = teams?.[1]?.user_id ?? null;
@@ -397,7 +409,14 @@ export default function MatchupDetail() {
         <SectionHeader title="Starters" week={week} />
         <View className="px-3">
           {Array.from({ length: rowCount }, (_, i) => (
-            <MatchupRow key={i} left={starters1[i]} right={starters2[i]} slot={slots[i]} />
+            <MatchupRow
+              key={i}
+              left={starters1[i]}
+              right={starters2[i]}
+              slot={slots[i]}
+              liveGameDetailsByTeam={liveGameDetailsByTeam}
+              weeklyPlayerStats={weeklyPlayerStats}
+            />
           ))}
         </View>
 
@@ -408,7 +427,14 @@ export default function MatchupDetail() {
             </View>
             <View className="px-3">
               {Array.from({ length: benchRowCount }, (_, i) => (
-                <MatchupRow key={i} left={bench1[i]} right={bench2[i]} dimmed />
+                <MatchupRow
+                  key={i}
+                  left={bench1[i]}
+                  right={bench2[i]}
+                  dimmed
+                  liveGameDetailsByTeam={liveGameDetailsByTeam}
+                  weeklyPlayerStats={weeklyPlayerStats}
+                />
               ))}
             </View>
           </>
@@ -506,6 +532,81 @@ function TopPerformerCard({ performer, align = "left" }: { performer: TopPerform
   );
 }
 
+interface PlayerDetailContent {
+  isLive: boolean;
+  resultLine: string;
+  boxScoreLine: string | null;
+  showFieldBar: boolean;
+  yardLine: number;
+}
+
+// Precomputed once per player so MatchupRow can decide whether the whole
+// detail row is worth rendering at all (nothing to show pre-kickoff)
+// before PlayerDetail renders its half of it.
+function getPlayerDetailContent(
+  player: Starter | undefined,
+  liveGameDetailsByTeam: Record<string, LiveGameDetail>,
+  weeklyPlayerStats: Record<string, RawPlayerStats>
+): PlayerDetailContent | null {
+  if (!player || !player.team || player.pos === "DEF" || player.pos === "K") return null;
+  const detail = liveGameDetailsByTeam[player.team];
+  if (!detail || detail.state === "pre") return null;
+
+  const isLive = detail.state === "in";
+  const opp = detail.opponentAbbr ?? "";
+  const vsAt = detail.isHome ? "vs" : "@";
+  const resultLine = isLive
+    ? `Q${detail.period} ${detail.displayClock} ${detail.teamScore}-${detail.opponentScore} ${vsAt} ${opp}`
+    : `${detail.teamScore > detail.opponentScore ? "W" : detail.teamScore < detail.opponentScore ? "L" : "T"} ${detail.teamScore}-${detail.opponentScore} ${vsAt} ${opp}`;
+
+  const stats = player.id ? weeklyPlayerStats[player.id] : undefined;
+  const boxScoreLine = formatBoxScoreLine(player.pos, stats);
+  const showFieldBar = isLive && detail.hasPossession && detail.yardLine !== undefined;
+
+  return { isLive, resultLine, boxScoreLine, showFieldBar, yardLine: detail.yardLine ?? 0 };
+}
+
+function FieldPositionBar({ yardLine }: { yardLine: number }) {
+  const pct = Math.min(100, Math.max(0, yardLine));
+  return (
+    <View className="w-full mt-1.5">
+      <View className="h-[5px] rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
+        <View style={{ width: `${pct}%` }} className="h-full bg-brand rounded-full" />
+      </View>
+      <Text className="text-[8px] font-bold tracking-wide text-gray-400 dark:text-gray-600 mt-0.5 text-right">
+        END ZONE
+      </Text>
+    </View>
+  );
+}
+
+function PlayerDetail({ content, align }: { content: PlayerDetailContent | null; align: "left" | "right" }) {
+  if (!content) return <View className="flex-1" />;
+  return (
+    <View className={`flex-1 ${align === "right" ? "items-end" : "items-start"}`}>
+      <View className={`flex-row items-center gap-1 ${align === "right" ? "flex-row-reverse" : ""}`}>
+        {content.isLive && <View className="w-[5px] h-[5px] rounded-full bg-brand" />}
+        <Text
+          numberOfLines={1}
+          style={{ color: content.isLive ? "#e2465a" : "#6b7280" }}
+          className="text-[10px] font-semibold"
+        >
+          {content.resultLine}
+        </Text>
+      </View>
+      {content.showFieldBar && <FieldPositionBar yardLine={content.yardLine} />}
+      {content.boxScoreLine && (
+        <Text
+          numberOfLines={2}
+          className={`text-[10px] text-gray-500 mt-0.5 ${align === "right" ? "text-right" : "text-left"}`}
+        >
+          {content.boxScoreLine}
+        </Text>
+      )}
+    </View>
+  );
+}
+
 function PlayerHalf({ player, align }: { player?: Starter; align: "left" | "right" }) {
   if (!player || Object.keys(player).length === 0) {
     return (
@@ -578,21 +679,53 @@ function PlayerHalf({ player, align }: { player?: Starter; align: "left" | "righ
   );
 }
 
-function MatchupRow({ left, right, slot, dimmed }: { left?: Starter; right?: Starter; slot?: string; dimmed?: boolean }) {
+function MatchupRow({
+  left,
+  right,
+  slot,
+  dimmed,
+  liveGameDetailsByTeam,
+  weeklyPlayerStats,
+}: {
+  left?: Starter;
+  right?: Starter;
+  slot?: string;
+  dimmed?: boolean;
+  liveGameDetailsByTeam: Record<string, LiveGameDetail>;
+  weeklyPlayerStats: Record<string, RawPlayerStats>;
+}) {
   const badgeLabel = slot ? slotLabel(slot) : (left?.pos ?? right?.pos ?? "");
   const badgeColor = POSITION_COLOR[badgeLabel] ?? POSITION_COLOR[left?.pos ?? right?.pos ?? ""] ?? "#9ca3af";
 
+  const leftContent = getPlayerDetailContent(left, liveGameDetailsByTeam, weeklyPlayerStats);
+  const rightContent = getPlayerDetailContent(right, liveGameDetailsByTeam, weeklyPlayerStats);
+  const rowIsLive = !!leftContent?.isLive || !!rightContent?.isLive;
+
   return (
-    <View className={`flex-row items-center py-2.5 border-b border-gray-100 dark:border-white/5 ${dimmed ? "opacity-70" : ""}`}>
-      <PlayerHalf player={left} align="left" />
-      {badgeLabel ? (
-        <View style={{ backgroundColor: badgeColor }} className="rounded px-1.5 py-0.5 mx-2 min-w-[34px] items-center">
-          <Text className="text-white text-[9px] font-bold">{badgeLabel}</Text>
+    <View
+      className={`py-2.5 border-b border-gray-100 dark:border-white/5 ${dimmed ? "opacity-70" : ""} ${
+        rowIsLive ? "bg-brand/5" : ""
+      }`}
+    >
+      <View className="flex-row items-center">
+        <PlayerHalf player={left} align="left" />
+        {badgeLabel ? (
+          <View style={{ backgroundColor: badgeColor }} className="rounded px-1.5 py-0.5 mx-2 min-w-[34px] items-center">
+            <Text className="text-white text-[9px] font-bold">{badgeLabel}</Text>
+          </View>
+        ) : (
+          <View className="mx-2 w-[34px]" />
+        )}
+        <PlayerHalf player={right} align="right" />
+      </View>
+
+      {(leftContent || rightContent) && (
+        <View className="flex-row items-start mt-1.5">
+          <PlayerDetail content={leftContent} align="left" />
+          <View className="mx-2 w-[34px]" />
+          <PlayerDetail content={rightContent} align="right" />
         </View>
-      ) : (
-        <View className="mx-2 w-[34px]" />
       )}
-      <PlayerHalf player={right} align="right" />
     </View>
   );
 }

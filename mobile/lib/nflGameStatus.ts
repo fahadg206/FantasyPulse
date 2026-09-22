@@ -85,6 +85,80 @@ export function isPastMondayNightCutoff(now: Date = new Date()): boolean {
   return pacific.getHours() >= 22;
 }
 
+export interface LiveGameDetail {
+  state: NflTeamGameState;
+  opponentAbbr?: string;
+  isHome: boolean;
+  teamScore: number;
+  opponentScore: number;
+  period: number;
+  displayClock: string;
+  down?: number;
+  distance?: number;
+  downDistanceText?: string;
+  /** 0 = this team's own goal line, 100 = the end zone they're driving toward - straight off ESPN's own scale, already oriented to whichever team has the ball */
+  yardLine?: number;
+  isRedZone?: boolean;
+  /** true when this team currently has the ball */
+  hasPossession: boolean;
+}
+
+/**
+ * The richer live picture behind each starter's row: score, clock, down and
+ * distance, and field position - not just the pre/live/final state
+ * getNflGameStatusByTeam gives. Same ESPN scoreboard endpoint, so it's
+ * abbreviation-normalized the same way; a separate fetch from
+ * getNflGameStatusByTeam rather than sharing one, since the two are called
+ * from different places and this one is only needed where the richer
+ * per-player game card is actually shown.
+ */
+export async function getLiveGameDetailsByTeam(
+  week: number,
+  season: string | number
+): Promise<Record<string, LiveGameDetail>> {
+  const res = await fetch(
+    `https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?week=${week}&seasontype=2&year=${season}`
+  );
+  if (!res.ok) throw new Error(`ESPN scoreboard request failed: ${res.status}`);
+  const data = await res.json();
+
+  const map: Record<string, LiveGameDetail> = {};
+  for (const event of data.events || []) {
+    const comp = event.competitions?.[0];
+    const state = comp?.status?.type?.state as NflTeamGameState | undefined;
+    if (!state) continue;
+    const period = comp?.status?.period ?? 0;
+    const displayClock = comp?.status?.displayClock ?? "";
+    const situation = comp?.situation;
+    const competitors = comp?.competitors ?? [];
+
+    for (const competitor of competitors) {
+      const abbr = competitor?.team?.abbreviation;
+      if (!abbr) continue;
+      const opponent = competitors.find((c: any) => c !== competitor);
+      const detail: LiveGameDetail = {
+        state,
+        opponentAbbr: opponent?.team?.abbreviation,
+        isHome: competitor.homeAway === "home",
+        teamScore: Number(competitor.score ?? 0),
+        opponentScore: Number(opponent?.score ?? 0),
+        period,
+        displayClock,
+        down: situation?.down,
+        distance: situation?.distance,
+        downDistanceText: situation?.downDistanceText,
+        yardLine: situation?.yardLine,
+        isRedZone: situation?.isRedZone,
+        hasPossession: !!situation?.possession && situation.possession === competitor.team?.id,
+      };
+      map[abbr] = detail;
+      const sleeperAbbr = ESPN_TO_SLEEPER_ABBREVIATION[abbr];
+      if (sleeperAbbr) map[sleeperAbbr] = detail;
+    }
+  }
+  return map;
+}
+
 export function combineMatchupGameState(
   team1: NflTeamGameState,
   team2: NflTeamGameState,
