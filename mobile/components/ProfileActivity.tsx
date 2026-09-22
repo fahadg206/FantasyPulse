@@ -1,10 +1,20 @@
 import { useEffect, useState } from "react";
-import { View, Text, Pressable, ActivityIndicator } from "react-native";
+import { View, Text, Pressable, Image, ActivityIndicator } from "react-native";
 import { useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import type { FantasyProfileStats } from "../lib/fantasyProfile";
-import { getTopRosteredPlayers, getRecentAcquisitions, getWeeklyMatchups, TopRosteredPlayer, RecentAcquisition, WeeklyMatchup } from "../lib/profileActivity";
+import {
+  getTopRosteredPlayers,
+  getRecentAcquisitions,
+  getWeeklyMatchups,
+  getCareerStats,
+  TopRosteredPlayer,
+  RecentAcquisition,
+  WeeklyMatchup,
+  CareerStats,
+} from "../lib/profileActivity";
 import { formatTwitterTimestamp } from "../lib/formatTime";
+import { getTeamLogo } from "../lib/nflTeams";
 import Avatar from "./Avatar";
 
 const POSITION_COLOR: Record<string, string> = {
@@ -34,6 +44,7 @@ export default function ProfileActivity({ sleeperUserId, stats }: { sleeperUserI
   const [matchups, setMatchups] = useState<WeeklyMatchup[] | null>(null);
   const [topPlayers, setTopPlayers] = useState<TopRosteredPlayer[] | null>(null);
   const [acquisitions, setAcquisitions] = useState<RecentAcquisition[] | null>(null);
+  const [career, setCareer] = useState<CareerStats | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,6 +59,9 @@ export default function ProfileActivity({ sleeperUserId, stats }: { sleeperUserI
     getRecentAcquisitions(sleeperUserId, leagues, 5)
       .then((r) => !cancelled && setAcquisitions(r))
       .catch(console.error);
+    getCareerStats(sleeperUserId, leagues)
+      .then((r) => !cancelled && setCareer(r))
+      .catch(console.error);
 
     return () => {
       cancelled = true;
@@ -57,6 +71,21 @@ export default function ProfileActivity({ sleeperUserId, stats }: { sleeperUserI
 
   return (
     <View>
+      {/* Career - leagues count front and center, plus all-time record */}
+      <View className="flex-row bg-[#141416] rounded-2xl border border-white/10 mb-4 overflow-hidden">
+        <CareerStat value={stats.totals.leaguesCount} label="Leagues" />
+        <CareerStat
+          value={career ? `${(career.winPct * 100).toFixed(0)}%` : "-"}
+          label="Win Rate"
+        />
+        <CareerStat value={career ? career.playoffAppearances : "-"} label="Playoffs" />
+        <CareerStat
+          value={!career ? "-" : career.championships > 0 ? `${career.championships} 🏆` : "0"}
+          label="Titles"
+          last
+        />
+      </View>
+
       {/* This Week's Matchups */}
       {matchups === null ? (
         <View className="items-center py-6">
@@ -102,24 +131,28 @@ export default function ProfileActivity({ sleeperUserId, stats }: { sleeperUserI
         <Card>
           <SectionLabel>TOP ROSTERED PLAYERS</SectionLabel>
           <View className="gap-2.5">
-            {topPlayers.map((p) => (
-              <View key={p.playerId} className="flex-row items-center justify-between">
-                <View className="flex-row items-center gap-2 flex-1 mr-2">
-                  <Text
-                    style={{ color: POSITION_COLOR[p.pos ?? ""] ?? "#9ca3af" }}
-                    className="text-[10px] font-extrabold w-7"
-                  >
-                    {p.pos ?? "-"}
-                  </Text>
-                  <Text numberOfLines={1} className="text-white text-[13px] font-semibold flex-1">
-                    {p.name}
+            {topPlayers.map((p) => {
+              const logo = getTeamLogo(p.team);
+              return (
+                <View key={p.playerId} className="flex-row items-center justify-between">
+                  <View className="flex-row items-center gap-2 flex-1 mr-2">
+                    <Text
+                      style={{ color: POSITION_COLOR[p.pos ?? ""] ?? "#9ca3af" }}
+                      className="text-[10px] font-extrabold w-7"
+                    >
+                      {p.pos ?? "-"}
+                    </Text>
+                    {logo && <Image source={{ uri: logo }} className="w-[18px] h-[18px]" resizeMode="contain" />}
+                    <Text numberOfLines={1} className="text-white text-[13px] font-semibold flex-1">
+                      {p.name}
+                    </Text>
+                  </View>
+                  <Text className="text-gray-500 text-[11px]">
+                    {p.leagueCount} of {stats.totals.leaguesCount} leagues
                   </Text>
                 </View>
-                <Text className="text-gray-500 text-[11px]">
-                  {p.leagueCount} of {stats.totals.leaguesCount} leagues
-                </Text>
-              </View>
-            ))}
+              );
+            })}
           </View>
         </Card>
       ) : null}
@@ -146,7 +179,7 @@ export default function ProfileActivity({ sleeperUserId, stats }: { sleeperUserI
       ) : null}
 
       {/* Leagues */}
-      <SectionLabel>{stats.season} SEASON · {stats.totals.leaguesCount} LEAGUES</SectionLabel>
+      <SectionLabel>{stats.season} SEASON</SectionLabel>
       {stats.leagues.map((l) => (
         <Pressable
           key={l.leagueId}
@@ -175,6 +208,15 @@ export default function ProfileActivity({ sleeperUserId, stats }: { sleeperUserI
           <Feather name="chevron-right" size={16} color="#6b7280" />
         </Pressable>
       ))}
+    </View>
+  );
+}
+
+function CareerStat({ value, label, last }: { value: string | number; label: string; last?: boolean }) {
+  return (
+    <View className={`flex-1 items-center py-3.5 ${!last ? "border-r border-white/10" : ""}`}>
+      <Text className="text-white font-extrabold text-[16px]">{value}</Text>
+      <Text className="text-gray-500 text-[10px] mt-0.5">{label}</Text>
     </View>
   );
 }

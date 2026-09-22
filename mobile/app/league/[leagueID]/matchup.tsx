@@ -21,6 +21,7 @@ import MatchupFeed from "../../../components/MatchupFeed";
 import CommentsSection from "../../../components/CommentsSection";
 import useBigPlayFeed from "../../../lib/useBigPlayFeed";
 import { ensureSystemPost } from "../../../lib/posts";
+import { finalScoreText } from "../../../lib/announceTransactions";
 
 const POSITION_COLOR: Record<string, string> = {
   QB: "#ef4444",
@@ -172,10 +173,7 @@ export default function MatchupDetail() {
 
     const pts1 = parseFloat(team1.team_points || "0");
     const pts2 = parseFloat(team2.team_points || "0");
-    const winner = pts1 === pts2 ? null : pts1 > pts2 ? team1.name : team2.name;
-    const text = winner
-      ? `🏈 FINAL: ${team1.name} ${pts1.toFixed(2)} - ${team2.name} ${pts2.toFixed(2)}. ${winner} takes it.`
-      : `🏈 FINAL: ${team1.name} ${pts1.toFixed(2)} - ${team2.name} ${pts2.toFixed(2)}. Deadlocked.`;
+    const text = finalScoreText(team1.name, pts1, team2.name, pts2);
 
     ensureSystemPost({
       id: `matchup_${leagueID}_${week}_${matchupID}`,

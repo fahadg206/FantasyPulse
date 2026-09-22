@@ -9,7 +9,7 @@ import { sleeper } from "../../../lib/api";
 import getMatchupData from "../../../lib/getMatchupData";
 import { storage, StorageKeys } from "../../../lib/storage";
 import ArticleCarousel from "../../../components/ArticleCarousel";
-import HomeCarousel from "../../../components/HomeCarousel";
+import FeedPreview from "../../../components/FeedPreview";
 import HomePoll from "../../../components/HomePoll";
 import TransactionsTicker from "../../../components/TransactionsTicker";
 import TrendingPlayers from "../../../components/TrendingPlayers";
@@ -258,7 +258,7 @@ export default function Dashboard() {
       </View>
 
       <View className="pt-7">
-        <HomeCarousel leagueID={leagueID} />
+        <FeedPreview />
       </View>
 
       <View className="pt-7">
