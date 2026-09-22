@@ -28,7 +28,16 @@ const PROFILE_TAB_EMPTY: Record<ProfileTab, string> = {
 // - not on Boogie's profile, which only ever needed the one "Posts" list
 // since he's a staff-writer persona rather than someone who likes/reposts
 // other managers' posts.
-export default function ProfileTabbedPosts({ profileUid, currentUid }: { profileUid: string; currentUid?: string }) {
+export default function ProfileTabbedPosts({
+  profileUid,
+  profileDisplayName,
+  currentUid,
+}: {
+  profileUid: string;
+  /** shown as "{name} reposted" above each post in the Reposts tab, same as X's own profile */
+  profileDisplayName: string;
+  currentUid?: string;
+}) {
   const router = useRouter();
   const [tab, setTab] = useState<ProfileTab>("posts");
   const [posts, setPosts] = useState<Post[]>([]);
@@ -92,7 +101,9 @@ export default function ProfileTabbedPosts({ profileUid, currentUid }: { profile
               {tab === "reposts" && (
                 <View className="flex-row items-center gap-1.5 px-4 pt-2.5">
                   <Feather name="repeat" size={12} color="#6b7280" />
-                  <Text className="text-gray-500 text-[11px] font-semibold">Reposted</Text>
+                  <Text numberOfLines={1} className="text-gray-500 text-[11px] font-semibold">
+                    {profileDisplayName} reposted
+                  </Text>
                 </View>
               )}
               <PostCard

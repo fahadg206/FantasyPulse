@@ -191,7 +191,11 @@ export default function ProfileHome() {
             </Pressable>
           </View>
 
-          <ProfileTabbedPosts profileUid={profile.uid} currentUid={profile.uid} />
+          <ProfileTabbedPosts
+            profileUid={profile.uid}
+            profileDisplayName={profile.displayName}
+            currentUid={profile.uid}
+          />
         </SwipeableTabs>
       </KeyboardAvoidingView>
     </SafeAreaView>

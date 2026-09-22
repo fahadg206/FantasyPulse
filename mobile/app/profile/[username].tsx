@@ -309,6 +309,7 @@ export default function PublicProfile() {
 
         <ProfileTabbedPosts
           profileUid={profile.uid}
+          profileDisplayName={profile.displayName}
           currentUid={authUser && !isReadOnly(authUser) ? authUser.uid : undefined}
         />
       </SwipeableTabs>
