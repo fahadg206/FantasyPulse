@@ -79,10 +79,21 @@ export function computeFantasyTeamGameState(
 }
 
 /** true once it's past Monday Night Football's hard cutoff, 10:00pm Pacific */
+// This only ever returned true ON Monday itself, past 10pm - meaning the
+// safety net it's meant to be (for whatever a real per-player game-state
+// gap doesn't otherwise catch - a bye-week team, a status ESPN never
+// updated) stopped applying the moment Monday ended, even though the
+// week's games were just as over on Tuesday or Wednesday. Extended to
+// stay true through Wednesday - the NFL never schedules real games on
+// Tuesday or Wednesday of a standard week, so treating those two days as
+// "still past last Monday night" can't misfire against a new week's
+// Thursday-onward games actually being live, the way just returning true
+// for every non-Monday day would.
 export function isPastMondayNightCutoff(now: Date = new Date()): boolean {
   const pacific = new Date(now.toLocaleString("en-US", { timeZone: "America/Los_Angeles" }));
-  if (pacific.getDay() !== 1) return false; // only applies on Monday itself
-  return pacific.getHours() >= 22;
+  const day = pacific.getDay(); // 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
+  if (day === 1) return pacific.getHours() >= 22;
+  return day === 2 || day === 3;
 }
 
 export interface LiveGameDetail {
