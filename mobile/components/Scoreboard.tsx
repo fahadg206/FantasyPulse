@@ -186,6 +186,7 @@ export default function Scoreboard({ leagueID }: { leagueID: string }) {
                   points={team1.team_points}
                   showScore={!preGame}
                   emphasize={team1Leading}
+                  live={liveGame}
                 />
                 <View className="h-px bg-white/10 my-1.5" />
                 <ScoreRow
@@ -194,6 +195,7 @@ export default function Scoreboard({ leagueID }: { leagueID: string }) {
                   points={team2.team_points}
                   showScore={!preGame}
                   emphasize={team2Leading}
+                  live={liveGame}
                 />
               </View>
 
@@ -237,13 +239,22 @@ function ScoreRow({
   points,
   showScore,
   emphasize,
+  live,
 }: {
   name: string;
   avatar?: string | ImageSourcePropType;
   points?: string;
   showScore: boolean;
   emphasize: boolean;
+  live?: boolean;
 }) {
+  // Bold+white still means "the confirmed winner" (final only). While the
+  // game's still going, neither side is declared a winner, but the score
+  // is live and worth reading clearly - white, just not bold - instead of
+  // the same muted gray a game that hasn't started yet gets.
+  const textColor = emphasize || live ? "text-white" : "text-gray-500";
+  const weight = emphasize ? "font-bold" : live ? "font-semibold" : "font-medium";
+
   return (
     <View className="flex-row justify-between items-center">
       <View className="flex-row items-center flex-1 mr-2">
@@ -251,10 +262,7 @@ function ScoreRow({
           source={typeof avatar === "string" ? { uri: avatar } : avatar}
           className="w-[24px] h-[24px] rounded-full mr-2 bg-white/10"
         />
-        <Text
-          numberOfLines={1}
-          className={`text-[12px] flex-1 ${emphasize ? "font-bold text-white" : "font-medium text-gray-500"}`}
-        >
+        <Text numberOfLines={1} className={`text-[12px] flex-1 ${weight} ${textColor}`}>
           {name}
         </Text>
       </View>
@@ -263,7 +271,7 @@ function ScoreRow({
           value={parseFloat(points || "0")}
           decimals={1}
           style={{ fontVariant: ["tabular-nums"] }}
-          className={`text-[16px] ${emphasize ? "font-bold text-white" : "font-semibold text-gray-500"}`}
+          className={`text-[16px] ${emphasize ? "font-bold" : "font-semibold"} ${textColor}`}
         />
       ) : (
         <Text className="text-[10px] text-gray-500">--</Text>

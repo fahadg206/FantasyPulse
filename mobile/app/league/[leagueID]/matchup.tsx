@@ -295,14 +295,18 @@ export default function MatchupDetail() {
                     value={team1Points}
                     decimals={1}
                     style={{ fontVariant: ["tabular-nums"] }}
-                    className={`text-[26px] font-bold ${team1Points >= team2Points ? "text-white" : "text-gray-500"}`}
+                    className={`text-[26px] font-bold ${
+                      liveGame || (postGame && team1Points >= team2Points) ? "text-white" : "text-gray-500"
+                    }`}
                   />
                   <Text className="text-gray-600 text-[16px]">-</Text>
                   <AnimatedNumber
                     value={team2Points}
                     decimals={1}
                     style={{ fontVariant: ["tabular-nums"] }}
-                    className={`text-[26px] font-bold ${team2Points >= team1Points ? "text-white" : "text-gray-500"}`}
+                    className={`text-[26px] font-bold ${
+                      liveGame || (postGame && team2Points >= team1Points) ? "text-white" : "text-gray-500"
+                    }`}
                   />
                 </View>
               </>
@@ -703,9 +707,11 @@ function MatchupRow({
 
   return (
     <View
-      className={`py-2.5 border-b border-gray-100 dark:border-white/5 ${dimmed ? "opacity-70" : ""} ${
-        rowIsLive ? "bg-brand/5" : ""
-      }`}
+      className={
+        rowIsLive
+          ? `my-1 px-2 py-2.5 rounded-2xl bg-brand/15 border border-brand/30 ${dimmed ? "opacity-70" : ""}`
+          : `py-2.5 border-b border-gray-100 dark:border-white/5 ${dimmed ? "opacity-70" : ""}`
+      }
     >
       <View className="flex-row items-center">
         <PlayerHalf player={left} align="left" />

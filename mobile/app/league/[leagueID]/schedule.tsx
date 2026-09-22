@@ -261,6 +261,7 @@ export default function Schedule() {
                     points={team1.team_points}
                     showScore={!preGame}
                     emphasize={team1Leading}
+                    live={status === "live"}
                     performers={team1Top2}
                   />
                   <View className="h-px bg-white/10 my-2.5" />
@@ -270,6 +271,7 @@ export default function Schedule() {
                     points={team2.team_points}
                     showScore={!preGame}
                     emphasize={team2Leading}
+                    live={status === "live"}
                     performers={team2Top2}
                   />
                 </View>
@@ -311,6 +313,7 @@ function ScheduleTeamRow({
   points,
   showScore,
   emphasize,
+  live,
   performers,
 }: {
   name: string;
@@ -318,8 +321,16 @@ function ScheduleTeamRow({
   points?: string;
   showScore: boolean;
   emphasize: boolean;
+  live?: boolean;
   performers: TopPerformer[];
 }) {
+  // Bold+white still means "the confirmed winner" (final only). While the
+  // game's still going, neither side is declared a winner, but the score
+  // is live and worth reading clearly - white, just not bold - instead of
+  // the same muted gray a game that hasn't started yet gets.
+  const textColor = emphasize || live ? "text-white" : "text-gray-500";
+  const weight = emphasize ? "font-bold" : live ? "font-semibold" : "font-medium";
+
   return (
     <View className="flex-row items-start justify-between">
       <View className="flex-row items-center flex-1 mr-2 pt-0.5">
@@ -327,10 +338,7 @@ function ScheduleTeamRow({
           source={typeof avatar === "string" ? { uri: avatar } : avatar}
           className="w-[36px] h-[36px] rounded-full mr-2.5 bg-white/10"
         />
-        <Text
-          numberOfLines={1}
-          className={`text-[14px] flex-1 ${emphasize ? "font-bold text-white" : "font-medium text-gray-500"}`}
-        >
+        <Text numberOfLines={1} className={`text-[14px] flex-1 ${weight} ${textColor}`}>
           {name}
         </Text>
       </View>
@@ -340,7 +348,7 @@ function ScheduleTeamRow({
             value={parseFloat(points || "0")}
             decimals={1}
             style={{ fontVariant: ["tabular-nums"] }}
-            className={`text-[19px] ${emphasize ? "font-bold text-white" : "font-semibold text-gray-500"}`}
+            className={`text-[19px] ${emphasize ? "font-bold" : "font-semibold"} ${textColor}`}
           />
         ) : (
           <Text className="text-[12px] text-gray-500">--</Text>
