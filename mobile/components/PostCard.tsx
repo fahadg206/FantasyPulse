@@ -6,6 +6,7 @@ import type { Post } from "../lib/posts";
 import { toggleLike, toggleRepost, deletePost, BOOGIE_UID, BOOGIE_USERNAME } from "../lib/posts";
 import { formatTwitterTimestamp } from "../lib/formatTime";
 import Avatar from "./Avatar";
+import ReplyModal from "./ReplyModal";
 
 // Styled to match Twitter's own mobile feed row as closely as this app's
 // data supports: flush full-width row (no rounded card, unlike the rest of
@@ -19,10 +20,11 @@ interface PostCardProps {
   currentUid?: string | null;
   liked: boolean;
   reposted: boolean;
-  onPressReply?: () => void;
   onPressTarget?: () => void;
   /** called after a successful delete, so the caller can drop this post from its own list */
   onDeleted?: () => void;
+  /** called after a successful reply - most callers don't need this (the card's own reply count already updates itself), only a screen that's also showing a live list of this post's replies (the thread screen) needs to splice the new one in */
+  onReplied?: (reply: Post) => void;
   /** suppresses tap-to-expand - for the root post on its own thread screen, where tapping it would just re-open the screen it's already on */
   disableExpand?: boolean;
 }
@@ -32,9 +34,9 @@ export default function PostCard({
   currentUid,
   liked: initialLiked,
   reposted: initialReposted,
-  onPressReply,
   onPressTarget,
   onDeleted,
+  onReplied,
   disableExpand,
 }: PostCardProps) {
   const router = useRouter();
@@ -42,7 +44,9 @@ export default function PostCard({
   const [likeCount, setLikeCount] = useState(post.likeCount);
   const [reposted, setReposted] = useState(initialReposted);
   const [repostCount, setRepostCount] = useState(post.repostCount);
+  const [replyCount, setReplyCount] = useState(post.replyCount);
   const [deleting, setDeleting] = useState(false);
+  const [replyModalOpen, setReplyModalOpen] = useState(false);
 
   const canInteract = !!currentUid;
   const isOwnPost = !!currentUid && currentUid === post.authorUid;
@@ -182,9 +186,13 @@ export default function PostCard({
         )}
 
         <View className="flex-row items-center justify-between mt-3 pr-8">
-          <Pressable onPress={onPressReply} className="flex-row items-center gap-1.5" hitSlop={8}>
+          <Pressable
+            onPress={() => (canInteract ? setReplyModalOpen(true) : router.push("/profile"))}
+            className="flex-row items-center gap-1.5"
+            hitSlop={8}
+          >
             <Feather name="message-circle" size={16} color="#9ca3af" />
-            {post.replyCount > 0 && <Text className="text-gray-500 text-[12px]">{post.replyCount}</Text>}
+            {replyCount > 0 && <Text className="text-gray-500 text-[12px]">{replyCount}</Text>}
           </Pressable>
 
           <Pressable onPress={onRepost} disabled={!canInteract} className="flex-row items-center gap-1.5" hitSlop={8}>
@@ -210,6 +218,19 @@ export default function PostCard({
           </Pressable>
         </View>
       </View>
+
+      {canInteract && currentUid && (
+        <ReplyModal
+          visible={replyModalOpen}
+          onClose={() => setReplyModalOpen(false)}
+          post={post}
+          currentUid={currentUid}
+          onReplied={(reply) => {
+            setReplyCount((c) => c + 1);
+            onReplied?.(reply);
+          }}
+        />
+      )}
     </Pressable>
   );
 }

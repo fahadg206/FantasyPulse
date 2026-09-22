@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { View, Text, Pressable, FlatList, ActivityIndicator } from "react-native";
+import { View, Text, Pressable, FlatList, ActivityIndicator, KeyboardAvoidingView, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
@@ -97,6 +97,7 @@ export default function PostThread() {
 
   return (
     <SafeAreaView className="flex-1 bg-[#0c0c0e]">
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1">
       <View className="flex-row items-center gap-3 px-4 py-3 border-b border-white/10">
         <Pressable onPress={() => router.back()} hitSlop={10}>
           <Feather name="arrow-left" size={20} color="#fff" />
@@ -124,6 +125,10 @@ export default function PostThread() {
                 liked={interactionState[post.id]?.liked ?? false}
                 reposted={interactionState[post.id]?.reposted ?? false}
                 onDeleted={() => router.back()}
+                onReplied={(reply) => {
+                  setReplies((prev) => [...prev, reply]);
+                  setInteractionState((prev) => ({ ...prev, [reply.id]: { liked: false, reposted: false } }));
+                }}
                 disableExpand
               />
               <View className="px-4 py-2.5 border-b border-white/10">
@@ -144,7 +149,6 @@ export default function PostThread() {
               currentUid={profile?.uid}
               liked={interactionState[item.id]?.liked ?? false}
               reposted={interactionState[item.id]?.reposted ?? false}
-              onPressReply={() => router.push(`/post/${item.id}`)}
               onDeleted={() => setReplies((prev) => prev.filter((r) => r.id !== item.id))}
             />
           )}
@@ -152,7 +156,7 @@ export default function PostThread() {
       )}
 
       {profile ? (
-        <ComposeBox profile={profile} placeholder="Post your reply" compact onSubmit={submitReply} />
+        <ComposeBox profile={profile} placeholder="Post your reply" compact submitLabel="Reply" onSubmit={submitReply} />
       ) : (
         <Pressable
           onPress={() => router.push("/profile")}
@@ -162,6 +166,7 @@ export default function PostThread() {
           <Text className="text-gray-500 text-[12px]">Sign in to reply</Text>
         </Pressable>
       )}
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

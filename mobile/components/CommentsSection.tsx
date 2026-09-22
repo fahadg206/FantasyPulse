@@ -104,7 +104,6 @@ export default function CommentsSection({ targetType, targetId, leagueId, target
               currentUid={profile?.uid}
               liked={interactionState[c.id]?.liked ?? false}
               reposted={interactionState[c.id]?.reposted ?? false}
-              onPressReply={() => router.push(`/post/${c.id}`)}
               onDeleted={() => setComments((prev) => prev.filter((p) => p.id !== c.id))}
             />
           ))}
@@ -112,7 +111,7 @@ export default function CommentsSection({ targetType, targetId, leagueId, target
       )}
 
       {profile ? (
-        <ComposeBox profile={profile} placeholder="Add a comment..." compact onSubmit={submit} />
+        <ComposeBox profile={profile} placeholder="Add a comment..." compact submitLabel="Reply" onSubmit={submit} />
       ) : (
         <Pressable
           onPress={() => router.push("/profile")}

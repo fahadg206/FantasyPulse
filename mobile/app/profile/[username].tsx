@@ -119,7 +119,6 @@ function BoogieProfile() {
                   currentUid={currentUid}
                   liked={interactionState[post.id]?.liked ?? false}
                   reposted={interactionState[post.id]?.reposted ?? false}
-                  onPressReply={() => router.push(`/post/${post.id}`)}
                   onPressTarget={() => {
                     if (post.targetType === "matchup" && post.targetId && post.leagueId) {
                       const [week, matchupID] = post.targetId.split(":");

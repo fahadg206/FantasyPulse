@@ -47,7 +47,7 @@ export default function FeedPreview() {
       ) : (
         <View className="border-y border-white/10 bg-[#0c0c0e]">
           {posts.map((post) => (
-            <PostCard key={post.id} post={post} liked={false} reposted={false} onPressReply={() => router.push("/feed")} />
+            <PostCard key={post.id} post={post} liked={false} reposted={false} />
           ))}
         </View>
       )}

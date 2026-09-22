@@ -151,7 +151,6 @@ export default function Feed() {
                   router.push({ pathname: "/league/[leagueID]/trades", params: { leagueID: item.leagueId } } as any);
                 }
               }}
-              onPressReply={() => router.push(`/post/${item.id}`)}
               onDeleted={() => setPosts((prev) => prev.filter((p) => p.id !== item.id))}
             />
           )}

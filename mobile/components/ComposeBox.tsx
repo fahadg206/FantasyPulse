@@ -10,15 +10,22 @@ const MAX_POST_LENGTH = 280;
 interface ComposeBoxProps {
   profile: UserProfile;
   placeholder: string;
+  /** smaller avatar, tighter padding, no divider above - for compose rows embedded mid-page (CommentsSection, a thread's reply bar) rather than a screen's own top-level composer */
   compact?: boolean;
+  /** "Post" for a standalone post, "Reply" when replying to something */
+  submitLabel?: string;
+  autoFocus?: boolean;
   onSubmit: (text: string, imageUrl?: string) => Promise<void>;
 }
 
-// Shared by the Feed's top-level composer and every CommentsSection - text
-// plus an optional attached image, uploaded to this user's own folder in
-// Storage right before posting so a cancelled/abandoned draft never uploads
-// anything.
-export default function ComposeBox({ profile, placeholder, compact, onSubmit }: ComposeBoxProps) {
+// One Twitter-style compose row - avatar, an unstyled (no pill/bubble)
+// growing text field, an attach-image button, and a pill submit button -
+// shared by the Feed's top-level composer, every CommentsSection, the
+// reply modal, and a post thread's own reply bar, so a reply never looks
+// different depending on where it was written from. Uploads any attached
+// image to this user's own folder in Storage right before posting, so a
+// cancelled/abandoned draft never uploads anything.
+export default function ComposeBox({ profile, placeholder, compact, submitLabel = "Post", autoFocus, onSubmit }: ComposeBoxProps) {
   const [text, setText] = useState("");
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [posting, setPosting] = useState(false);
@@ -57,46 +64,23 @@ export default function ComposeBox({ profile, placeholder, compact, onSubmit }: 
   const canSubmit = (!!text.trim() || !!imageUri) && !posting;
 
   return (
-    <View className={compact ? "px-4 py-3" : "flex-row px-4 py-3 border-b border-white/10"}>
-      {!compact && (
-        <View className="mr-3">
-          <Avatar uid={profile.uid} url={profile.avatar} name={profile.displayName} />
-        </View>
-      )}
-      <View className="flex-1">
-        <View className={compact ? "flex-row items-center gap-2" : undefined}>
-          <TextInput
-            value={text}
-            onChangeText={setText}
-            placeholder={placeholder}
-            placeholderTextColor="#6b7280"
-            multiline={!compact}
-            maxLength={MAX_POST_LENGTH}
-            className={
-              compact
-                ? "flex-1 bg-white/5 border border-white/10 rounded-full px-4 py-2.5 text-white text-[13px]"
-                : "text-white text-[15px] min-h-[40px]"
-            }
-          />
-          {compact && (
-            <>
-              <Pressable onPress={attachImage} hitSlop={8} className="w-9 h-9 items-center justify-center">
-                <Feather name="image" size={18} color="#9ca3af" />
-              </Pressable>
-              <Pressable
-                onPress={submit}
-                disabled={!canSubmit}
-                className={`w-9 h-9 rounded-full items-center justify-center ${canSubmit ? "bg-brand" : "bg-brand/30"}`}
-              >
-                {posting ? <ActivityIndicator color="#fff" size="small" /> : <Feather name="send" size={15} color="#fff" />}
-              </Pressable>
-            </>
-          )}
-        </View>
+    <View className={`flex-row px-4 ${compact ? "py-2.5" : "py-3 border-b border-white/10"}`}>
+      <Avatar uid={profile.uid} url={profile.avatar} name={profile.displayName} size={compact ? 34 : 42} />
+      <View className="flex-1 ml-3">
+        <TextInput
+          value={text}
+          onChangeText={setText}
+          placeholder={placeholder}
+          placeholderTextColor="#6b7280"
+          multiline
+          autoFocus={autoFocus}
+          maxLength={MAX_POST_LENGTH}
+          className={`text-white ${compact ? "text-[14px] min-h-[32px]" : "text-[15px] min-h-[40px]"}`}
+        />
 
         {imageUri && (
           <View className="mt-2 self-start relative">
-            <Image source={{ uri: imageUri }} className="w-[120px] h-[80px] rounded-xl bg-white/5" resizeMode="cover" />
+            <Image source={{ uri: imageUri }} className="w-[140px] h-[90px] rounded-xl bg-white/5" resizeMode="cover" />
             <Pressable
               onPress={() => setImageUri(null)}
               hitSlop={6}
@@ -109,23 +93,22 @@ export default function ComposeBox({ profile, placeholder, compact, onSubmit }: 
 
         {error && <Text className="text-red-400 text-[11px] mt-1.5">{error}</Text>}
 
-        {!compact && (
-          <View className="flex-row items-center justify-between mt-2">
-            <View className="flex-row items-center gap-4">
-              <Pressable onPress={attachImage} hitSlop={8}>
-                <Feather name="image" size={19} color="#af1222" />
-              </Pressable>
-              <Text className="text-gray-600 text-[11px]">{text.length}/{MAX_POST_LENGTH}</Text>
-            </View>
-            <Pressable
-              onPress={submit}
-              disabled={!canSubmit}
-              className={`px-4 py-1.5 rounded-full ${canSubmit ? "bg-brand" : "bg-brand/30"}`}
-            >
-              {posting ? <ActivityIndicator color="#fff" size="small" /> : <Text className="text-white font-bold text-[13px]">Post</Text>}
-            </Pressable>
-          </View>
-        )}
+        <View className="flex-row items-center justify-between mt-2">
+          <Pressable onPress={attachImage} hitSlop={8}>
+            <Feather name="image" size={compact ? 17 : 19} color="#af1222" />
+          </Pressable>
+          <Pressable
+            onPress={submit}
+            disabled={!canSubmit}
+            className={`px-4 py-1.5 rounded-full ${canSubmit ? "bg-brand" : "bg-brand/30"}`}
+          >
+            {posting ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Text className="text-white font-bold text-[13px]">{submitLabel}</Text>
+            )}
+          </Pressable>
+        </View>
       </View>
     </View>
   );
