@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { View, Text, Pressable, Share, Alert } from "react-native";
+import { View, Text, Pressable, Share, Alert, Modal, Image } from "react-native";
 import { useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import type { Post } from "../lib/posts";
@@ -51,6 +51,7 @@ export default function PostCard({
   const [replyCount, setReplyCount] = useState(post.replyCount);
   const [deleting, setDeleting] = useState(false);
   const [replyModalOpen, setReplyModalOpen] = useState(false);
+  const [imageViewerOpen, setImageViewerOpen] = useState(false);
 
   const canInteract = !!currentUid;
   const isOwnPost = !!currentUid && currentUid === post.authorUid;
@@ -145,6 +146,34 @@ export default function PostCard({
     />
   );
 
+  // Tapping an attached image used to do nothing at all - no Pressable
+  // wrapped it. Opens the same full-screen viewer real X shows: the image
+  // large, the post's own compact info and action row underneath, sharing
+  // this card's own like/repost/reply state and handlers rather than
+  // duplicating them.
+  const imageViewer = post.imageUrl && (
+    <ImageViewerModal
+      visible={imageViewerOpen}
+      onClose={() => setImageViewerOpen(false)}
+      imageUrl={post.imageUrl}
+      post={post}
+      authorUsername={authorUsername}
+      isBoogie={isBoogie}
+      currentUid={currentUid}
+      canInteract={canInteract}
+      liked={liked}
+      likeCount={likeCount}
+      reposted={reposted}
+      repostCount={repostCount}
+      replyCount={replyCount}
+      onLike={onLike}
+      onRepost={onRepost}
+      onShare={onShare}
+      onReplyPress={() => (canInteract ? setReplyModalOpen(true) : router.push("/profile"))}
+      goToProfile={goToProfile}
+    />
+  );
+
   // The larger "detail view" real Twitter shows at the top of a thread -
   // avatar/name/handle as their own header line (not squeezed beside the
   // text), the post text itself in a noticeably bigger size, the full
@@ -178,7 +207,11 @@ export default function PostCard({
 
         {post.matchupCard && <MatchupCardView card={post.matchupCard} />}
 
-        {post.imageUrl && <PostImage uri={post.imageUrl} className="w-full rounded-2xl mb-3 bg-white/5" />}
+        {post.imageUrl && (
+          <Pressable onPress={() => setImageViewerOpen(true)}>
+            <PostImage uri={post.imageUrl} className="w-full rounded-2xl mb-3 bg-white/5" />
+          </Pressable>
+        )}
 
         {post.quotedPost && <QuotedPostCard quoted={post.quotedPost} className="mb-3" />}
 
@@ -234,6 +267,7 @@ export default function PostCard({
         </View>
 
         {replyModal}
+        {imageViewer}
       </View>
     );
   }
@@ -272,7 +306,11 @@ export default function PostCard({
 
         {post.matchupCard && <MatchupCardView card={post.matchupCard} />}
 
-        {post.imageUrl && <PostImage uri={post.imageUrl} className="w-full rounded-2xl mt-2.5 bg-white/5" />}
+        {post.imageUrl && (
+          <Pressable onPress={() => setImageViewerOpen(true)}>
+            <PostImage uri={post.imageUrl} className="w-full rounded-2xl mt-2.5 bg-white/5" />
+          </Pressable>
+        )}
 
         {post.quotedPost && <QuotedPostCard quoted={post.quotedPost} className="mt-2.5" />}
 
@@ -325,6 +363,7 @@ export default function PostCard({
       </View>
 
       {replyModal}
+      {imageViewer}
     </Pressable>
   );
 }
@@ -338,6 +377,150 @@ export default function PostCard({
 // something outside the app entirely (Boogie's imported tweets, quoting
 // real X users with no account here) has nowhere to navigate to, so that
 // case renders identically but isn't pressable.
+// Full-screen image viewer, opened by tapping a post's attached image -
+// previously that image had no Pressable around it at all, so nothing
+// happened on tap. Matches X's own layout: the image large at the top,
+// the post's compact info and action row underneath, sharing this card's
+// existing like/repost/reply state rather than a separate implementation.
+// Not the same screen as the post's own thread (app/post/[postId].tsx) -
+// no replies list, just the image and a reply composer bar, dismissible
+// back to wherever the image was tapped from.
+function ImageViewerModal({
+  visible,
+  onClose,
+  imageUrl,
+  post,
+  authorUsername,
+  isBoogie,
+  currentUid,
+  canInteract,
+  liked,
+  likeCount,
+  reposted,
+  repostCount,
+  replyCount,
+  onLike,
+  onRepost,
+  onShare,
+  onReplyPress,
+  goToProfile,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  imageUrl: string;
+  post: Post;
+  authorUsername: string;
+  isBoogie: boolean;
+  currentUid?: string | null;
+  canInteract: boolean;
+  liked: boolean;
+  likeCount: number;
+  reposted: boolean;
+  repostCount: number;
+  replyCount: number;
+  onLike: () => void;
+  onRepost: () => void;
+  onShare: () => void;
+  onReplyPress: () => void;
+  goToProfile: () => void;
+}) {
+  return (
+    <Modal visible={visible} animationType="fade" presentationStyle="fullScreen" onRequestClose={onClose}>
+      <View className="flex-1 bg-black">
+        <View className="flex-row items-center justify-between px-4 pt-3 pb-2">
+          <Pressable onPress={onClose} hitSlop={10} className="w-9 h-9 rounded-full bg-white/10 items-center justify-center">
+            <Feather name="arrow-left" size={18} color="#fff" />
+          </Pressable>
+          <Pressable onPress={onShare} hitSlop={10} className="w-9 h-9 rounded-full bg-white/10 items-center justify-center">
+            <Feather name="more-horizontal" size={18} color="#fff" />
+          </Pressable>
+        </View>
+
+        <Pressable onPress={onClose} className="flex-1 items-center justify-center">
+          <Image source={{ uri: imageUrl }} resizeMode="contain" style={{ width: "100%", height: "100%" }} />
+        </Pressable>
+
+        <View className="px-4 pb-3">
+          <Pressable onPress={goToProfile} disabled={isBoogie} className="flex-row items-center gap-2.5 mb-2.5">
+            <Avatar uid={post.authorUid} url={post.authorAvatar} name={post.authorDisplayName} size={40} />
+            <View>
+              <View className="flex-row items-center gap-1">
+                <Text className="text-white font-bold text-[15px]">{post.authorDisplayName}</Text>
+                {isBoogie && <Feather name="check-circle" size={13} color="#af1222" />}
+              </View>
+              <Text className="text-gray-500 text-[13px]">@{authorUsername}</Text>
+            </View>
+          </Pressable>
+
+          {!!post.text && <Text className="text-white text-[15px] leading-[20px] mb-3">{post.text}</Text>}
+
+          <View className="flex-row items-center gap-2.5">
+            <PillAction icon="message-circle" count={replyCount} onPress={onReplyPress} />
+            <PillAction
+              icon="repeat"
+              count={repostCount}
+              active={reposted}
+              activeColor="#00ba7c"
+              onPress={onRepost}
+              disabled={!canInteract}
+            />
+            <PillAction
+              icon="heart"
+              count={likeCount}
+              active={liked}
+              activeColor="#f91880"
+              onPress={onLike}
+              disabled={!canInteract}
+            />
+            <PillAction icon="share" onPress={onShare} />
+          </View>
+        </View>
+
+        <Pressable
+          onPress={onReplyPress}
+          className="flex-row items-center gap-3 px-4 py-3 border-t border-white/10"
+        >
+          <Avatar uid={currentUid ?? undefined} name="You" size={32} />
+          <View className="flex-1 bg-white/10 rounded-full px-4 py-2.5">
+            <Text className="text-gray-500 text-[14px]">Post your reply</Text>
+          </View>
+        </Pressable>
+      </View>
+    </Modal>
+  );
+}
+
+function PillAction({
+  icon,
+  count,
+  active,
+  activeColor = "#fff",
+  disabled,
+  onPress,
+}: {
+  icon: React.ComponentProps<typeof Feather>["name"];
+  count?: number;
+  active?: boolean;
+  activeColor?: string;
+  disabled?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      className="flex-row items-center gap-1.5 bg-white/10 rounded-full px-3.5 py-2"
+    >
+      <Feather name={icon} size={16} color={active ? activeColor : "#e5e7eb"} />
+      {!!count && (
+        <Text style={{ color: active ? activeColor : "#e5e7eb" }} className="text-[13px] font-semibold">
+          {count}
+        </Text>
+      )}
+    </Pressable>
+  );
+}
+
 function QuotedPostCard({ quoted, className }: { quoted: NonNullable<Post["quotedPost"]>; className?: string }) {
   const router = useRouter();
   const isInternal = !!quoted.postId;
