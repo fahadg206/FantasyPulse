@@ -99,7 +99,7 @@ function BoogieProfile() {
           <ProfileActivity
             sleeperUserId={BOOGIE_SLEEPER_USER_ID}
             stats={stats}
-            extraTitles={[{ leagueName: "Champions League", season: "Pre-Sleeper" }]}
+            extraTitles={[{ leagueName: "Champions League", season: "2022" }]}
           />
         ) : null}
 

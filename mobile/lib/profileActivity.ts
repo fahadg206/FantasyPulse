@@ -331,9 +331,66 @@ export interface WeeklyMatchup {
   hasOpponent: boolean;
   /** true only while real NFL games are actually underway for this matchup - not "final" and not "hasn't started" */
   isLive: boolean;
+  /**
+   * Sleeper's public API has no documented field for "this is a Chopped
+   * (weekly-elimination) league" or "this roster was eliminated in week
+   * N" - verified against both Sleeper's own docs and a community Chopped
+   * tracker's source before concluding that. This is the best available
+   * proxy: no paired opponent shows up for this week at all (a real
+   * head-to-head league only lacks one on a bye week in an odd-numbered
+   * league, which degrades gracefully into the same rank display rather
+   * than breaking). When true, rank/eliminatedWeek are reconstructed by
+   * replaying each week's scores ourselves (lowest score among not-yet-
+   * eliminated rosters each week), the same technique a public Chopped
+   * tracker uses for the same reason.
+   */
+  isChoppedFormat: boolean;
+  /** current rank among still-active rosters, only set when isChoppedFormat and not eliminated */
+  rank?: number;
+  totalActiveTeams?: number;
+  /** set once eliminated - the week it happened */
+  eliminatedWeek?: number;
 }
 
 /** this manager's matchup in each of their leagues for the NFL's current week */
+/**
+ * Replays a Chopped-format league's completed weeks to reconstruct who
+ * was eliminated and when, since Sleeper's API doesn't expose that state
+ * directly - one elimination per week, the roster with the lowest score
+ * that week among everyone not already eliminated. Returns rosterId ->
+ * the week they were chopped.
+ */
+async function reconstructChoppedEliminations(
+  leagueId: string,
+  currentWeek: number,
+  rosterIds: string[]
+): Promise<Record<string, number>> {
+  const completedWeeks = Array.from({ length: Math.max(0, currentWeek - 1) }, (_, i) => i + 1);
+  const weekResults = await Promise.all(
+    completedWeeks.map((w) => fetchJson(`${SLEEPER}/league/${leagueId}/matchups/${w}`).catch(() => []))
+  );
+
+  const eliminatedWeek: Record<string, number> = {};
+  const stillActive = new Set(rosterIds.map(String));
+
+  weekResults.forEach((matchups, i) => {
+    const week = i + 1;
+    const scores = (matchups as any[])
+      .filter((m) => stillActive.has(String(m.roster_id)))
+      .map((m) => ({ rosterId: String(m.roster_id), points: m.points ?? 0 }));
+    if (scores.length === 0) return;
+    // A week nobody's actually played yet (points all 0) isn't a real
+    // result to eliminate anyone over.
+    if (!scores.some((s) => s.points > 0)) return;
+
+    const lowest = scores.reduce((min, s) => (s.points < min.points ? s : min));
+    eliminatedWeek[lowest.rosterId] = week;
+    stillActive.delete(lowest.rosterId);
+  });
+
+  return eliminatedWeek;
+}
+
 export async function getWeeklyMatchups(
   sleeperUserId: string,
   leagues: Pick<LeagueSeasonStats, "leagueId" | "leagueName">[]
@@ -379,9 +436,38 @@ export async function getWeeklyMatchups(
           return user?.avatar ? `https://sleepercdn.com/avatars/thumbs/${user.avatar}` : undefined;
         };
 
-        const opponent = matchups.find(
-          (m: any) => m.matchup_id === myMatchup.matchup_id && m.roster_id !== myRoster.roster_id
-        );
+        // Guarded so two rosters that both lack a matchup_id (which is
+        // exactly the Chopped-format signal below) never spuriously
+        // "pair up" with each other via undefined === undefined.
+        const hasRealMatchupId = myMatchup.matchup_id !== undefined && myMatchup.matchup_id !== null;
+        const opponent = hasRealMatchupId
+          ? matchups.find((m: any) => m.matchup_id === myMatchup.matchup_id && m.roster_id !== myRoster.roster_id)
+          : undefined;
+        const isChoppedFormat = !opponent;
+
+        let rank: number | undefined;
+        let totalActiveTeams: number | undefined;
+        let eliminatedWeek: number | undefined;
+        if (isChoppedFormat) {
+          const eliminations = await reconstructChoppedEliminations(
+            league.leagueId,
+            week,
+            rosters.map((r: any) => r.roster_id)
+          );
+          eliminatedWeek = eliminations[String(myRoster.roster_id)];
+          const activeRosterIds = rosters
+            .map((r: any) => String(r.roster_id))
+            .filter((id: string) => eliminations[id] === undefined);
+          totalActiveTeams = activeRosterIds.length;
+          if (eliminatedWeek === undefined) {
+            const ranked = [...activeRosterIds].sort((a, b) => {
+              const scoreOf = (rid: string) => matchups.find((m: any) => String(m.roster_id) === rid)?.points ?? 0;
+              return scoreOf(b) - scoreOf(a);
+            });
+            const idx = ranked.indexOf(String(myRoster.roster_id));
+            rank = idx === -1 ? undefined : idx + 1;
+          }
+        }
 
         // Same real-per-starter-game-state check used everywhere else in
         // this app (the dashboard scoreboard, schedule, matchup screen) -
@@ -415,6 +501,10 @@ export async function getWeeklyMatchups(
           oppAvatar: opponent ? teamAvatar(opponent.roster_id) : undefined,
           hasOpponent: !!opponent,
           isLive,
+          isChoppedFormat,
+          rank,
+          totalActiveTeams,
+          eliminatedWeek,
         };
       } catch (error) {
         console.error(`Error loading weekly matchup for league ${league.leagueId}:`, error);

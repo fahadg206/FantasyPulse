@@ -149,34 +149,51 @@ export default function ProfileActivity({
 
       {/* Leagues */}
       <SectionLabel>{stats.season} SEASON</SectionLabel>
-      {stats.leagues.map((l) => (
-        <Pressable
-          key={l.leagueId}
-          onPress={() => router.push(`/league/${l.leagueId}` as any)}
-          className="flex-row items-center justify-between bg-[#141416] rounded-xl border border-white/10 px-4 py-3 mb-2"
-        >
-          <View className="flex-row items-center flex-1 mr-2">
-            <Avatar url={l.avatar} name={l.leagueName} size={28} kind="league" />
-            <View className="ml-2.5 flex-1">
-              <Text numberOfLines={1} className="text-white font-semibold text-[13px]">
-                {l.leagueName}
-              </Text>
-              <Text className="text-gray-500 text-[11px]">
-                Rank #{l.rank} of {l.totalTeams}
+      {stats.leagues.map((l) => {
+        // A win-loss record doesn't mean anything in a Chopped-format
+        // league (no head-to-head) - cross-referenced against the same
+        // detection getWeeklyMatchups already did, so it shows rank
+        // instead wherever that league turned out to have no paired
+        // opponent this week.
+        const choppedMatch = matchups?.find((m) => m.leagueId === l.leagueId && m.isChoppedFormat);
+
+        return (
+          <Pressable
+            key={l.leagueId}
+            onPress={() => router.push(`/league/${l.leagueId}` as any)}
+            className="flex-row items-center justify-between bg-[#141416] rounded-xl border border-white/10 px-4 py-3 mb-2"
+          >
+            <View className="flex-row items-center flex-1 mr-2">
+              <Avatar url={l.avatar} name={l.leagueName} size={28} kind="league" />
+              <View className="ml-2.5 flex-1">
+                <Text numberOfLines={1} className="text-white font-semibold text-[13px]">
+                  {l.leagueName}
+                </Text>
+                <Text className="text-gray-500 text-[11px]">
+                  Rank #{l.rank} of {l.totalTeams}
+                </Text>
+              </View>
+            </View>
+            <View className="items-end mr-1">
+              {choppedMatch ? (
+                <Text style={{ fontVariant: ["tabular-nums"] }} className="text-white font-bold text-[13px]">
+                  {choppedMatch.eliminatedWeek !== undefined
+                    ? `Chopped · Wk ${choppedMatch.eliminatedWeek}`
+                    : `Rank #${choppedMatch.rank ?? "-"}`}
+                </Text>
+              ) : (
+                <Text style={{ fontVariant: ["tabular-nums"] }} className="text-white font-bold text-[13px]">
+                  {l.wins}-{l.losses}
+                </Text>
+              )}
+              <Text style={{ fontVariant: ["tabular-nums"] }} className="text-gray-500 text-[11px]">
+                {l.pointsFor.toFixed(1)} pts
               </Text>
             </View>
-          </View>
-          <View className="items-end mr-1">
-            <Text style={{ fontVariant: ["tabular-nums"] }} className="text-white font-bold text-[13px]">
-              {l.wins}-{l.losses}
-            </Text>
-            <Text style={{ fontVariant: ["tabular-nums"] }} className="text-gray-500 text-[11px]">
-              {l.pointsFor.toFixed(1)} pts
-            </Text>
-          </View>
-          <Feather name="chevron-right" size={16} color="#6b7280" />
-        </Pressable>
-      ))}
+            <Feather name="chevron-right" size={16} color="#6b7280" />
+          </Pressable>
+        );
+      })}
 
       {/* This Week's Matchups */}
       {matchups === null ? (
@@ -205,17 +222,41 @@ export default function ProfileActivity({
                 </Text>
                 {m.isLive && <LiveBadge />}
               </View>
-              <View className="flex-row items-center justify-between">
-                <MatchupSide name={m.myTeamName} score={m.myScore} leading={m.myScore >= m.oppScore} avatar={m.myAvatar} />
-                <Text className="text-gray-600 text-[11px] mx-2">vs</Text>
-                <MatchupSide
-                  name={m.oppTeamName}
-                  score={m.oppScore}
-                  leading={m.oppScore > m.myScore}
-                  avatar={m.oppAvatar}
-                  align="right"
-                />
-              </View>
+              {m.isChoppedFormat ? (
+                // No head-to-head opponent in a Chopped-format league -
+                // show this manager's standing instead: their live rank
+                // among survivors, or which week they were chopped.
+                <View className="flex-row items-center justify-between">
+                  <View className="flex-row items-center gap-2 flex-1 mr-2">
+                    <Avatar url={m.myAvatar} name={m.myTeamName} size={26} />
+                    <Text numberOfLines={1} className="text-white text-[13px] font-semibold flex-1">
+                      {m.myTeamName}
+                    </Text>
+                  </View>
+                  {m.eliminatedWeek !== undefined ? (
+                    <Text className="text-[#ef4444] text-[13px] font-extrabold">
+                      Chopped · Wk {m.eliminatedWeek}
+                    </Text>
+                  ) : (
+                    <Text className="text-white text-[15px] font-extrabold">
+                      Rank {m.rank ?? "-"}
+                      {m.totalActiveTeams ? <Text className="text-gray-500 text-[12px] font-semibold"> of {m.totalActiveTeams}</Text> : null}
+                    </Text>
+                  )}
+                </View>
+              ) : (
+                <View className="flex-row items-center justify-between">
+                  <MatchupSide name={m.myTeamName} score={m.myScore} leading={m.myScore >= m.oppScore} avatar={m.myAvatar} />
+                  <Text className="text-gray-600 text-[11px] mx-2">vs</Text>
+                  <MatchupSide
+                    name={m.oppTeamName}
+                    score={m.oppScore}
+                    leading={m.oppScore > m.myScore}
+                    avatar={m.oppAvatar}
+                    align="right"
+                  />
+                </View>
+              )}
             </Pressable>
           ))}
         </View>
