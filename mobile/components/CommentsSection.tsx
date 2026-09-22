@@ -104,6 +104,8 @@ export default function CommentsSection({ targetType, targetId, leagueId, target
               currentUid={profile?.uid}
               liked={interactionState[c.id]?.liked ?? false}
               reposted={interactionState[c.id]?.reposted ?? false}
+              onPressReply={() => router.push(`/post/${c.id}`)}
+              onDeleted={() => setComments((prev) => prev.filter((p) => p.id !== c.id))}
             />
           ))}
         </View>

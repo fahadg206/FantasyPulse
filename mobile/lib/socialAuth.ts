@@ -220,6 +220,32 @@ export async function updateProfile(
   await setDoc(doc(db, "profiles", uid), updates, { merge: true });
 }
 
+/**
+ * Keeps a profile's picture in sync with its linked Sleeper account - a
+ * no-op once the user has uploaded their own photo (avatarIsCustom), and
+ * otherwise refreshes it to whatever Sleeper has now. linkSleeperAccount
+ * only sets this at the moment of linking; calling this whenever a profile
+ * is displayed also backfills it for any account that linked Sleeper
+ * before this existed, and keeps it current if they ever change their
+ * picture over on Sleeper.
+ */
+export async function ensureAvatarSynced(profile: UserProfile): Promise<UserProfile> {
+  if (!profile.sleeperUserId || profile.avatarIsCustom) return profile;
+  try {
+    const res = await fetch(`https://api.sleeper.app/v1/user/${profile.sleeperUserId}`);
+    if (!res.ok) return profile;
+    const sleeperUser = await res.json();
+    if (!sleeperUser?.avatar) return profile;
+    const avatar = `https://sleepercdn.com/avatars/thumbs/${sleeperUser.avatar}`;
+    if (avatar === profile.avatar) return profile;
+    await setDoc(doc(db, "profiles", profile.uid), { avatar }, { merge: true });
+    return { ...profile, avatar };
+  } catch (error) {
+    console.error("Error syncing Sleeper avatar:", error);
+    return profile;
+  }
+}
+
 /** links this app account to a real Sleeper account, for the Fantasy Profile's cross-league stats */
 export async function linkSleeperAccount(uid: string, sleeperUsername: string): Promise<void> {
   const res = await fetch(`https://api.sleeper.app/v1/user/${sleeperUsername.trim()}`);

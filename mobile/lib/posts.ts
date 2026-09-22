@@ -51,6 +51,8 @@ export interface Post {
   targetType?: "matchup" | "trade" | "waiver";
   targetId?: string;
   targetLabel?: string;
+  /** set when this post is a reply to another post - see getReplies/getPost */
+  parentPostId?: string;
   likeCount: number;
   replyCount: number;
   repostCount: number;
@@ -67,6 +69,7 @@ export interface CreatePostInput {
   targetType?: "matchup" | "trade" | "waiver";
   targetId?: string;
   targetLabel?: string;
+  parentPostId?: string;
 }
 
 const MAX_POST_LENGTH = 280;
@@ -97,12 +100,22 @@ export async function createPost(input: CreatePostInput): Promise<Post> {
     targetType: input.targetType ?? null,
     targetId: input.targetId ?? null,
     targetLabel: input.targetLabel ?? null,
+    parentPostId: input.parentPostId ?? null,
     likeCount: 0,
     replyCount: 0,
     repostCount: 0,
   };
 
   const ref = await addDoc(collection(db, "posts"), data);
+
+  if (input.parentPostId) {
+    const parentRef = doc(db, "posts", input.parentPostId);
+    const parentSnap = await getDoc(parentRef);
+    const currentReplyCount = (parentSnap.data()?.replyCount as number) ?? 0;
+    await updateDoc(parentRef, { replyCount: currentReplyCount + 1 }).catch((error) =>
+      console.error("Error updating parent reply count:", error)
+    );
+  }
 
   return {
     id: ref.id,
@@ -113,7 +126,26 @@ export async function createPost(input: CreatePostInput): Promise<Post> {
     targetType: input.targetType,
     targetId: input.targetId,
     targetLabel: input.targetLabel,
+    parentPostId: input.parentPostId,
   };
+}
+
+/** a single post by id - used by the thread screen to show what's being replied to */
+export async function getPost(postId: string): Promise<Post | null> {
+  const snap = await getDoc(doc(db, "posts", postId));
+  return snap.exists() ? { id: snap.id, ...(snap.data() as Omit<Post, "id">) } : null;
+}
+
+/** replies to one post, oldest first - a single equality filter + orderBy, so no composite index is needed */
+export async function getReplies(postId: string): Promise<Post[]> {
+  const q = query(collection(db, "posts"), where("parentPostId", "==", postId), orderBy("createdAtMs", "asc"));
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Post, "id">) }));
+}
+
+/** deletes a post outright - the author's own only, per firestore.rules. Any replies to it are left in place (their thread screen shows "This post was deleted" for the missing parent) rather than cascading, to keep this a single cheap write. */
+export async function deletePost(postId: string): Promise<void> {
+  await deleteDoc(doc(db, "posts", postId));
 }
 
 /** the public feed - every post, newest first, across every league */

@@ -13,6 +13,7 @@ import HomeCarousel from "../../../components/HomeCarousel";
 import HomePoll from "../../../components/HomePoll";
 import TransactionsTicker from "../../../components/TransactionsTicker";
 import TrendingPlayers from "../../../components/TrendingPlayers";
+import { announceLeagueTransactions } from "../../../lib/announceTransactions";
 
 const helmet = require("../../../assets/images/helmet2.png");
 
@@ -78,13 +79,22 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!leagueID) return;
+    setLeagueName("");
     (async () => {
-      const storedName = await storage.getItem(StorageKeys.selectedLeagueName);
-      if (storedName) setLeagueName(storedName);
+      // The cached name/id pair is only a fast paint for whichever league
+      // the user most recently picked from Select League - it's stale (or
+      // outright wrong) the moment you're viewing a different leagueID,
+      // like jumping into another manager's league from their profile, so
+      // it's only trusted when the cached id actually matches this one.
+      const [storedId, storedName] = await Promise.all([
+        storage.getItem(StorageKeys.selectedLeagueID),
+        storage.getItem(StorageKeys.selectedLeagueName),
+      ]);
+      if (storedId === leagueID && storedName) setLeagueName(storedName);
       try {
         const { data } = await sleeper.getLeague(leagueID);
         setLeagueAvatar(data?.avatar ?? null);
-        if (!storedName && data?.name) setLeagueName(data.name);
+        if (data?.name) setLeagueName(data.name);
       } catch (error) {
         console.error("Error fetching league info:", error);
       }
@@ -133,6 +143,18 @@ export default function Dashboard() {
     return () => {
       cancelled = true;
     };
+  }, [leagueID]);
+
+  useEffect(() => {
+    if (!leagueID) return;
+    // The dashboard is the most-visited screen in the app - backfilling
+    // Boogie's trade/waiver posts here (not just from the Trades tab)
+    // means the whole season's transaction history gets announced the
+    // moment anyone opens the league, not only once someone happens to
+    // tap into Trades specifically.
+    announceLeagueTransactions(leagueID).catch((error) =>
+      console.error("Error backfilling Boogie's transaction posts:", error)
+    );
   }, [leagueID]);
 
   if (!leagueID) return null;

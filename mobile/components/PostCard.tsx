@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { View, Text, Pressable, Image, Share } from "react-native";
+import { View, Text, Pressable, Image, Share, Alert } from "react-native";
 import { useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import type { Post } from "../lib/posts";
-import { toggleLike, toggleRepost, BOOGIE_UID } from "../lib/posts";
+import { toggleLike, toggleRepost, deletePost, BOOGIE_UID } from "../lib/posts";
 import { formatTwitterTimestamp } from "../lib/formatTime";
 import Avatar from "./Avatar";
 
@@ -21,6 +21,8 @@ interface PostCardProps {
   reposted: boolean;
   onPressReply?: () => void;
   onPressTarget?: () => void;
+  /** called after a successful delete, so the caller can drop this post from its own list */
+  onDeleted?: () => void;
 }
 
 export default function PostCard({
@@ -30,14 +32,17 @@ export default function PostCard({
   reposted: initialReposted,
   onPressReply,
   onPressTarget,
+  onDeleted,
 }: PostCardProps) {
   const router = useRouter();
   const [liked, setLiked] = useState(initialLiked);
   const [likeCount, setLikeCount] = useState(post.likeCount);
   const [reposted, setReposted] = useState(initialReposted);
   const [repostCount, setRepostCount] = useState(post.repostCount);
+  const [deleting, setDeleting] = useState(false);
 
   const canInteract = !!currentUid;
+  const isOwnPost = !!currentUid && currentUid === post.authorUid;
   // Auto-announced posts (a trade, a waiver move, a final score) come from
   // Boogie The Writer, the same staff-writer persona used for Articles -
   // there's no real profile behind the byline, so it's shown as a
@@ -76,7 +81,29 @@ export default function PostCard({
     Share.share({ message: post.text }).catch(() => {});
   };
 
+  const onDelete = () => {
+    Alert.alert("Delete post?", "This can't be undone.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          setDeleting(true);
+          try {
+            await deletePost(post.id);
+            onDeleted?.();
+          } catch (error) {
+            console.error("Error deleting post:", error);
+            setDeleting(false);
+          }
+        },
+      },
+    ]);
+  };
+
   const goToProfile = isBoogie ? undefined : () => router.push(`/profile/${post.authorUsername}`);
+
+  if (deleting) return null;
 
   return (
     <View className="flex-row px-4 py-3 border-b border-white/10">
@@ -85,16 +112,23 @@ export default function PostCard({
       </Pressable>
 
       <View className="flex-1">
-        <View className="flex-row items-center flex-wrap">
-          <Pressable onPress={goToProfile} disabled={isBoogie}>
-            <View className="flex-row items-center gap-1">
-              <Text className="text-white font-bold text-[14px]">{post.authorDisplayName}</Text>
-              {isBoogie && <Feather name="check-circle" size={13} color="#af1222" />}
-            </View>
-          </Pressable>
-          <Text className="text-gray-500 text-[13px] ml-1">
-            @{post.authorUsername} · {formatTwitterTimestamp(post.createdAtMs)}
-          </Text>
+        <View className="flex-row items-center justify-between">
+          <View className="flex-row items-center flex-wrap flex-1 mr-2">
+            <Pressable onPress={goToProfile} disabled={isBoogie}>
+              <View className="flex-row items-center gap-1">
+                <Text className="text-white font-bold text-[14px]">{post.authorDisplayName}</Text>
+                {isBoogie && <Feather name="check-circle" size={13} color="#af1222" />}
+              </View>
+            </Pressable>
+            <Text className="text-gray-500 text-[13px] ml-1">
+              @{post.authorUsername} · {formatTwitterTimestamp(post.createdAtMs)}
+            </Text>
+          </View>
+          {isOwnPost && (
+            <Pressable onPress={onDelete} hitSlop={8}>
+              <Feather name="trash-2" size={14} color="#6b7280" />
+            </Pressable>
+          )}
         </View>
 
         {!!post.text && <Text className="text-white text-[15px] mt-0.5 leading-[20px]">{post.text}</Text>}

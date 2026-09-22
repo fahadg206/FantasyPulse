@@ -4,7 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import type { User } from "firebase/auth";
-import { onAuthChange, isReadOnly, getUserProfileByUsername, UserProfile } from "../../lib/socialAuth";
+import { onAuthChange, isReadOnly, getUserProfileByUsername, ensureAvatarSynced, UserProfile } from "../../lib/socialAuth";
 import { getFantasyProfileStats, FantasyProfileStats } from "../../lib/fantasyProfile";
 import { followUser, unfollowUser, isFollowing, getFollowingUids, getFollowerUids } from "../../lib/follows";
 import ProfileActivity from "../../components/ProfileActivity";
@@ -28,7 +28,10 @@ export default function PublicProfile() {
 
   useEffect(() => {
     if (!username) return;
-    getUserProfileByUsername(username).then(setProfile).catch(() => setProfile(null));
+    getUserProfileByUsername(username)
+      .then((p) => (p ? ensureAvatarSynced(p) : null))
+      .then(setProfile)
+      .catch(() => setProfile(null));
   }, [username]);
 
   useEffect(() => {

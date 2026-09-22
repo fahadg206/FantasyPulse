@@ -3,21 +3,25 @@ import { Feather } from "@expo/vector-icons";
 import { BOOGIE_UID } from "../lib/posts";
 
 const boogieImg = require("../assets/images/boogie.png");
+const helmetImg = require("../assets/images/helmet2.png");
 
-// One avatar renderer for every place a user's picture shows up (posts,
-// profile headers, compose boxes): a real photo when there is one, Boogie's
-// real staff-writer photo for auto-announced posts, and a colored initial
-// circle as the fallback everywhere else - so nothing crashes or shows a
-// broken image just because a manager hasn't set a picture yet.
+// One avatar renderer for every place a picture shows up (posts, profile
+// headers, compose boxes, league rows): a real photo when there is one,
+// Boogie's real staff-writer photo for auto-announced posts, the Fantasy
+// Pulse helmet for a league with no picture of its own, and a colored
+// initial circle as the fallback for a user with no picture - so nothing
+// crashes or shows a broken image just because something hasn't set one.
 
 interface AvatarProps {
   uid?: string;
   url?: string | null;
   name: string;
   size?: number;
+  /** "league" swaps the no-picture fallback from an initial circle to the Fantasy Pulse helmet */
+  kind?: "user" | "league";
 }
 
-export default function Avatar({ uid, url, name, size = 42 }: AvatarProps) {
+export default function Avatar({ uid, url, name, size = 42, kind = "user" }: AvatarProps) {
   const dimension = { width: size, height: size, borderRadius: size / 2 };
 
   if (uid === BOOGIE_UID) {
@@ -30,6 +34,14 @@ export default function Avatar({ uid, url, name, size = 42 }: AvatarProps) {
 
   if (url) {
     return <Image source={{ uri: url }} style={dimension} className="bg-white/10" resizeMode="cover" />;
+  }
+
+  if (kind === "league") {
+    return (
+      <View style={[dimension, { overflow: "hidden" }]} className="bg-brand/10 items-center justify-center">
+        <Image source={helmetImg} style={{ width: size * 0.78, height: size * 0.78 }} resizeMode="contain" />
+      </View>
+    );
   }
 
   return (

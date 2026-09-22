@@ -26,6 +26,7 @@ import {
   completeProfile,
   validateUsername,
   uploadAndSetAvatar,
+  ensureAvatarSynced,
   UserProfile,
 } from "../../lib/socialAuth";
 import { getFantasyProfileStats, FantasyProfileStats } from "../../lib/fantasyProfile";
@@ -61,6 +62,7 @@ export default function ProfileHome() {
     }
     setProfileChecked(false);
     getUserProfile(authUser.uid)
+      .then((p) => (p ? ensureAvatarSynced(p) : null))
       .then(setProfile)
       .catch((error) => {
         console.error(error);

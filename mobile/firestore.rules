@@ -53,7 +53,9 @@ service cloud.firestore {
       allow update: if request.auth != null
         && request.resource.data.diff(resource.data).affectedKeys()
              .hasOnly(['likeCount', 'repostCount', 'replyCount']);
-      allow delete: if false;
+      // Only the author can delete their own post - Boogie's posts have no
+      // matching request.auth.uid so no one can delete those this way.
+      allow delete: if request.auth != null && resource.data.authorUid == request.auth.uid;
     }
 
     // posts.ts: one doc per (post, user) like/repost relationship, doc id

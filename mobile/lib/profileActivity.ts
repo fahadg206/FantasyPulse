@@ -181,6 +181,7 @@ export interface WeeklyMatchup {
   leagueId: string;
   leagueName: string;
   week: number;
+  matchupId: string;
   myTeamName: string;
   myScore: number;
   oppTeamName: string;
@@ -232,6 +233,7 @@ export async function getWeeklyMatchups(
           leagueId: league.leagueId,
           leagueName: league.leagueName,
           week,
+          matchupId: String(myMatchup.matchup_id),
           myTeamName: teamName(myRoster.roster_id),
           myScore: myMatchup.points ?? 0,
           oppTeamName: opponent ? teamName(opponent.roster_id) : "No opponent",

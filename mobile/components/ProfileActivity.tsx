@@ -68,7 +68,14 @@ export default function ProfileActivity({ sleeperUserId, stats }: { sleeperUserI
           {matchups.map((m) => (
             <Pressable
               key={m.leagueId}
-              onPress={() => router.push(`/league/${m.leagueId}` as any)}
+              onPress={() =>
+                m.hasOpponent
+                  ? router.push({
+                      pathname: "/league/[leagueID]/matchup",
+                      params: { leagueID: m.leagueId, week: String(m.week), matchupID: m.matchupId },
+                    } as any)
+                  : router.push(`/league/${m.leagueId}` as any)
+              }
               className="bg-[#141416] rounded-2xl border border-white/10 p-3.5 mb-2.5"
             >
               <Text numberOfLines={1} className="text-gray-500 text-[10px] font-bold mb-2">
@@ -147,7 +154,7 @@ export default function ProfileActivity({ sleeperUserId, stats }: { sleeperUserI
           className="flex-row items-center justify-between bg-[#141416] rounded-xl border border-white/10 px-4 py-3 mb-2"
         >
           <View className="flex-row items-center flex-1 mr-2">
-            <Avatar url={l.avatar} name={l.leagueName} size={28} />
+            <Avatar url={l.avatar} name={l.leagueName} size={28} kind="league" />
             <View className="ml-2.5 flex-1">
               <Text numberOfLines={1} className="text-white font-semibold text-[13px]">
                 {l.leagueName}
