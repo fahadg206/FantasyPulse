@@ -81,7 +81,10 @@ export default function Feed() {
 
   return (
     <SafeAreaView className="flex-1 bg-[#0c0c0e]">
-      <View className="flex-row items-center justify-center px-4 py-3 border-b border-white/10">
+      <View className="flex-row items-center px-4 py-3 border-b border-white/10">
+        <Pressable onPress={() => router.push("/")} hitSlop={10} className="mr-3">
+          <Feather name="arrow-left" size={20} color="#fff" />
+        </Pressable>
         <Text className="text-white text-[17px] font-bold">Feed</Text>
       </View>
 
