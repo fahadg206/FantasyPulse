@@ -148,9 +148,29 @@ export async function deletePost(postId: string): Promise<void> {
   await deleteDoc(doc(db, "posts", postId));
 }
 
-/** the public feed - every post, newest first, across every league */
+/** @deprecated every post across every league, mixed together - kept only for reference; the Feed screen and its dashboard preview both use getFeedPostsForLeague now, since a league's feed showing another league's trades/scores/Boogie posts was the actual bug being fixed */
 export async function getFeedPosts(limitCount = 30): Promise<Post[]> {
   const q = query(collection(db, "posts"), orderBy("createdAtMs", "desc"), fsLimit(limitCount));
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Post, "id">) }));
+}
+
+/**
+ * The feed for one specific league, newest first - every post created
+ * while viewing that league (a real manager's own tweet composed there,
+ * plus Boogie's auto-announced trades/waivers/final scores, which always
+ * carry the leagueId they're about). Someone following a specific
+ * league's updates should only ever see that league's posts, not another
+ * league's Boogie announcements mixed in - which is exactly what the old
+ * getFeedPosts (no league filter at all) got wrong.
+ */
+export async function getFeedPostsForLeague(leagueId: string, limitCount = 30): Promise<Post[]> {
+  const q = query(
+    collection(db, "posts"),
+    where("leagueId", "==", leagueId),
+    orderBy("createdAtMs", "desc"),
+    fsLimit(limitCount)
+  );
   const snap = await getDocs(q);
   return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Post, "id">) }));
 }

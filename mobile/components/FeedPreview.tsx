@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { View, Text, Pressable, ActivityIndicator } from "react-native";
 import { useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
-import { getFeedPosts, Post } from "../lib/posts";
+import { getFeedPostsForLeague, Post } from "../lib/posts";
 import PostCard from "./PostCard";
 
 // What used to be the AI-generated headlines carousel at the top of the
@@ -11,13 +11,18 @@ import PostCard from "./PostCard";
 // moment anyone opens the league. A lightweight, read-only preview (no
 // like/repost here, and no per-post interaction-state fetch) that hands
 // off to the real Feed screen for anything more than a glance.
-export default function FeedPreview() {
+//
+// Scoped to this specific league - someone opening one league's dashboard
+// shouldn't see another league's Boogie announcements or trade posts
+// mixed in here, any more than the full Feed screen should.
+export default function FeedPreview({ leagueID }: { leagueID: string }) {
   const router = useRouter();
   const [posts, setPosts] = useState<Post[] | null>(null);
 
   useEffect(() => {
+    if (!leagueID) return;
     let cancelled = false;
-    getFeedPosts(4)
+    getFeedPostsForLeague(leagueID, 4)
       .then((r) => !cancelled && setPosts(r))
       .catch((error) => {
         console.error("Error loading feed preview:", error);
@@ -26,13 +31,15 @@ export default function FeedPreview() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [leagueID]);
+
+  const goToFeed = () => router.push({ pathname: "/feed", params: { leagueID } });
 
   return (
     <View>
       <View className="flex-row items-center justify-between px-4 mb-3">
         <Text className="text-[13px] font-bold tracking-wider text-gray-500">FEED</Text>
-        <Pressable onPress={() => router.push("/feed")} className="flex-row items-center gap-1" hitSlop={6}>
+        <Pressable onPress={goToFeed} className="flex-row items-center gap-1" hitSlop={6}>
           <Text className="text-brand text-[12px] font-semibold">See All</Text>
           <Feather name="chevron-right" size={12} color="#af1222" />
         </Pressable>
@@ -41,7 +48,7 @@ export default function FeedPreview() {
       {posts === null ? (
         <ActivityIndicator color="#af1222" className="py-6" />
       ) : posts.length === 0 ? (
-        <Pressable onPress={() => router.push("/feed")} className="px-4">
+        <Pressable onPress={goToFeed} className="px-4">
           <Text className="text-gray-500 text-[12px]">Nothing here yet - be the first to post.</Text>
         </Pressable>
       ) : (

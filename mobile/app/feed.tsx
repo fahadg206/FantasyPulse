@@ -1,16 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, Pressable, FlatList, ActivityIndicator, RefreshControl } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import type { User } from "firebase/auth";
 import { onAuthChange, isReadOnly, getUserProfile, UserProfile } from "../lib/socialAuth";
-import { getFeedPosts, createPost, isPostLiked, isPostReposted, Post } from "../lib/posts";
+import { getFeedPostsForLeague, createPost, isPostLiked, isPostReposted, Post } from "../lib/posts";
 import PostCard from "../components/PostCard";
 import ComposeBox from "../components/ComposeBox";
 
+// League-scoped, like the dashboard's FeedPreview it's reached from -
+// someone following one league's updates shouldn't see another league's
+// Boogie announcements or trade posts mixed in.
 export default function Feed() {
   const router = useRouter();
+  const { leagueID } = useLocalSearchParams<{ leagueID: string }>();
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [posts, setPosts] = useState<Post[]>([]);
@@ -42,9 +46,13 @@ export default function Feed() {
   const requestIdRef = useRef(0);
 
   const loadFeed = useCallback(async () => {
+    if (!leagueID) {
+      setLoading(false);
+      return;
+    }
     const requestId = ++requestIdRef.current;
     try {
-      const feedPosts = await getFeedPosts(30);
+      const feedPosts = await getFeedPostsForLeague(leagueID, 30);
       if (requestIdRef.current !== requestId) return;
       setPosts(feedPosts);
 
@@ -72,7 +80,7 @@ export default function Feed() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authUser]);
+  }, [authUser, leagueID]);
 
   useEffect(() => {
     loadFeed();
@@ -84,7 +92,7 @@ export default function Feed() {
   };
 
   const submitPost = async (text: string, imageUrl?: string) => {
-    if (!profile) return;
+    if (!profile || !leagueID) return;
     const post = await createPost({
       authorUid: profile.uid,
       authorUsername: profile.username,
@@ -92,15 +100,33 @@ export default function Feed() {
       authorAvatar: profile.avatar,
       text,
       imageUrl,
+      leagueId: leagueID,
     });
     setPosts((prev) => [post, ...prev]);
     setInteractionState((prev) => ({ ...prev, [post.id]: { liked: false, reposted: false } }));
   };
 
+  if (!leagueID) {
+    return (
+      <SafeAreaView className="flex-1 bg-[#0c0c0e] items-center justify-center px-6">
+        <Text className="text-gray-500 text-[13px] text-center">
+          Open the Feed from inside a league to see its updates.
+        </Text>
+        <Pressable onPress={() => router.push("/")} className="mt-4">
+          <Text className="text-brand text-[13px] font-semibold">Go to your leagues</Text>
+        </Pressable>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView className="flex-1 bg-[#0c0c0e]">
       <View className="flex-row items-center px-4 py-3 border-b border-white/10">
-        <Pressable onPress={() => router.push("/")} hitSlop={10} className="mr-3">
+        <Pressable
+          onPress={() => router.push({ pathname: "/league/[leagueID]", params: { leagueID } } as any)}
+          hitSlop={10}
+          className="mr-3"
+        >
           <Feather name="arrow-left" size={20} color="#fff" />
         </Pressable>
         <Text className="text-white text-[17px] font-bold">Feed</Text>

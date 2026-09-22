@@ -258,7 +258,7 @@ export default function Dashboard() {
       </View>
 
       <View className="pt-7">
-        <FeedPreview />
+        <FeedPreview leagueID={leagueID} />
       </View>
 
       <View className="pt-7">
