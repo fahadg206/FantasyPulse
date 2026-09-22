@@ -127,6 +127,12 @@ export default function ProfileHome() {
 
   return (
     <SafeAreaView className="flex-1 bg-[#0c0c0e]">
+      <View className="flex-row items-center px-4 py-3 border-b border-white/10">
+        <Pressable onPress={() => router.push("/")} hitSlop={10} className="mr-3">
+          <Feather name="arrow-left" size={20} color="#fff" />
+        </Pressable>
+        <Text className="text-white text-[17px] font-bold">Fantasy Profile</Text>
+      </View>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1">
         <ScrollView contentContainerClassName="px-5 pt-8 pb-12" showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           <View className="items-center mb-6">

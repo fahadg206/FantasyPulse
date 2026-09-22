@@ -8,7 +8,7 @@ import {
   type User,
 } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore/lite";
-import { auth, db } from "./firebase";
+import { auth, db, authReady } from "./firebase";
 import { pickImage, uploadImageAsync } from "./mediaUpload";
 
 // Real accounts, on top of the app-wide anonymous session that already
@@ -92,6 +92,13 @@ export async function signUp(
   email: string,
   displayName?: string
 ): Promise<UserProfile> {
+  // Guards against the brief window right after cold start where the
+  // app's own anonymous-session fallback hasn't finished yet - a
+  // Firestore call made before that resolves hits every rule's
+  // `request.auth != null` check as if signed out, surfacing as a raw
+  // "Missing or insufficient permissions" error. See firebase.ts.
+  await authReady;
+
   const trimmedSleeperUsername = sleeperUsername.trim();
   if (!trimmedSleeperUsername) throw new Error("Enter your Sleeper username.");
   if (password.length < 6) throw new Error("Password must be at least 6 characters.");
@@ -192,6 +199,9 @@ export async function completeProfile(user: User, username: string, displayName?
 }
 
 export async function signIn(usernameOrEmail: string, password: string): Promise<UserProfile> {
+  // See the matching comment in signUp - same race, same fix.
+  await authReady;
+
   const trimmed = usernameOrEmail.trim();
   let email: string;
 

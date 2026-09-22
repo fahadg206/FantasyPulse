@@ -20,3 +20,15 @@ export function formatTwitterTimestamp(ms: number): string {
     year: sameYear ? undefined : "numeric",
   });
 }
+
+/** "9:41 PM · 8/22/26" - the full timestamp shown on a post's own expanded/detail view, not the relative one used in a feed row */
+export function formatAbsoluteTimestamp(ms: number): string {
+  const date = new Date(ms);
+  const time = date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  const dateStr = date.toLocaleDateString("en-US", {
+    month: "numeric",
+    day: "numeric",
+    year: "2-digit",
+  });
+  return `${time} · ${dateStr}`;
+}

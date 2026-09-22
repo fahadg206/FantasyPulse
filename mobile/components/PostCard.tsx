@@ -4,7 +4,7 @@ import { useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import type { Post } from "../lib/posts";
 import { toggleLike, toggleRepost, deletePost, BOOGIE_UID, BOOGIE_USERNAME } from "../lib/posts";
-import { formatTwitterTimestamp } from "../lib/formatTime";
+import { formatTwitterTimestamp, formatAbsoluteTimestamp } from "../lib/formatTime";
 import Avatar from "./Avatar";
 import ReplyModal from "./ReplyModal";
 
@@ -27,6 +27,8 @@ interface PostCardProps {
   onReplied?: (reply: Post) => void;
   /** suppresses tap-to-expand - for the root post on its own thread screen, where tapping it would just re-open the screen it's already on */
   disableExpand?: boolean;
+  /** the larger "detail view" layout real Twitter shows for the post a thread screen is actually about - bigger avatar and text, the timestamp on its own full line, a full-width icon row - instead of the normal compact feed row. Implies disableExpand (nothing to expand into, it's already the expanded view). */
+  expanded?: boolean;
 }
 
 export default function PostCard({
@@ -38,6 +40,7 @@ export default function PostCard({
   onDeleted,
   onReplied,
   disableExpand,
+  expanded,
 }: PostCardProps) {
   const router = useRouter();
   const [liked, setLiked] = useState(initialLiked);
@@ -127,6 +130,117 @@ export default function PostCard({
   const expandPost = () => router.push(`/post/${post.id}`);
 
   if (deleting) return null;
+
+  const replyModal = canInteract && currentUid && (
+    <ReplyModal
+      visible={replyModalOpen}
+      onClose={() => setReplyModalOpen(false)}
+      post={post}
+      currentUid={currentUid}
+      onReplied={(reply) => {
+        setReplyCount((c) => c + 1);
+        onReplied?.(reply);
+      }}
+    />
+  );
+
+  // The larger "detail view" real Twitter shows at the top of a thread -
+  // avatar/name/handle as their own header line (not squeezed beside the
+  // text), the post text itself in a noticeably bigger size, the full
+  // timestamp+date on its own line (no view count - this app doesn't
+  // track one, so it's left out rather than faked), then a full-width,
+  // evenly spaced icon row.
+  if (expanded) {
+    return (
+      <View className="px-4 pt-3 pb-1">
+        <View className="flex-row items-center justify-between mb-3">
+          <Pressable onPress={goToProfile} disabled={isBoogie} className="flex-row items-center flex-1 mr-2">
+            <Avatar uid={post.authorUid} url={post.authorAvatar} name={post.authorDisplayName} size={52} />
+            <View className="ml-3 flex-1">
+              <View className="flex-row items-center gap-1">
+                <Text numberOfLines={1} className="text-white font-bold text-[16px]">
+                  {post.authorDisplayName}
+                </Text>
+                {isBoogie && <Feather name="check-circle" size={14} color="#af1222" />}
+              </View>
+              <Text className="text-gray-500 text-[14px]">@{authorUsername}</Text>
+            </View>
+          </Pressable>
+          {isOwnPost && (
+            <Pressable onPress={onDelete} hitSlop={8}>
+              <Feather name="trash-2" size={16} color="#6b7280" />
+            </Pressable>
+          )}
+        </View>
+
+        {!!post.text && <Text className="text-white text-[20px] leading-[26px] mb-3">{post.text}</Text>}
+
+        {post.matchupCard && <MatchupCardView card={post.matchupCard} />}
+
+        {post.imageUrl && (
+          <Image
+            source={{ uri: post.imageUrl }}
+            className="w-full rounded-2xl mb-3 bg-white/5"
+            style={{ aspectRatio: 16 / 9 }}
+            resizeMode="cover"
+          />
+        )}
+
+        {post.targetLabel && (
+          <Pressable
+            onPress={onPressTarget}
+            className="flex-row items-center gap-1.5 mb-3 px-2.5 py-1.5 rounded-lg bg-white/5 self-start"
+          >
+            <Feather
+              name={post.targetType === "trade" ? "repeat" : post.targetType === "waiver" ? "trending-up" : "activity"}
+              size={11}
+              color="#9ca3af"
+            />
+            <Text className="text-gray-400 text-[11px]">{post.targetLabel}</Text>
+          </Pressable>
+        )}
+
+        <Text className="text-gray-500 text-[14px] pb-3 border-b border-white/10">
+          {formatAbsoluteTimestamp(post.createdAtMs)}
+        </Text>
+
+        <View className="flex-row items-center justify-between py-3 border-b border-white/10">
+          <Pressable
+            onPress={() => (canInteract ? setReplyModalOpen(true) : router.push("/profile"))}
+            className="flex-row items-center gap-2"
+            hitSlop={8}
+          >
+            <Feather name="message-circle" size={20} color="#9ca3af" />
+            {replyCount > 0 && <Text className="text-gray-500 text-[13px]">{replyCount}</Text>}
+          </Pressable>
+
+          <Pressable onPress={onRepost} disabled={!canInteract} className="flex-row items-center gap-2" hitSlop={8}>
+            <Feather name="repeat" size={20} color={reposted ? "#00ba7c" : "#9ca3af"} />
+            {repostCount > 0 && (
+              <Text style={{ color: reposted ? "#00ba7c" : "#6b7280" }} className="text-[13px]">
+                {repostCount}
+              </Text>
+            )}
+          </Pressable>
+
+          <Pressable onPress={onLike} disabled={!canInteract} className="flex-row items-center gap-2" hitSlop={8}>
+            <Feather name="heart" size={20} color={liked ? "#f91880" : "#9ca3af"} />
+            {likeCount > 0 && (
+              <Text style={{ color: liked ? "#f91880" : "#6b7280" }} className="text-[13px]">
+                {likeCount}
+              </Text>
+            )}
+          </Pressable>
+
+          <Pressable onPress={onShare} hitSlop={8}>
+            <Feather name="share" size={20} color="#9ca3af" />
+          </Pressable>
+        </View>
+
+        {replyModal}
+      </View>
+    );
+  }
 
   return (
     <Pressable
@@ -219,18 +333,7 @@ export default function PostCard({
         </View>
       </View>
 
-      {canInteract && currentUid && (
-        <ReplyModal
-          visible={replyModalOpen}
-          onClose={() => setReplyModalOpen(false)}
-          post={post}
-          currentUid={currentUid}
-          onReplied={(reply) => {
-            setReplyCount((c) => c + 1);
-            onReplied?.(reply);
-          }}
-        />
-      )}
+      {replyModal}
     </Pressable>
   );
 }

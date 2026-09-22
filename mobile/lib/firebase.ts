@@ -46,9 +46,29 @@ export const storageBucket = firebaseConfig.storageBucket;
 // anonymous one on every single cold start, which is what made staying
 // signed in seem impossible. onAuthStateChanged's first callback reflects
 // whatever session (real, anonymous, or none) the SDK already restored.
+//
+// authReady resolves once that initial check - and, if it fell through to
+// the anonymous fallback, that sign-in too - is actually done, so
+// request.auth is guaranteed non-null server-side by the time anything
+// awaits it. Without this, a Firestore call made in the brief window
+// before the fallback finishes (someone opening the app and immediately
+// tapping Sign In, for instance) hits every rule's `request.auth != null`
+// check as if signed out entirely - surfacing as a raw "Missing or
+// insufficient permissions" error on something as simple as looking up a
+// username, since nothing was gating that call on auth actually being
+// ready yet.
+let resolveAuthReady: () => void;
+export const authReady: Promise<void> = new Promise((resolve) => {
+  resolveAuthReady = resolve;
+});
+
 const unsubscribeInitialAuthCheck = onAuthStateChanged(auth, (user) => {
   unsubscribeInitialAuthCheck();
   if (!user) {
-    signInAnonymously(auth).catch((e) => console.error("Anonymous sign-in error:", e));
+    signInAnonymously(auth)
+      .catch((e) => console.error("Anonymous sign-in error:", e))
+      .finally(() => resolveAuthReady());
+  } else {
+    resolveAuthReady();
   }
 });

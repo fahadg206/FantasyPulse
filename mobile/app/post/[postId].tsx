@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { View, Text, Pressable, FlatList, ActivityIndicator, KeyboardAvoidingView, Platform } from "react-native";
+import { View, Text, Pressable, FlatList, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import type { User } from "firebase/auth";
 import { onAuthChange, isReadOnly, getUserProfile, UserProfile } from "../../lib/socialAuth";
-import { getPost, getReplies, createPost, isPostLiked, isPostReposted, Post } from "../../lib/posts";
+import { getPost, getReplies, isPostLiked, isPostReposted, Post } from "../../lib/posts";
 import PostCard from "../../components/PostCard";
-import ComposeBox from "../../components/ComposeBox";
+import ReplyModal from "../../components/ReplyModal";
+import Avatar from "../../components/Avatar";
 
 // A single post's own thread - what it's replying to isn't shown (posts
 // don't chain further than one level up in this app), just the post itself
@@ -77,27 +78,12 @@ export default function PostThread() {
     load();
   }, [load]);
 
-  const submitReply = async (text: string, imageUrl?: string) => {
-    if (!profile || !post) return;
-    const reply = await createPost({
-      authorUid: profile.uid,
-      authorUsername: profile.username,
-      authorDisplayName: profile.displayName,
-      authorAvatar: profile.avatar,
-      text,
-      imageUrl,
-      parentPostId: post.id,
-    });
-    setReplies((prev) => [...prev, reply]);
-    setInteractionState((prev) => ({ ...prev, [reply.id]: { liked: false, reposted: false } }));
-    setPost((p) => (p ? { ...p, replyCount: p.replyCount + 1 } : p));
-  };
+  const [replyModalOpen, setReplyModalOpen] = useState(false);
 
   if (!postId) return null;
 
   return (
     <SafeAreaView className="flex-1 bg-[#0c0c0e]">
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1">
       <View className="flex-row items-center gap-3 px-4 py-3 border-b border-white/10">
         <Pressable onPress={() => router.back()} hitSlop={10}>
           <Feather name="arrow-left" size={20} color="#fff" />
@@ -129,7 +115,7 @@ export default function PostThread() {
                   setReplies((prev) => [...prev, reply]);
                   setInteractionState((prev) => ({ ...prev, [reply.id]: { liked: false, reposted: false } }));
                 }}
-                disableExpand
+                expanded
               />
               <View className="px-4 py-2.5 border-b border-white/10">
                 <Text className="text-[10px] font-bold tracking-widest text-gray-500">
@@ -156,7 +142,15 @@ export default function PostThread() {
       )}
 
       {profile ? (
-        <ComposeBox profile={profile} placeholder="Post your reply" compact submitLabel="Reply" onSubmit={submitReply} />
+        <Pressable
+          onPress={() => setReplyModalOpen(true)}
+          className="flex-row items-center gap-3 px-4 py-3 border-t border-white/10"
+        >
+          <Avatar uid={profile.uid} url={profile.avatar} name={profile.displayName} size={32} />
+          <View className="flex-1 bg-white/10 rounded-full px-4 py-2.5">
+            <Text className="text-gray-500 text-[14px]">Post your reply</Text>
+          </View>
+        </Pressable>
       ) : (
         <Pressable
           onPress={() => router.push("/profile")}
@@ -166,7 +160,20 @@ export default function PostThread() {
           <Text className="text-gray-500 text-[12px]">Sign in to reply</Text>
         </Pressable>
       )}
-      </KeyboardAvoidingView>
+
+      {post && profile && (
+        <ReplyModal
+          visible={replyModalOpen}
+          onClose={() => setReplyModalOpen(false)}
+          post={post}
+          currentUid={profile.uid}
+          onReplied={(reply) => {
+            setReplies((prev) => [...prev, reply]);
+            setInteractionState((prev) => ({ ...prev, [reply.id]: { liked: false, reposted: false } }));
+            setPost((p) => (p ? { ...p, replyCount: p.replyCount + 1 } : p));
+          }}
+        />
+      )}
     </SafeAreaView>
   );
 }
