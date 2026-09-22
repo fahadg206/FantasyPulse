@@ -1,14 +1,34 @@
 import axios from "axios";
+import { cachedFetch } from "./requestCache";
 
 const SLEEPER_BASE = "https://api.sleeper.app/v1";
+
+// League settings, scoring rules, and the users list are effectively
+// static for the whole session - the same league fetched from five
+// different screens in one sitting doesn't need five separate round trips.
+// Rosters get a much shorter TTL since settings.wins/losses/fpts do change
+// (once a week finalizes) - short enough to still dedupe a fast tab
+// switch, long enough that it's never the thing making a screen feel
+// stale. Matchups and the current NFL week are deliberately left
+// uncached below - those are exactly the live-scoring data that must
+// never be stale.
+const LEAGUE_META_TTL_MS = 10 * 60 * 1000;
+const ROSTERS_TTL_MS = 2 * 60 * 1000;
 
 export const sleeper = {
   getUser: (username: string) => axios.get(`${SLEEPER_BASE}/user/${username}`),
   getUserLeagues: (userId: string, season: string) =>
     axios.get(`${SLEEPER_BASE}/user/${userId}/leagues/nfl/${season}`),
-  getLeague: (leagueId: string) => axios.get(`${SLEEPER_BASE}/league/${leagueId}`),
-  getLeagueUsers: (leagueId: string) => axios.get(`${SLEEPER_BASE}/league/${leagueId}/users`),
-  getLeagueRosters: (leagueId: string) => axios.get(`${SLEEPER_BASE}/league/${leagueId}/rosters`),
+  getLeague: (leagueId: string) =>
+    cachedFetch(`league:${leagueId}`, LEAGUE_META_TTL_MS, () => axios.get(`${SLEEPER_BASE}/league/${leagueId}`)),
+  getLeagueUsers: (leagueId: string) =>
+    cachedFetch(`league-users:${leagueId}`, LEAGUE_META_TTL_MS, () =>
+      axios.get(`${SLEEPER_BASE}/league/${leagueId}/users`)
+    ),
+  getLeagueRosters: (leagueId: string) =>
+    cachedFetch(`league-rosters:${leagueId}`, ROSTERS_TTL_MS, () =>
+      axios.get(`${SLEEPER_BASE}/league/${leagueId}/rosters`)
+    ),
   getMatchups: (leagueId: string, week: number) =>
     axios.get(`${SLEEPER_BASE}/league/${leagueId}/matchups/${week}`),
   getNflState: () => axios.get(`${SLEEPER_BASE}/state/nfl`),
@@ -20,12 +40,22 @@ export const sleeper = {
 export const APP_ORIGIN = "https://www.fantasypulseff.com";
 
 export const backend = {
+  // By far the heaviest single request in the app (the full league-scoped
+  // player payload, names/positions/teams/weekly projections for
+  // thousands of players) and, before this cache, also the most
+  // frequently repeated - nearly every screen calls this for the same
+  // league. Player identity/position/team and this week's projections
+  // don't shift minute to minute, so a 10-minute cache costs nothing in
+  // staleness and removes what was often the single slowest thing a
+  // screen was waiting on.
   fetchPlayers: (leagueId: string) =>
-    fetch(`${APP_ORIGIN}/api/fetchPlayers`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ leagueId }),
-    }).then((r) => r.json()),
+    cachedFetch(`players:${leagueId}`, LEAGUE_META_TTL_MS, () =>
+      fetch(`${APP_ORIGIN}/api/fetchPlayers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ leagueId }),
+      }).then((r) => r.json())
+    ),
 
   // Sending a raw string as the body with no Content-Type left it up to
   // each runtime to guess how to encode it - on-device this occasionally

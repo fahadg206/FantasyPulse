@@ -73,6 +73,8 @@ export default function MatchupDetail() {
   const [playersDataForFeed, setPlayersDataForFeed] = useState<Record<string, any>>({});
   const [liveGameDetailsByTeam, setLiveGameDetailsByTeam] = useState<Record<string, LiveGameDetail>>({});
   const [weeklyPlayerStats, setWeeklyPlayerStats] = useState<Record<string, RawPlayerStats>>({});
+  /** roster_id -> season average points per game, straight off each roster's own settings - cheap (rosters are already cached in lib/api.ts) and the same "how do these two normally score" context the screenshot-style matchup preview shows. */
+  const [avgFptsByRoster, setAvgFptsByRoster] = useState<Record<string, number>>({});
   const nflGameStatusByTeam: Record<string, NflTeamGameState> = useMemo(
     () => Object.fromEntries(Object.entries(liveGameDetailsByTeam).map(([abbr, detail]) => [abbr, detail.state])),
     [liveGameDetailsByTeam]
@@ -105,6 +107,20 @@ export default function MatchupDetail() {
             if (!cancelled) setWeeklyPlayerStats(stats);
           })
           .catch((error) => console.error("Error fetching weekly player stats:", error));
+        sleeper
+          .getLeagueRosters(leagueID)
+          .then(({ data: rosters }) => {
+            if (cancelled) return;
+            const map: Record<string, number> = {};
+            for (const r of rosters as any[]) {
+              const games = (r.settings?.wins ?? 0) + (r.settings?.losses ?? 0) + (r.settings?.ties ?? 0);
+              if (games === 0) continue;
+              const totalPts = (r.settings?.fpts ?? 0) + (r.settings?.fpts_decimal ?? 0) / 100;
+              map[String(r.roster_id)] = totalPts / games;
+            }
+            setAvgFptsByRoster(map);
+          })
+          .catch((error) => console.error("Error fetching roster averages:", error));
         const teams = matchupMap.get(matchupID);
         const t1 = teams?.[0]?.user_id ?? null;
         const t2 = teams?.[1]?.user_id ?? null;
@@ -348,6 +364,22 @@ export default function MatchupDetail() {
           <TeamHeader name={team2.name} avatar={team2.avatar} record={total2} align="right" />
         </View>
 
+        {/* Season average points per game for each team - how they
+            normally score, not a live number, so it's shown regardless of
+            whether the game's started yet. */}
+        {(team1.roster_id !== undefined && avgFptsByRoster[team1.roster_id] !== undefined) ||
+        (team2.roster_id !== undefined && avgFptsByRoster[team2.roster_id] !== undefined) ? (
+          <View className="flex-row items-center justify-center gap-3 mt-3">
+            <Text style={{ fontVariant: ["tabular-nums"] }} className="text-[12px] font-bold text-gray-300">
+              {team1.roster_id !== undefined ? (avgFptsByRoster[team1.roster_id] ?? 0).toFixed(1) : "-"}
+            </Text>
+            <Text className="text-[9px] font-bold tracking-widest text-gray-500">AVG FPTS</Text>
+            <Text style={{ fontVariant: ["tabular-nums"] }} className="text-[12px] font-bold text-gray-300">
+              {team2.roster_id !== undefined ? (avgFptsByRoster[team2.roster_id] ?? 0).toFixed(1) : "-"}
+            </Text>
+          </View>
+        ) : null}
+
         <View className="items-center mt-3">
           <BigPlayToast play={matchupLatestPlay} />
         </View>
@@ -393,8 +425,12 @@ export default function MatchupDetail() {
           )}
         </View>
 
-        {/* Matchup Predictor */}
-        {(proj1 > 0 || proj2 > 0) && (
+        {/* Matchup Predictor - a win-probability projection only means
+            anything before the game's actually being decided by real
+            points; once either team has kicked off, the two teams'
+            starters are worth what they've actually scored, not what a
+            preseason-style projection guessed. */}
+        {preGame && (proj1 > 0 || proj2 > 0) && (
           <View className="mt-5">
             <MatchupPredictorRing
               pct1={pct1}

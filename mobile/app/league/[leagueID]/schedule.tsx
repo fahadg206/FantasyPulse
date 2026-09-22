@@ -5,7 +5,7 @@ import { Feather } from "@expo/vector-icons";
 import { MotiView } from "moti";
 import { sleeper, backend } from "../../../lib/api";
 import getMatchupData, { MatchupMapData, ScheduleData } from "../../../lib/getMatchupData";
-import { getSeasonTotals, getTopNForTeam, SeasonTotals, TopPerformer } from "../../../lib/getTopPerformers";
+import { getSeasonTotals, getTopNForTeam, getTopNCurrentForTeam, SeasonTotals, TopPerformer } from "../../../lib/getTopPerformers";
 import { getTeamLogo } from "../../../lib/nflTeams";
 import AnimatedNumber from "../../../components/AnimatedNumber";
 import {
@@ -183,16 +183,51 @@ export default function Schedule() {
 
       const team1Full = scheduleData[team1.user_id ?? ""];
       const team2Full = scheduleData[team2.user_id ?? ""];
+      // Pre-game: who's *expected* to lead scoring (season average, or a
+      // projection fallback before there's any history) - a forecast.
+      // Live or final: who's *actually* leading scoring this week, off the
+      // real points already on the board, not a season number that has
+      // nothing to do with what's happening in this matchup right now.
       const team1Top2 =
-        team1Full?.roster_id && displayWeek !== undefined
-          ? getTopNForTeam(seasonTotals, team1Full.roster_id, team1Full.starters_full_data ?? [], playersData, displayWeek, 2)
-          : [];
+        status === "upcoming"
+          ? team1Full?.roster_id && displayWeek !== undefined
+            ? getTopNForTeam(seasonTotals, team1Full.roster_id, starters1Full, playersData, displayWeek, 2)
+            : []
+          : getTopNCurrentForTeam(starters1Full, 2);
       const team2Top2 =
-        team2Full?.roster_id && displayWeek !== undefined
-          ? getTopNForTeam(seasonTotals, team2Full.roster_id, team2Full.starters_full_data ?? [], playersData, displayWeek, 2)
-          : [];
+        status === "upcoming"
+          ? team2Full?.roster_id && displayWeek !== undefined
+            ? getTopNForTeam(seasonTotals, team2Full.roster_id, starters2Full, playersData, displayWeek, 2)
+            : []
+          : getTopNCurrentForTeam(starters2Full, 2);
 
-      return { matchupID, team1, team2, preGame, status, team1Leading, team2Leading, team1Top2, team2Top2 };
+      // Same projected-margin / over-under the Dashboard's Scoreboard card
+      // shows for an upcoming game - each side's starters' projections for
+      // this week, summed.
+      let team1Proj = 0;
+      let team2Proj = 0;
+      for (const s of starters1Full) {
+        const proj = s.proj !== undefined ? parseFloat(s.proj) : undefined;
+        if (proj !== undefined && !Number.isNaN(proj)) team1Proj += proj;
+      }
+      for (const s of starters2Full) {
+        const proj = s.proj !== undefined ? parseFloat(s.proj) : undefined;
+        if (proj !== undefined && !Number.isNaN(proj)) team2Proj += proj;
+      }
+
+      return {
+        matchupID,
+        team1,
+        team2,
+        preGame,
+        status,
+        team1Leading,
+        team2Leading,
+        team1Top2,
+        team2Top2,
+        team1Proj,
+        team2Proj,
+      };
     })
     .filter((g): g is NonNullable<typeof g> => g !== null);
 
@@ -235,7 +270,7 @@ export default function Schedule() {
               <View className="flex-1 h-px bg-white/10" />
             </View>
 
-            {section.games.map(({ matchupID, team1, team2, preGame, status, team1Leading, team2Leading, team1Top2, team2Top2 }) => (
+            {section.games.map(({ matchupID, team1, team2, preGame, status, team1Leading, team2Leading, team1Top2, team2Top2, team1Proj, team2Proj }) => (
               <Pressable
                 key={matchupID}
                 onPress={() =>
@@ -275,6 +310,24 @@ export default function Schedule() {
                     performers={team2Top2}
                   />
                 </View>
+
+                {/* Projected margin + over/under - the same "nice data" the
+                    Dashboard's Scoreboard card shows for an upcoming game,
+                    now here too. Only means anything as a forecast, so it
+                    only shows pre-game - once real points are on the
+                    board the projection isn't news anymore. */}
+                {status === "upcoming" && (team1Proj > 0 || team2Proj > 0) && (
+                  <View className="border-t border-white/10 px-4 py-2 flex-row items-center justify-between">
+                    <Text numberOfLines={1} className="text-[10px] text-gray-400 font-semibold flex-1 mr-2">
+                      {Math.round(team1Proj) === Math.round(team2Proj)
+                        ? "PICK'EM"
+                        : team1Proj > team2Proj
+                          ? `${abbrevName(team1.name)} -${Math.round(team1Proj - team2Proj)}`
+                          : `${abbrevName(team2.name)} -${Math.round(team2Proj - team1Proj)}`}
+                    </Text>
+                    <Text className="text-[10px] text-gray-500">O/U {Math.round(team1Proj + team2Proj)}</Text>
+                  </View>
+                )}
               </Pressable>
             ))}
           </View>
@@ -282,6 +335,10 @@ export default function Schedule() {
       </ScrollView>
     </View>
   );
+}
+
+function abbrevName(name: string) {
+  return name.length > 14 ? `${name.slice(0, 13)}…` : name;
 }
 
 function PerformerLine({ performer }: { performer: TopPerformer }) {

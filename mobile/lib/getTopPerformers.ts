@@ -96,6 +96,21 @@ function topNFromProjections(starters: Starter[], playersData: any, currentWeek:
   return scored.sort((a, b) => b.ppg - a.ppg).slice(0, n);
 }
 
+// This week's actual top scorer(s) so far - not a season average. Once a
+// matchup is live (or final), "who's leading the scoring" should mean what
+// actually happened this week, not who's normally good - starters_full_data
+// already carries each player's real points for the week being viewed
+// (getMatchupData reads it straight off players_points), so this needs no
+// extra fetch.
+export function getTopNCurrentForTeam(starters: Starter[], n: number): TopPerformer[] {
+  const scored: TopPerformer[] = [];
+  for (const s of starters) {
+    if (!s.id) continue;
+    scored.push(toPerformer(s, parseFloat(s.points ?? "0"), false));
+  }
+  return scored.sort((a, b) => b.ppg - a.ppg).slice(0, n);
+}
+
 // Top N performers for one team, given season totals already fetched via
 // getSeasonTotals (or falling back to projections if there's no history yet).
 export function getTopNForTeam(
