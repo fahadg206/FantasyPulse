@@ -8,6 +8,7 @@ type MenuItem = {
   description: string;
   icon: React.ReactNode;
   path: string;
+  params?: Record<string, string>;
 };
 
 export default function More() {
@@ -18,9 +19,22 @@ export default function More() {
   const items: MenuItem[] = [
     {
       label: "Feed",
-      description: "What's happening across your leagues - post, reply, like",
+      description: "What's happening in this league - post, reply, like",
       icon: <Feather name="message-circle" size={20} color="#af1222" />,
       path: `/feed`,
+      params: { leagueID },
+    },
+    {
+      label: "Messages",
+      description: "Direct messages with other managers",
+      icon: <Feather name="mail" size={20} color="#af1222" />,
+      path: `/messages`,
+    },
+    {
+      label: "Notifications",
+      description: "Replies, likes, reposts, and new followers",
+      icon: <Feather name="bell" size={20} color="#af1222" />,
+      path: `/notifications`,
     },
     {
       label: "Fantasy Profile",
@@ -89,7 +103,7 @@ export default function More() {
         {items.map((item, i) => (
           <Pressable
             key={item.path}
-            onPress={() => router.push(item.path as any)}
+            onPress={() => router.push((item.params ? { pathname: item.path, params: item.params } : item.path) as any)}
             className={`flex-row items-center gap-3 px-4 py-4 bg-white dark:bg-[#151010] ${
               i !== items.length - 1 ? "border-b border-brand/10 dark:border-white/10" : ""
             }`}

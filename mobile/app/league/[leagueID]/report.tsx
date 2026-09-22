@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { View, Text, TextInput, Pressable, ScrollView, ActivityIndicator } from "react-native";
+import { View, Text, TextInput, Pressable, ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform } from "react-native";
 import { Feather } from "@expo/vector-icons";
 
 const PAGES = ["Home", "Articles", "Rivalry", "Schedule", "Standings", "League Managers", "Other"];
@@ -55,7 +55,8 @@ export default function Report() {
   }
 
   return (
-    <ScrollView className="flex-1" contentContainerClassName="p-5">
+    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1">
+      <ScrollView className="flex-1" contentContainerClassName="p-5" keyboardShouldPersistTaps="handled">
       <Text className="text-2xl font-bold border-b border-brand/20 pb-2 mb-2 text-black dark:text-white">
         Report An Issue
       </Text>
@@ -128,6 +129,7 @@ export default function Report() {
           <Text className="text-brand font-bold">Submit!</Text>
         )}
       </Pressable>
-    </ScrollView>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
