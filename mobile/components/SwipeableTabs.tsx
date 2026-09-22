@@ -58,14 +58,20 @@ export default function SwipeableTabs({
         pagingEnabled
         showsHorizontalScrollIndicator={false}
         onMomentumScrollEnd={onMomentumScrollEnd}
+        style={{ flex: 1 }}
       >
         {children.map((child, i) => (
-          <View key={i} style={{ width }}>
+          <View key={i} style={{ width, flex: 1 }}>
             {/* No padding here by design - a post row (Social Profile) is
                 meant to sit flush edge-to-edge like the main Feed, while
                 Player Profile's stat cards want their own inset. Each
                 pane's content brings whatever padding it needs. */}
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ flexGrow: 1 }}
+              keyboardShouldPersistTaps="handled"
+              style={{ flex: 1 }}
+            >
               {child}
             </ScrollView>
           </View>
