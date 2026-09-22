@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, Pressable, FlatList, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -33,10 +33,20 @@ export default function PostThread() {
     getUserProfile(authUser.uid).then(setProfile).catch(console.error);
   }, [authUser]);
 
+  // Same race as the Feed screen: authUser starts null and flips to the
+  // real user once Firebase resolves the persisted session, re-triggering
+  // this - the null-user load (skips the like/repost check entirely) can
+  // finish after the real-user load and wipe its correct results back to
+  // "nothing's liked" if it happens to resolve last. requestIdRef ensures
+  // only the most recently issued call's results are ever applied.
+  const requestIdRef = useRef(0);
+
   const load = useCallback(async () => {
     if (!postId) return;
+    const requestId = ++requestIdRef.current;
     try {
       const [foundPost, foundReplies] = await Promise.all([getPost(postId), getReplies(postId)]);
+      if (requestIdRef.current !== requestId) return;
       setPost(foundPost);
       setReplies(foundReplies);
 
@@ -51,13 +61,14 @@ export default function PostThread() {
             return [p.id, { liked, reposted }] as const;
           })
         );
+        if (requestIdRef.current !== requestId) return;
         setInteractionState(Object.fromEntries(entries));
       }
     } catch (error) {
       console.error("Error loading post thread:", error);
-      setPost(null);
+      if (requestIdRef.current === requestId) setPost(null);
     } finally {
-      setLoading(false);
+      if (requestIdRef.current === requestId) setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [postId, authUser]);

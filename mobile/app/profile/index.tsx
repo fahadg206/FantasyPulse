@@ -127,11 +127,12 @@ export default function ProfileHome() {
 
   return (
     <SafeAreaView className="flex-1 bg-[#0c0c0e]">
-      <ScrollView contentContainerClassName="px-5 pt-8 pb-12" showsVerticalScrollIndicator={false}>
-        <View className="items-center mb-6">
-          <AvatarUploadButton profile={profile} onUploaded={(avatar) => setProfile((p) => (p ? { ...p, avatar, avatarIsCustom: true } : p))} />
-          <Text className="text-white text-[20px] font-bold mt-2">{profile?.displayName}</Text>
-          <Text className="text-gray-500 text-[13px]">@{profile?.username}</Text>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1">
+        <ScrollView contentContainerClassName="px-5 pt-8 pb-12" showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <View className="items-center mb-6">
+            <AvatarUploadButton profile={profile} onUploaded={(avatar) => setProfile((p) => (p ? { ...p, avatar, avatarIsCustom: true } : p))} />
+            <Text className="text-white text-[20px] font-bold mt-2">{profile?.displayName}</Text>
+            <Text className="text-gray-500 text-[13px]">@{profile?.username}</Text>
 
           <View className="flex-row gap-6 mt-4">
             <Pressable
@@ -175,7 +176,8 @@ export default function ProfileHome() {
           <Feather name="log-out" size={16} color="#9ca3af" />
           <Text className="text-gray-400 font-semibold">Sign Out</Text>
         </Pressable>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

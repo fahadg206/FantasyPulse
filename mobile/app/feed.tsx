@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, Pressable, FlatList, ActivityIndicator, RefreshControl } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -28,9 +28,24 @@ export default function Feed() {
     getUserProfile(authUser.uid).then(setProfile).catch(console.error);
   }, [authUser]);
 
+  // authUser starts null and flips to the real signed-in user once Firebase
+  // resolves the persisted session, which re-triggers this via the
+  // useEffect below - but that means two loads can be in flight at once
+  // (the initial null-user one and the real-user one), and whichever
+  // finishes LAST wins regardless of which one is actually current. The
+  // null-user load only awaits one call before writing empty interaction
+  // state, while the real-user load has to additionally check every post's
+  // like/repost status - slower, but not reliably slower, so the fast
+  // "you're signed out" result could resolve after the correct one and
+  // wipe it back to "nothing's liked". requestIdRef makes only the most
+  // recently issued call's results ever get applied.
+  const requestIdRef = useRef(0);
+
   const loadFeed = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
     try {
       const feedPosts = await getFeedPosts(30);
+      if (requestIdRef.current !== requestId) return;
       setPosts(feedPosts);
 
       if (authUser && !isReadOnly(authUser)) {
@@ -43,6 +58,7 @@ export default function Feed() {
             return [p.id, { liked, reposted }] as const;
           })
         );
+        if (requestIdRef.current !== requestId) return;
         setInteractionState(Object.fromEntries(entries));
       } else {
         setInteractionState({});
@@ -50,8 +66,10 @@ export default function Feed() {
     } catch (error) {
       console.error("Error loading feed:", error);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (requestIdRef.current === requestId) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authUser]);
