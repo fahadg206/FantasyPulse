@@ -9,6 +9,7 @@ import { getFantasyProfileStats, FantasyProfileStats } from "../../lib/fantasyPr
 import { followUser, unfollowUser, isFollowing, getFollowingUids, getFollowerUids } from "../../lib/follows";
 import { getPostsByAuthor, isPostLiked, isPostReposted, BOOGIE_UID, BOOGIE_USERNAME, BOOGIE_SLEEPER_USER_ID, Post } from "../../lib/posts";
 import ProfileActivity from "../../components/ProfileActivity";
+import ProfileTabbedPosts from "../../components/ProfileTabbedPosts";
 import { getManualTitles } from "../../lib/manualTitles";
 import Avatar from "../../components/Avatar";
 import PostCard from "../../components/PostCard";
@@ -297,6 +298,11 @@ export default function PublicProfile() {
             extraTitles={getManualTitles(profile.username)}
           />
         ) : null}
+
+        <ProfileTabbedPosts
+          profileUid={profile.uid}
+          currentUid={authUser && !isReadOnly(authUser) ? authUser.uid : undefined}
+        />
       </ScrollView>
     </SafeAreaView>
   );

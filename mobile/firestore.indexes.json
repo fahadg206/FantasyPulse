@@ -24,6 +24,22 @@
         { "fieldPath": "authorUid", "order": "ASCENDING" },
         { "fieldPath": "createdAtMs", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "postLikes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "uid", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "postReposts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "uid", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

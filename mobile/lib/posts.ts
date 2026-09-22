@@ -239,6 +239,38 @@ export async function ensureSystemPost(input: EnsureSystemPostInput): Promise<vo
   });
 }
 
+/** every post one user has liked, most-recently-liked first - for a profile page's Likes tab, same as Twitter's */
+export async function getPostsLikedByUser(uid: string, limitCount = 30): Promise<Post[]> {
+  const q = query(
+    collection(db, "postLikes"),
+    where("uid", "==", uid),
+    orderBy("createdAt", "desc"),
+    fsLimit(limitCount)
+  );
+  const snap = await getDocs(q);
+  const postIds = snap.docs.map((d) => (d.data().postId as string) ?? d.id.split("_")[0]);
+  return resolvePostsInOrder(postIds);
+}
+
+/** every post one user has reposted, most-recently-reposted first - for a profile page's Reposts tab */
+export async function getPostsRepostedByUser(uid: string, limitCount = 30): Promise<Post[]> {
+  const q = query(
+    collection(db, "postReposts"),
+    where("uid", "==", uid),
+    orderBy("createdAt", "desc"),
+    fsLimit(limitCount)
+  );
+  const snap = await getDocs(q);
+  const postIds = snap.docs.map((d) => (d.data().postId as string) ?? d.id.split("_")[0]);
+  return resolvePostsInOrder(postIds);
+}
+
+/** fetches each id's post and drops any that no longer exist (deleted since being liked/reposted), preserving the caller's order */
+async function resolvePostsInOrder(postIds: string[]): Promise<Post[]> {
+  const posts = await Promise.all(postIds.map((id) => getPost(id)));
+  return posts.filter((p): p is Post => p !== null);
+}
+
 function likeDocId(postId: string, uid: string): string {
   return `${postId}_${uid}`;
 }

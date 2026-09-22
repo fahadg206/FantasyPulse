@@ -32,6 +32,7 @@ import {
 import { getFantasyProfileStats, FantasyProfileStats } from "../../lib/fantasyProfile";
 import { getFollowingUids, getFollowerUids } from "../../lib/follows";
 import ProfileActivity from "../../components/ProfileActivity";
+import ProfileTabbedPosts from "../../components/ProfileTabbedPosts";
 import { getManualTitles } from "../../lib/manualTitles";
 import Avatar from "../../components/Avatar";
 
@@ -172,6 +173,8 @@ export default function ProfileHome() {
             extraTitles={getManualTitles(profile.username)}
           />
         ) : null}
+
+        <ProfileTabbedPosts profileUid={profile.uid} currentUid={profile.uid} />
 
         <FindManagerCard />
 
