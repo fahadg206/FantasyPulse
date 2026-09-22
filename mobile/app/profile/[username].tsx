@@ -96,7 +96,11 @@ function BoogieProfile() {
         {statsLoading ? (
           <ActivityIndicator color="#af1222" className="mb-4" />
         ) : stats ? (
-          <ProfileActivity sleeperUserId={BOOGIE_SLEEPER_USER_ID} stats={stats} />
+          <ProfileActivity
+            sleeperUserId={BOOGIE_SLEEPER_USER_ID}
+            stats={stats}
+            extraTitles={[{ leagueName: "Champions League", season: "Pre-Sleeper" }]}
+          />
         ) : null}
 
         <View className="mt-2">

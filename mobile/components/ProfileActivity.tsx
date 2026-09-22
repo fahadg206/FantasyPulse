@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { View, Text, Pressable, Image, ActivityIndicator } from "react-native";
 import { useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
+import { MotiView } from "moti";
 import type { FantasyProfileStats } from "../lib/fantasyProfile";
 import {
   getTopRosteredPlayers,
@@ -12,6 +13,7 @@ import {
   RecentAcquisition,
   WeeklyMatchup,
   CareerStats,
+  Title,
 } from "../lib/profileActivity";
 import { formatTwitterTimestamp } from "../lib/formatTime";
 import { getTeamLogo } from "../lib/nflTeams";
@@ -40,7 +42,16 @@ function Card({ children }: { children: React.ReactNode }) {
 // leagues themselves (tappable through to the real league). Shared by both
 // the signed-in user's own profile and anyone else's public profile page,
 // so the two never drift apart visually.
-export default function ProfileActivity({ sleeperUserId, stats }: { sleeperUserId: string; stats: FantasyProfileStats }) {
+export default function ProfileActivity({
+  sleeperUserId,
+  stats,
+  extraTitles = [],
+}: {
+  sleeperUserId: string;
+  stats: FantasyProfileStats;
+  /** championships from before this platform/account existed - not derivable from Sleeper, so they're passed in rather than crawled */
+  extraTitles?: Title[];
+}) {
   const router = useRouter();
   const [matchups, setMatchups] = useState<WeeklyMatchup[] | null>(null);
   const [topPlayers, setTopPlayers] = useState<TopRosteredPlayer[] | null>(null);
@@ -74,6 +85,9 @@ export default function ProfileActivity({ sleeperUserId, stats }: { sleeperUserI
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sleeperUserId, stats.season, stats.leagues.map((l) => l.leagueId).join(",")]);
 
+  const allTitles = [...(career?.titles ?? []), ...extraTitles];
+  const totalTitles = (career?.championships ?? 0) + extraTitles.length;
+
   return (
     <View>
       {/* Career - leagues count front and center, plus all-time record */}
@@ -85,7 +99,7 @@ export default function ProfileActivity({ sleeperUserId, stats }: { sleeperUserI
         />
         <CareerStat value={career ? career.playoffAppearances : "-"} label="Playoff Appearances" />
         <CareerStat
-          value={!career ? "-" : career.championships > 0 ? `${career.championships} 🏆` : "0"}
+          value={!career ? "-" : totalTitles > 0 ? `${totalTitles} 🏆` : "0"}
           label="Titles"
           last
         />
@@ -94,12 +108,14 @@ export default function ProfileActivity({ sleeperUserId, stats }: { sleeperUserI
       {/* Titles - which league and season each championship actually came
           from, not just the count already shown above. Covers leagues no
           longer active too, since getCareerStats crawls every season
-          ever, not just this manager's current leagues. */}
-      {career && career.titles.length > 0 && (
+          ever, not just this manager's current leagues - plus anything
+          passed in via extraTitles (a championship from before this
+          platform tracked anything). */}
+      {allTitles.length > 0 && (
         <Card>
           <SectionLabel>CHAMPIONSHIPS</SectionLabel>
           <View className="gap-2">
-            {career.titles.map((t, i) => (
+            {allTitles.map((t, i) => (
               <View key={`${t.leagueName}_${t.season}_${i}`} className="flex-row items-center justify-between">
                 <Text numberOfLines={1} className="text-white text-[13px] font-semibold flex-1 mr-2">
                   🏆 {t.leagueName}
@@ -131,6 +147,37 @@ export default function ProfileActivity({ sleeperUserId, stats }: { sleeperUserI
         </View>
       )}
 
+      {/* Leagues */}
+      <SectionLabel>{stats.season} SEASON</SectionLabel>
+      {stats.leagues.map((l) => (
+        <Pressable
+          key={l.leagueId}
+          onPress={() => router.push(`/league/${l.leagueId}` as any)}
+          className="flex-row items-center justify-between bg-[#141416] rounded-xl border border-white/10 px-4 py-3 mb-2"
+        >
+          <View className="flex-row items-center flex-1 mr-2">
+            <Avatar url={l.avatar} name={l.leagueName} size={28} kind="league" />
+            <View className="ml-2.5 flex-1">
+              <Text numberOfLines={1} className="text-white font-semibold text-[13px]">
+                {l.leagueName}
+              </Text>
+              <Text className="text-gray-500 text-[11px]">
+                Rank #{l.rank} of {l.totalTeams}
+              </Text>
+            </View>
+          </View>
+          <View className="items-end mr-1">
+            <Text style={{ fontVariant: ["tabular-nums"] }} className="text-white font-bold text-[13px]">
+              {l.wins}-{l.losses}
+            </Text>
+            <Text style={{ fontVariant: ["tabular-nums"] }} className="text-gray-500 text-[11px]">
+              {l.pointsFor.toFixed(1)} pts
+            </Text>
+          </View>
+          <Feather name="chevron-right" size={16} color="#6b7280" />
+        </Pressable>
+      ))}
+
       {/* This Week's Matchups */}
       {matchups === null ? (
         <View className="items-center py-6">
@@ -152,9 +199,12 @@ export default function ProfileActivity({ sleeperUserId, stats }: { sleeperUserI
               }
               className="bg-[#141416] rounded-2xl border border-white/10 p-3.5 mb-2.5"
             >
-              <Text numberOfLines={1} className="text-gray-500 text-[10px] font-bold mb-2">
-                {m.leagueName.toUpperCase()}
-              </Text>
+              <View className="flex-row items-center justify-between mb-2">
+                <Text numberOfLines={1} className="text-gray-500 text-[10px] font-bold flex-1 mr-2">
+                  {m.leagueName.toUpperCase()}
+                </Text>
+                {m.isLive && <LiveBadge />}
+              </View>
               <View className="flex-row items-center justify-between">
                 <MatchupSide name={m.myTeamName} score={m.myScore} leading={m.myScore >= m.oppScore} avatar={m.myAvatar} />
                 <Text className="text-gray-600 text-[11px] mx-2">vs</Text>
@@ -229,37 +279,28 @@ export default function ProfileActivity({ sleeperUserId, stats }: { sleeperUserI
           </View>
         </Card>
       ) : null}
+    </View>
+  );
+}
 
-      {/* Leagues */}
-      <SectionLabel>{stats.season} SEASON</SectionLabel>
-      {stats.leagues.map((l) => (
-        <Pressable
-          key={l.leagueId}
-          onPress={() => router.push(`/league/${l.leagueId}` as any)}
-          className="flex-row items-center justify-between bg-[#141416] rounded-xl border border-white/10 px-4 py-3 mb-2"
-        >
-          <View className="flex-row items-center flex-1 mr-2">
-            <Avatar url={l.avatar} name={l.leagueName} size={28} kind="league" />
-            <View className="ml-2.5 flex-1">
-              <Text numberOfLines={1} className="text-white font-semibold text-[13px]">
-                {l.leagueName}
-              </Text>
-              <Text className="text-gray-500 text-[11px]">
-                Rank #{l.rank} of {l.totalTeams}
-              </Text>
-            </View>
-          </View>
-          <View className="items-end mr-1">
-            <Text style={{ fontVariant: ["tabular-nums"] }} className="text-white font-bold text-[13px]">
-              {l.wins}-{l.losses}
-            </Text>
-            <Text style={{ fontVariant: ["tabular-nums"] }} className="text-gray-500 text-[11px]">
-              {l.pointsFor.toFixed(1)} pts
-            </Text>
-          </View>
-          <Feather name="chevron-right" size={16} color="#6b7280" />
-        </Pressable>
-      ))}
+// Same pulsing-dot LIVE pill the dashboard scoreboard and schedule screen
+// use, so a matchup that's actually underway reads the same way here.
+function LiveDot() {
+  return (
+    <MotiView
+      from={{ opacity: 1 }}
+      animate={{ opacity: 0.2 }}
+      transition={{ type: "timing", duration: 650, loop: true }}
+      className="w-[5px] h-[5px] rounded-full bg-[#dc2626] mr-1.5"
+    />
+  );
+}
+
+function LiveBadge() {
+  return (
+    <View className="flex-row items-center bg-[#dc2626]/15 border border-[#dc2626]/40 rounded-full px-2 py-0.5">
+      <LiveDot />
+      <Text className="text-[9px] font-bold text-[#dc2626] tracking-wide">LIVE</Text>
     </View>
   );
 }

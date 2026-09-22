@@ -1,6 +1,12 @@
 import { backend } from "./api";
 import { buildLeagueTransactions, TradeEvent, AddDropEvent } from "./leagueTransactions";
 import { rankTeams, determinePlayoffTeams } from "./whatIfSimulation";
+import {
+  getNflGameStatusByTeam,
+  computeFantasyTeamGameState,
+  combineMatchupGameState,
+  isPastMondayNightCutoff,
+} from "./nflGameStatus";
 import type { LeagueSeasonStats } from "./fantasyProfile";
 
 // Everything that makes a profile feel alive beyond a bare win/loss record:
@@ -323,6 +329,8 @@ export interface WeeklyMatchup {
   oppScore: number;
   oppAvatar?: string;
   hasOpponent: boolean;
+  /** true only while real NFL games are actually underway for this matchup - not "final" and not "hasn't started" */
+  isLive: boolean;
 }
 
 /** this manager's matchup in each of their leagues for the NFL's current week */
@@ -334,6 +342,17 @@ export async function getWeeklyMatchups(
 
   const nflState = await fetchJson(`${SLEEPER}/state/nfl`);
   const week: number = nflState.season_type === "post" ? 18 : nflState.display_week || 1;
+
+  // Both shared across every league below (global, not per-league) - real
+  // NFL game status for live/final, and player -> team lookup so a
+  // roster's starters can be checked against that status. Same "fetched
+  // once, from whichever league responds first" pattern already used for
+  // player names elsewhere in this file.
+  const [statusByTeam, playersData] = await Promise.all([
+    getNflGameStatusByTeam(week, nflState.season).catch(() => ({})),
+    backend.fetchPlayers(leagues[0].leagueId).catch(() => ({})),
+  ]);
+  const pastMondayCutoff = isPastMondayNightCutoff();
 
   const results = await Promise.all(
     leagues.map(async (league): Promise<WeeklyMatchup | null> => {
@@ -364,6 +383,25 @@ export async function getWeeklyMatchups(
           (m: any) => m.matchup_id === myMatchup.matchup_id && m.roster_id !== myRoster.roster_id
         );
 
+        // Same real-per-starter-game-state check used everywhere else in
+        // this app (the dashboard scoreboard, schedule, matchup screen) -
+        // not a naive "scores aren't 0" heuristic.
+        const startersTeams = (starters: string[] | undefined) =>
+          (starters ?? []).filter((id) => id && id !== "0").map((id) => (playersData as any)[id]?.t);
+        const rosterFullySet = (starters: string[] | undefined) => {
+          const real = (starters ?? []).filter((id) => id && id !== "0");
+          return real.length > 0 && real.length === (starters?.length ?? 0);
+        };
+        const myState = computeFantasyTeamGameState(
+          startersTeams(myMatchup.starters),
+          statusByTeam,
+          rosterFullySet(myMatchup.starters)
+        );
+        const oppState = opponent
+          ? computeFantasyTeamGameState(startersTeams(opponent.starters), statusByTeam, rosterFullySet(opponent.starters))
+          : "pre";
+        const isLive = combineMatchupGameState(myState, oppState, pastMondayCutoff) === "live";
+
         return {
           leagueId: league.leagueId,
           leagueName: league.leagueName,
@@ -376,6 +414,7 @@ export async function getWeeklyMatchups(
           oppScore: opponent?.points ?? 0,
           oppAvatar: opponent ? teamAvatar(opponent.roster_id) : undefined,
           hasOpponent: !!opponent,
+          isLive,
         };
       } catch (error) {
         console.error(`Error loading weekly matchup for league ${league.leagueId}:`, error);
