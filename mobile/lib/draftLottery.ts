@@ -6,6 +6,8 @@ import { DraftProspect, DRAFT_PROSPECTS, PlayerPos } from "./draftProspects";
 // manualTitles.ts.
 export const LOTTERY_LEAGUE_IDS = new Set(["1337305377120751616"]);
 
+export const MOCK_DRAFT_ROUNDS = 4;
+
 export interface LotteryTeam {
   rosterId: string;
   teamName: string;
@@ -24,12 +26,6 @@ export function computeLotteryOdds(
     ...t,
     odds: Math.max(0, LOTTERY_START_PCT - i * LOTTERY_STEP_PCT),
   }));
-}
-
-export interface TeamNeed {
-  pos: PlayerPos;
-  count: number;
-  deficit: number;
 }
 
 /**
@@ -51,9 +47,6 @@ export function computeBaselineDepth(rosterPositions: string[]): Record<PlayerPo
   const flexSlots = count("FLEX") + count("WRRB_FLEX") + count("REC_FLEX");
 
   const isSuperflex = sfSlots > 0;
-  // A superflex slot is usually filled by a QB on a competitive build, so
-  // it counts toward QB starting demand directly; a generic FLEX splits
-  // its demand three ways across RB/WR/TE.
   const qbStarters = qbSlots + sfSlots;
   const rbStarters = rbSlots + flexSlots / 3;
   const wrStarters = wrSlots + flexSlots / 3;
@@ -67,7 +60,13 @@ export function computeBaselineDepth(rosterPositions: string[]): Record<PlayerPo
   };
 }
 
-/** this team's single biggest positional need, from their real rostered player counts against this league's own real starting requirements (computeBaselineDepth) */
+export interface TeamNeed {
+  pos: PlayerPos;
+  count: number;
+  deficit: number;
+}
+
+/** this team's single biggest positional need, from their real rostered player counts against this league's own real starting requirements - display-only (the "NEEDS X" badge); pick selection uses the blended scorer below, not this alone */
 export function biggestNeed(posCounts: Record<PlayerPos, number>, baselineDepth: Record<PlayerPos, number>): TeamNeed {
   const needs = (Object.keys(baselineDepth) as PlayerPos[]).map((pos) => ({
     pos,
@@ -78,46 +77,91 @@ export function biggestNeed(posCounts: Record<PlayerPos, number>, baselineDepth:
   return needs[0];
 }
 
-export interface MockDraftPick {
-  pickNumber: number;
-  rosterId: string;
+// How much one unit of positional need is worth against the prospect
+// pool's own value spread (0..poolSize on overallRank) - tuned so a real
+// need can flip a close value decision (a mid-pack rank gap) without ever
+// justifying reaching for a deep-bench prospect over a true blue-chip at
+// a position the team doesn't need. Superflex value still wins the big
+// gaps; need only wins the close ones - which is the balance actually
+// asked for here.
+const NEED_WEIGHT = 6;
+
+/**
+ * The actual pick: scores every remaining prospect as (value from their
+ * superflex-weighted overall rank) + (need bonus at their position for
+ * this team), and takes the highest. Not "fill the biggest need no matter
+ * what," and not pure best-player-available either - both matter, the
+ * same way a real dynasty rookie draft decision actually gets made.
+ */
+function pickBestProspect(
+  remaining: DraftProspect[],
+  posCounts: Record<PlayerPos, number>,
+  baselineDepth: Record<PlayerPos, number>
+): DraftProspect | undefined {
+  const poolSize = remaining.length;
+  let best: DraftProspect | undefined;
+  let bestScore = -Infinity;
+  for (const p of remaining) {
+    const deficit = Math.max(0, baselineDepth[p.pos] - (posCounts[p.pos] ?? 0));
+    const valueScore = poolSize - p.overallRank;
+    const score = valueScore + deficit * NEED_WEIGHT;
+    if (score > bestScore) {
+      bestScore = score;
+      best = p;
+    }
+  }
+  return best;
+}
+
+export interface DraftSlot {
+  round: number;
+  originalRosterId: string;
+  /** who's actually making this pick - equals originalRosterId unless the pick was traded */
+  currentRosterId: string;
   teamName: string;
   avatar?: string;
+  /** set when this pick was traded away from its original team - the original team's name, for the "via" note */
+  viaTeamName?: string;
+}
+
+export interface MockDraftPick extends DraftSlot {
+  pickNumber: number;
   need: PlayerPos;
   prospect: DraftProspect | null;
 }
 
 /**
- * A "way-too-early" mock rookie draft, real prospects (draftProspects.ts,
- * already ranked in superflex-weighted order) against real team needs
- * (each roster's actual positional depth vs. this league's own real
- * starting requirements). Draft order is current standings -
- * lottery-position teams worst-to-best, then playoff teams in reverse
- * standings order, the same convention the real NFL draft uses - since
- * there's no actual randomized lottery draw to run here, just the
- * probabilities shown alongside it. At each pick, the team takes the best
- * remaining prospect at their single biggest positional need; if their
- * needs are already well covered, best-player-available by overall
- * (superflex) rank.
+ * Runs the full mock draft across every round in `slots` (already in
+ * round-major pick order - round 1 picks 1..N, then round 2, etc.), one
+ * shrinking prospect pool shared across all of it so nobody gets drafted
+ * twice, and each team's own positional counts updated as they pick -
+ * a team's round 2 need already reflects what they took in round 1 of
+ * this same mock, same as a real draft.
  */
 export function buildMockDraftBoard(
-  draftOrder: { rosterId: string; teamName: string; avatar?: string; posCounts: Record<PlayerPos, number> }[],
+  slots: DraftSlot[],
+  initialPosCounts: Record<string, Record<PlayerPos, number>>,
   baselineDepth: Record<PlayerPos, number>
 ): MockDraftPick[] {
   const remaining = [...DRAFT_PROSPECTS];
-  const bestAt = (pos: PlayerPos) => remaining.filter((p) => p.pos === pos).sort((a, b) => a.posRank - b.posRank)[0];
-  const bestOverall = () => [...remaining].sort((a, b) => a.overallRank - b.overallRank)[0];
+  const posCounts: Record<string, Record<PlayerPos, number>> = {};
+  for (const [rosterId, counts] of Object.entries(initialPosCounts)) {
+    posCounts[rosterId] = { ...counts };
+  }
 
-  return draftOrder.map((team, i) => {
-    const need = biggestNeed(team.posCounts, baselineDepth);
-    const prospect = (need.deficit > 0 && bestAt(need.pos)) || bestOverall();
-    if (prospect) remaining.splice(remaining.indexOf(prospect), 1);
+  return slots.map((slot, i) => {
+    const counts = posCounts[slot.currentRosterId] ?? { QB: 0, RB: 0, WR: 0, TE: 0 };
+    const need = biggestNeed(counts, baselineDepth);
+    const prospect = pickBestProspect(remaining, counts, baselineDepth);
+    if (prospect) {
+      remaining.splice(remaining.indexOf(prospect), 1);
+      counts[prospect.pos] = (counts[prospect.pos] ?? 0) + 1;
+      posCounts[slot.currentRosterId] = counts;
+    }
 
     return {
+      ...slot,
       pickNumber: i + 1,
-      rosterId: team.rosterId,
-      teamName: team.teamName,
-      avatar: team.avatar,
       need: need.pos,
       prospect: prospect ?? null,
     };

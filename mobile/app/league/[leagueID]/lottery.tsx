@@ -1,16 +1,18 @@
 import { useEffect, useState } from "react";
-import { View, Text, Image, ScrollView, ActivityIndicator } from "react-native";
+import { View, Text, Image, ScrollView, Pressable, ActivityIndicator } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import { sleeper, backend } from "../../../lib/api";
 import { rankTeams, determinePlayoffTeams, TeamSeedData } from "../../../lib/whatIfSimulation";
 import {
   LOTTERY_LEAGUE_IDS,
+  MOCK_DRAFT_ROUNDS,
   computeLotteryOdds,
   computeBaselineDepth,
   buildMockDraftBoard,
   LotteryTeam,
   MockDraftPick,
+  DraftSlot,
 } from "../../../lib/draftLottery";
 import { PlayerPos } from "../../../lib/draftProspects";
 
@@ -23,12 +25,22 @@ interface TeamMeta {
   avatar?: string;
 }
 
+interface TradedPick {
+  round: number;
+  season: string;
+  roster_id: number;
+  owner_id: number;
+  previous_owner_id: number;
+}
+
 export default function DraftLottery() {
   const { leagueID } = useLocalSearchParams<{ leagueID: string }>();
   const [loading, setLoading] = useState(true);
   const [lottery, setLottery] = useState<LotteryTeam[]>([]);
   const [board, setBoard] = useState<MockDraftPick[]>([]);
   const [isSuperflex, setIsSuperflex] = useState(false);
+  const [draftSeason, setDraftSeason] = useState<string>("");
+  const [activeRound, setActiveRound] = useState(1);
 
   useEffect(() => {
     if (!leagueID || !LOTTERY_LEAGUE_IDS.has(leagueID)) {
@@ -39,18 +51,30 @@ export default function DraftLottery() {
 
     (async () => {
       try {
-        const [{ data: league }, { data: rosters }, { data: users }, playersData] = await Promise.all([
+        const [{ data: league }, { data: rosters }, { data: users }, playersData, tradedPicksRes] = await Promise.all([
           sleeper.getLeague(leagueID),
           sleeper.getLeagueRosters(leagueID),
           sleeper.getLeagueUsers(leagueID),
           backend.fetchPlayers(leagueID),
+          fetch(`https://api.sleeper.app/v1/league/${leagueID}/traded_picks`).then((r) => r.json()),
         ]);
         if (cancelled) return;
 
         const playoffSpots: number = league.settings?.playoff_teams ?? 6;
         const divisionsCount: number = league.settings?.divisions ?? 0;
         const rosterPositions: string[] = league.roster_positions ?? [];
-        setIsSuperflex(rosterPositions.some((p) => p === "SUPER_FLEX" || p === "SUPERFLEX"));
+        const superflex = rosterPositions.some((p) => p === "SUPER_FLEX" || p === "SUPERFLEX");
+        setIsSuperflex(superflex);
+
+        // The rookie draft covering this prospect class happens the
+        // offseason after the CURRENT season wraps - one year ahead of
+        // whatever season this league is presently playing, not a
+        // hardcoded year, so this stays correct in future seasons too.
+        const nextSeason = String(Number(league.season) + 1);
+        setDraftSeason(nextSeason);
+        const tradedPicks: TradedPick[] = (Array.isArray(tradedPicksRes) ? tradedPicksRes : []).filter(
+          (p: TradedPick) => p.season === nextSeason
+        );
 
         const teamMeta: Record<string, TeamMeta> = {};
         const wins: Record<string, number> = {};
@@ -82,29 +106,40 @@ export default function DraftLottery() {
         const ranked = rankTeams(teamIds, wins, pointsFor);
         const { qualifiers } = determinePlayoffTeams(ranked, managerInfo, divisionsCount, playoffSpots);
         const qualifierSet = new Set(qualifiers);
-        // ranked is best-to-worst; lottery display wants worst-to-best
-        // (the worst team gets the best odds), so the non-qualifiers slice
-        // of it is reversed.
         const nonPlayoffWorstFirst = ranked.filter((id) => !qualifierSet.has(id)).reverse();
 
         const lotteryResult = computeLotteryOdds(nonPlayoffWorstFirst.map((id) => teamMeta[id]));
         if (!cancelled) setLottery(lotteryResult);
 
-        // Full mock draft order: lottery teams worst-to-best (same as
-        // above), then playoff teams in reverse standings order - the
-        // worst playoff seed picks first among playoff teams, same
-        // convention the real NFL draft uses. There's no actual
-        // randomized lottery draw run here (that's what the odds above
-        // represent), so this board uses current standings order as its
-        // stand-in.
+        // Same original-slot order repeats every round (straight, not
+        // snake) - lottery teams worst-to-best, then playoff teams in
+        // reverse standings order, the real NFL draft's convention.
         const playoffWorstFirst = [...qualifiers].reverse();
-        const draftOrder = [...nonPlayoffWorstFirst, ...playoffWorstFirst].map((id) => ({
-          ...teamMeta[id],
-          posCounts: posCountsByRoster[id],
-        }));
+        const draftOrderRosterIds = [...nonPlayoffWorstFirst, ...playoffWorstFirst];
+
+        const resolveOwner = (round: number, originalRosterId: string): string => {
+          const trade = tradedPicks.find((p) => p.round === round && String(p.roster_id) === originalRosterId);
+          return trade ? String(trade.owner_id) : originalRosterId;
+        };
+
+        const slots: DraftSlot[] = [];
+        for (let round = 1; round <= MOCK_DRAFT_ROUNDS; round++) {
+          for (const originalRosterId of draftOrderRosterIds) {
+            const currentRosterId = resolveOwner(round, originalRosterId);
+            const traded = currentRosterId !== originalRosterId;
+            slots.push({
+              round,
+              originalRosterId,
+              currentRosterId,
+              teamName: teamMeta[currentRosterId]?.teamName ?? "Unknown Team",
+              avatar: teamMeta[currentRosterId]?.avatar,
+              viaTeamName: traded ? teamMeta[originalRosterId]?.teamName : undefined,
+            });
+          }
+        }
 
         const baselineDepth = computeBaselineDepth(rosterPositions);
-        const mockBoard = buildMockDraftBoard(draftOrder, baselineDepth);
+        const mockBoard = buildMockDraftBoard(slots, posCountsByRoster, baselineDepth);
         if (!cancelled) setBoard(mockBoard);
       } catch (error) {
         console.error("Error loading draft lottery:", error);
@@ -137,6 +172,8 @@ export default function DraftLottery() {
       </View>
     );
   }
+
+  const roundPicks = board.filter((p) => p.round === activeRound);
 
   return (
     <ScrollView className="flex-1 bg-[#0c0c0e]" contentContainerClassName="p-4 pb-10">
@@ -171,8 +208,9 @@ export default function DraftLottery() {
 
       <Text className="text-[11px] font-bold tracking-widest text-brand mb-1">DYNASTY EARLY BOARD</Text>
       <Text className="text-gray-500 text-[12px] mb-1">
-        A way-too-early mock of next year&apos;s rookie draft - real 2027 {isSuperflex ? "superflex " : ""}prospect
-        rankings, matched to each team&apos;s actual roster needs under this league&apos;s own format and scoring.
+        A way-too-early mock of the {draftSeason} rookie draft - real {isSuperflex ? "superflex " : ""}prospect
+        rankings, matched to each team&apos;s actual roster needs and real traded picks under this league&apos;s own
+        format and scoring.
       </Text>
       {isSuperflex && (
         <View className="flex-row items-center gap-1.5 mb-4 self-start bg-white/5 border border-white/10 rounded-full px-2.5 py-1">
@@ -181,9 +219,23 @@ export default function DraftLottery() {
         </View>
       )}
 
+      <View className="flex-row bg-[#1c1c1e] rounded-full p-1 mb-4 self-center">
+        {Array.from({ length: MOCK_DRAFT_ROUNDS }, (_, i) => i + 1).map((round) => (
+          <Pressable
+            key={round}
+            onPress={() => setActiveRound(round)}
+            className={`px-4 py-2 rounded-full ${activeRound === round ? "bg-brand" : ""}`}
+          >
+            <Text className={`text-[12px] font-bold ${activeRound === round ? "text-white" : "text-gray-400"}`}>
+              Round {round}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+
       <View className="gap-3">
-        {board.map((pick) => (
-          <View key={pick.rosterId} className="rounded-2xl border border-white/10 bg-[#101012] overflow-hidden">
+        {roundPicks.map((pick) => (
+          <View key={`${pick.round}-${pick.originalRosterId}`} className="rounded-2xl border border-white/10 bg-[#101012] overflow-hidden">
             <View className="flex-row items-center px-3.5 pt-3 pb-2.5">
               <View className="w-[24px] h-[24px] rounded-full bg-brand/15 border border-brand/30 items-center justify-center mr-2">
                 <Text className="text-brand text-[10px] font-bold">{pick.pickNumber}</Text>
@@ -192,9 +244,16 @@ export default function DraftLottery() {
                 source={pick.avatar ? { uri: pick.avatar } : helmet}
                 className="w-[22px] h-[22px] rounded-full mr-2 bg-white/10"
               />
-              <Text numberOfLines={1} className="flex-1 text-white font-semibold text-[12px] mr-2">
-                {pick.teamName}
-              </Text>
+              <View className="flex-1 mr-2">
+                <Text numberOfLines={1} className="text-white font-semibold text-[12px]">
+                  {pick.teamName}
+                </Text>
+                {pick.viaTeamName && (
+                  <Text numberOfLines={1} className="text-gray-500 text-[10px] mt-0.5">
+                    via {pick.viaTeamName}
+                  </Text>
+                )}
+              </View>
               <View style={{ backgroundColor: `${POS_COLOR[pick.need]}22`, borderColor: `${POS_COLOR[pick.need]}55` }} className="rounded-full border px-2 py-0.5">
                 <Text style={{ color: POS_COLOR[pick.need] }} className="text-[9px] font-bold">
                   NEEDS {pick.need}
@@ -244,8 +303,8 @@ export default function DraftLottery() {
       <View className="flex-row items-center gap-1.5 mt-4">
         <Feather name="info" size={11} color="#6b7280" />
         <Text className="text-gray-600 text-[10px] flex-1">
-          Prospect rankings are from early 2027 superflex dynasty big boards and will keep moving all season - this
-          is a snapshot, not a prediction.
+          Prospect rankings are from early {draftSeason} superflex dynasty big boards and will keep moving all
+          season - this is a snapshot, not a prediction.
         </Text>
       </View>
     </ScrollView>
