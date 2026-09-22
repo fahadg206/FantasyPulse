@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { View, Text, Image, FlatList, ScrollView, ActivityIndicator, Pressable } from "react-native";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons, Feather } from "@expo/vector-icons";
 import { sleeper, backend } from "../../../lib/api";
 import getMatchupData from "../../../lib/getMatchupData";
@@ -8,6 +8,7 @@ import { storage, StorageKeys } from "../../../lib/storage";
 import WhatIfModal from "../../../components/WhatIfModal";
 import { runMonteCarlo } from "../../../lib/whatIfSimulation";
 import { getZoneForRank, isZoneStart, StandingsZone } from "../../../lib/leagueZones";
+import { LOTTERY_LEAGUE_IDS } from "../../../lib/draftLottery";
 
 const helmet = require("../../../assets/images/helmet2.png");
 
@@ -41,6 +42,7 @@ function calculateTeamProjection(starters: string[], week: number, playersData: 
 
 export default function Standings() {
   const { leagueID } = useLocalSearchParams<{ leagueID: string }>();
+  const router = useRouter();
   const [sortedTeamData, setSortedTeamData] = useState<SortedTeamData>([]);
   const [leagueName, setLeagueName] = useState("");
   const [playoffSpots, setPlayoffSpots] = useState(6);
@@ -254,6 +256,18 @@ export default function Standings() {
             <Text className="text-brand text-[11px] font-bold">What If?</Text>
           </Pressable>
         </View>
+
+        {LOTTERY_LEAGUE_IDS.has(leagueID) && (
+          <View className="items-end mt-2">
+            <Pressable
+              onPress={() => router.push(`/league/${leagueID}/lottery`)}
+              className="flex-row items-center gap-1.5 bg-white/5 border border-white/10 rounded-full px-3 py-1.5"
+            >
+              <Ionicons name="shuffle" size={12} color="#af1222" />
+              <Text className="text-brand text-[11px] font-bold">Draft Lottery</Text>
+            </Pressable>
+          </View>
+        )}
 
         {hasDivisions && (
           <View className="flex-row bg-[#1c1c1e] rounded-full p-1 mt-3.5 self-start">
