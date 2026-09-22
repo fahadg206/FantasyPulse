@@ -82,7 +82,7 @@ export default function ProfileActivity({ sleeperUserId, stats }: { sleeperUserI
                 {m.leagueName.toUpperCase()}
               </Text>
               <View className="flex-row items-center justify-between">
-                <MatchupSide name={m.myTeamName} score={m.myScore} leading={m.myScore >= m.oppScore} />
+                <MatchupSide name={m.myTeamName} score={m.myScore} leading={m.myScore >= m.oppScore} avatar={m.myAvatar} />
                 <Text className="text-gray-600 text-[11px] mx-2">vs</Text>
                 <MatchupSide
                   name={m.oppTeamName}
