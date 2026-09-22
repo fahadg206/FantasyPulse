@@ -1,10 +1,14 @@
 // Real "way-too-early" 2027 NFL Draft skill-position prospects (the class
 // that would actually be available in a dynasty rookie draft held after
-// this season), pulled from published early big boards (Yahoo Sports,
-// SI, 247Sports, Fox Sports - late-Sept 2026 rankings) and ranked within
-// position, since these entirely reorder as an actual college season
-// plays out. Restricted to QB/RB/WR/TE - the positions a standard (non-IDP)
-// dynasty startup actually drafts.
+// this season) - overall order is DraftSharks' 2027 Dynasty SUPERFLEX
+// Rookie Rankings (QBs valued the way a real 2-QB-startable league values
+// them, not a straight 1-QB big board), restricted to QB/RB/WR/TE - the
+// positions a standard (non-IDP) dynasty startup actually drafts.
+// Headshot, college logo, height, and weight are each player's real,
+// current ESPN college-football profile data (site.api.espn.com), pulled
+// as of late Sept 2026 - school affiliation in particular can and does
+// change on transfers, which is why a couple of these don't match the
+// school the rankings article listed (ESPN's live roster data wins).
 
 export type PlayerPos = "QB" | "RB" | "WR" | "TE";
 
@@ -12,51 +16,90 @@ export interface DraftProspect {
   name: string;
   pos: PlayerPos;
   school: string;
+  /** overall rank across all positions in this superflex-weighted order, 1 = best */
+  overallRank: number;
   /** rank within its own position group, 1 = best */
   posRank: number;
+  headshot?: string;
+  logo?: string;
+  height?: string;
+  weight?: string;
 }
 
 export const DRAFT_PROSPECTS: DraftProspect[] = [
-  // Quarterbacks
-  { name: "Arch Manning", pos: "QB", school: "Texas", posRank: 1 },
-  { name: "Dante Moore", pos: "QB", school: "Oregon", posRank: 2 },
-  { name: "C.J. Carr", pos: "QB", school: "Notre Dame", posRank: 3 },
-  { name: "Julian Sayin", pos: "QB", school: "Ohio State", posRank: 4 },
-  { name: "Drew Mestemaker", pos: "QB", school: "Oklahoma State", posRank: 5 },
-  { name: "LaNorris Sellers", pos: "QB", school: "South Carolina", posRank: 6 },
-  { name: "Drake Lindsey", pos: "QB", school: "Minnesota", posRank: 7 },
-  { name: "Trinidad Chambliss", pos: "QB", school: "Ole Miss", posRank: 8 },
-  { name: "Darian Mensah", pos: "QB", school: "Miami", posRank: 9 },
-  { name: "Jayden Maiava", pos: "QB", school: "USC", posRank: 10 },
-  { name: "Sam Leavitt", pos: "QB", school: "LSU", posRank: 11 },
-
-  // Running Backs
-  { name: "Kewan Lacy", pos: "RB", school: "Ole Miss", posRank: 1 },
-  { name: "Jadan Baugh", pos: "RB", school: "Florida", posRank: 2 },
-  { name: "Ahmad Hardy", pos: "RB", school: "Missouri", posRank: 3 },
-  { name: "Nate Frazier", pos: "RB", school: "Georgia", posRank: 4 },
-  { name: "Mark Fletcher Jr.", pos: "RB", school: "Miami", posRank: 5 },
-  { name: "Isaac Brown", pos: "RB", school: "Louisville", posRank: 6 },
-
-  // Wide Receivers
-  { name: "Jeremiah Smith", pos: "WR", school: "Ohio State", posRank: 1 },
-  { name: "Cam Coleman", pos: "WR", school: "Texas", posRank: 2 },
-  { name: "Charlie Becker", pos: "WR", school: "Indiana", posRank: 3 },
-  { name: "Nick Marsh", pos: "WR", school: "Indiana", posRank: 4 },
-  { name: "Ryan Coleman-Williams", pos: "WR", school: "Alabama", posRank: 5 },
-  { name: "Jordan Faison", pos: "WR", school: "Notre Dame", posRank: 6 },
-  { name: "KJ Duff", pos: "WR", school: "Rutgers", posRank: 7 },
-  { name: "Wyatt Young", pos: "WR", school: "Oklahoma", posRank: 8 },
-  { name: "Ryan Wingo", pos: "WR", school: "Texas", posRank: 9 },
-  { name: "Mario Craver", pos: "WR", school: "Texas A&M", posRank: 10 },
-  { name: "Bryant Wesco Jr.", pos: "WR", school: "Clemson", posRank: 11 },
-  { name: "Duce Robinson", pos: "WR", school: "Florida State", posRank: 12 },
-  { name: "Omarion Miller", pos: "WR", school: "Arizona State", posRank: 13 },
-
-  // Tight Ends
-  { name: "Trey'Dez Green", pos: "TE", school: "LSU", posRank: 1 },
-  { name: "Jamari Johnson", pos: "TE", school: "Oregon", posRank: 2 },
-  { name: "Terrance Carter Jr.", pos: "TE", school: "Texas Tech", posRank: 3 },
-  { name: "Luke Reynolds", pos: "TE", school: "Virginia Tech", posRank: 4 },
-  { name: "Benjamin Brahmer", pos: "TE", school: "Penn State", posRank: 5 },
+  { name: "Jeremiah Smith", pos: "WR", school: "Ohio State", overallRank: 1, posRank: 1, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5079720.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/194.png", height: "6' 4\"", weight: "222 lbs" },
+  { name: "Arch Manning", pos: "QB", school: "Texas", overallRank: 2, posRank: 1, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4870906.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/251.png", height: "6' 4\"", weight: "222 lbs" },
+  { name: "Dante Moore", pos: "QB", school: "Oregon", overallRank: 3, posRank: 2, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4870921.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/2483.png", height: "6' 3\"", weight: "220 lbs" },
+  { name: "Cam Coleman", pos: "WR", school: "Texas", overallRank: 4, posRank: 2, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5079376.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/251.png", height: "6' 3\"", weight: "204 lbs" },
+  { name: "Julian Sayin", pos: "QB", school: "Ohio State", overallRank: 5, posRank: 3, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5079712.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/194.png", height: "6' 1\"", weight: "214 lbs" },
+  { name: "Bryant Wesco Jr.", pos: "WR", school: "Clemson", overallRank: 6, posRank: 3, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5112674.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/228.png", height: "6' 2\"", weight: "195 lbs" },
+  { name: "Kewan Lacy", pos: "RB", school: "Ole Miss", overallRank: 7, posRank: 1, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5086388.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/145.png", height: "5' 11\"", weight: "205 lbs" },
+  { name: "Jadan Baugh", pos: "RB", school: "Florida", overallRank: 8, posRank: 2, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5079322.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/57.png", height: "6' 1\"", weight: "225 lbs" },
+  { name: "Charlie Becker", pos: "WR", school: "Indiana", overallRank: 9, posRank: 4, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5146735.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/84.png", height: "6' 4\"", weight: "208 lbs" },
+  { name: "Nick Marsh", pos: "WR", school: "Indiana", overallRank: 10, posRank: 5, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5079600.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/84.png", height: "6' 3\"", weight: "210 lbs" },
+  { name: "Ahmad Hardy", pos: "RB", school: "Missouri", overallRank: 11, posRank: 3, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5197065.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/142.png", height: "5' 10\"", weight: "210 lbs" },
+  { name: "LaNorris Sellers", pos: "QB", school: "South Carolina", overallRank: 12, posRank: 4, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4875127.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/2579.png", height: "6' 3\"", weight: "238 lbs" },
+  { name: "Darian Mensah", pos: "QB", school: "Miami", overallRank: 13, posRank: 5, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5121169.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/2390.png", height: "6' 3\"", weight: "205 lbs" },
+  { name: "C.J. Carr", pos: "QB", school: "Notre Dame", overallRank: 14, posRank: 6, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5079369.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/87.png", height: "6' 2\"", weight: "215 lbs" },
+  { name: "Trey'Dez Green", pos: "TE", school: "LSU", overallRank: 15, posRank: 1, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5079420.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/99.png", height: "6' 7\"", weight: "237 lbs" },
+  { name: "Ryan Coleman-Williams", pos: "WR", school: "Alabama", overallRank: 16, posRank: 6, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5141711.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/333.png", height: "6' 0\"", weight: "184 lbs" },
+  { name: "TJ Moore", pos: "WR", school: "Clemson", overallRank: 17, posRank: 7, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5218753.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/228.png", height: "6' 3\"", weight: "200 lbs" },
+  { name: "Isaac Brown", pos: "RB", school: "Louisville", overallRank: 18, posRank: 4, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5079349.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/97.png", height: "5' 9\"", weight: "190 lbs" },
+  { name: "Mark Fletcher Jr.", pos: "RB", school: "Miami", overallRank: 19, posRank: 5, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4870736.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/2390.png", height: "6' 2\"", weight: "225 lbs" },
+  { name: "KJ Duff", pos: "WR", school: "Rutgers", overallRank: 20, posRank: 8, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5084771.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/164.png", height: "6' 6\"", weight: "225 lbs" },
+  { name: "Mario Craver", pos: "WR", school: "Texas A&M", overallRank: 21, posRank: 9, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5079345.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/245.png", height: "5' 9\"", weight: "180 lbs" },
+  { name: "Jamari Johnson", pos: "TE", school: "Oregon", overallRank: 22, posRank: 2, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4922988.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/2483.png", height: "6' 5\"", weight: "255 lbs" },
+  { name: "Isaiah Sategna III", pos: "WR", school: "Oklahoma", overallRank: 23, posRank: 10, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5080703.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/201.png", height: "5' 10\"", weight: "185 lbs" },
+  { name: "Brendan Sorsby", pos: "QB", school: "Cincinnati", overallRank: 24, posRank: 7, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4899046.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/2132.png", height: "6' 3\"", weight: "235 lbs" },
+  { name: "Hollywood Smothers", pos: "RB", school: "Texas", overallRank: 25, posRank: 6, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4871053.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/251.png", height: "5' 11\"", weight: "193 lbs" },
+  { name: "Trinidad Chambliss", pos: "QB", school: "Ole Miss", overallRank: 26, posRank: 8, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4911529.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/145.png", height: "6' 0\"", weight: "205 lbs" },
+  { name: "Ryan Wingo", pos: "WR", school: "Texas", overallRank: 27, posRank: 11, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5218633.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/251.png", height: "6' 2\"", weight: "214 lbs" },
+  { name: "Eugene Wilson III", pos: "WR", school: "LSU", overallRank: 28, posRank: 12, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4921154.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/99.png", height: "5' 11\"", weight: "190 lbs" },
+  { name: "Justice Haynes", pos: "RB", school: "Georgia Tech", overallRank: 29, posRank: 7, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4870760.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/59.png", height: "5' 11\"", weight: "210 lbs" },
+  { name: "Drew Mestemaker", pos: "QB", school: "Oklahoma State", overallRank: 30, posRank: 9, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5219834.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/197.png", height: "6' 3\"", weight: "215 lbs" },
+  { name: "Jayce Brown", pos: "WR", school: "LSU", overallRank: 31, posRank: 13, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5121334.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/99.png", height: "5' 11\"", weight: "175 lbs" },
+  { name: "Duce Robinson", pos: "WR", school: "Florida State", overallRank: 32, posRank: 14, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4870922.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/52.png", height: "6' 6\"", weight: "230 lbs" },
+  { name: "Terrance Carter Jr.", pos: "TE", school: "Texas Tech", overallRank: 33, posRank: 3, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4867887.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/2641.png", height: "6' 2\"", weight: "245 lbs" },
+  { name: "LJ Martin", pos: "RB", school: "BYU", overallRank: 34, posRank: 8, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4918126.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/252.png", height: "6' 2\"", weight: "225 lbs" },
+  { name: "Antwan Raymond", pos: "RB", school: "Rutgers", overallRank: 35, posRank: 9, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5209945.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/164.png", height: "5' 11\"", weight: "205 lbs" },
+  { name: "Josh Hoover", pos: "QB", school: "Indiana", overallRank: 36, posRank: 10, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4685401.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/84.png", height: "6' 2\"", weight: "205 lbs" },
+  { name: "Nate Frazier", pos: "RB", school: "Georgia", overallRank: 37, posRank: 10, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5084047.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/61.png", height: "5' 10\"", weight: "205 lbs" },
+  { name: "Jayden Maiava", pos: "QB", school: "USC", overallRank: 38, posRank: 11, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4685454.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/30.png", height: "6' 4\"", weight: "230 lbs" },
+  { name: "Cooper Barkate", pos: "WR", school: "Miami", overallRank: 39, posRank: 15, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4804878.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/2390.png", height: "6' 1\"", weight: "195 lbs" },
+  { name: "Cameron Dickey", pos: "RB", school: "Texas Tech", overallRank: 40, posRank: 11, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5193580.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/2641.png", height: "5' 10\"", weight: "215 lbs" },
+  { name: "DJ Vonnahme", pos: "TE", school: "Iowa", overallRank: 41, posRank: 4, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5218931.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/2294.png", height: "6' 4\"", weight: "241 lbs" },
+  { name: "Nyck Harbor", pos: "WR", school: "South Carolina", overallRank: 42, posRank: 16, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4870745.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/2579.png", height: "6' 5\"", weight: "239 lbs" },
+  { name: "Cam Cook", pos: "RB", school: "West Virginia", overallRank: 43, posRank: 12, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4918103.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/277.png", height: "5' 9\"", weight: "203 lbs" },
+  { name: "DeSean Bishop", pos: "RB", school: "Tennessee", overallRank: 44, posRank: 13, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4921108.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/2633.png", height: "5' 10\"", weight: "215 lbs" },
+  { name: "Danny Scudero", pos: "WR", school: "Colorado", overallRank: 45, posRank: 17, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5152815.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/38.png", height: "5' 9\"", weight: "175 lbs" },
+  { name: "Isaiah Horton", pos: "WR", school: "Texas A&M", overallRank: 46, posRank: 18, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4685383.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/245.png", height: "6' 4\"", weight: "215 lbs" },
+  { name: "Sam Leavitt", pos: "QB", school: "LSU", overallRank: 47, posRank: 12, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5078810.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/99.png", height: "6' 2\"", weight: "216 lbs" },
+  { name: "Wayne Knight", pos: "RB", school: "UCLA", overallRank: 48, posRank: 14, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4912342.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/26.png", height: "5' 7\"", weight: "193 lbs" },
+  { name: "Eric Singleton Jr.", pos: "WR", school: "Florida", overallRank: 49, posRank: 19, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5095360.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/57.png", height: "5' 10\"", weight: "184 lbs" },
+  { name: "CJ Bailey", pos: "QB", school: "NC State", overallRank: 50, posRank: 13, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5079301.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/152.png", height: "6' 6\"", weight: "218 lbs" },
+  { name: "Nic Anderson", pos: "WR", school: "Kentucky", overallRank: 51, posRank: 20, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4699866.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/96.png", height: "6' 4\"", weight: "208 lbs" },
+  { name: "Dorian Thomas", pos: "TE", school: "California", overallRank: 52, posRank: 5, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4908552.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/25.png", height: "6' 4\"", weight: "255 lbs" },
+  { name: "Gunner Stockton", pos: "QB", school: "Georgia", overallRank: 53, posRank: 14, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4685578.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/61.png", height: "6' 1\"", weight: "215 lbs" },
+  { name: "Cam Edwards", pos: "RB", school: "Michigan State", overallRank: 54, posRank: 15, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5086034.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/127.png", height: "5' 11\"", weight: "206 lbs" },
+  { name: "Raleek Brown", pos: "RB", school: "Texas", overallRank: 55, posRank: 16, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4685268.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/251.png", height: "5' 9\"", weight: "193 lbs" },
+  { name: "John Mateer", pos: "QB", school: "Oklahoma", overallRank: 56, posRank: 15, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4915980.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/201.png", height: "6' 1\"", weight: "224 lbs" },
+  { name: "Tre Wisner", pos: "RB", school: "Florida State", overallRank: 57, posRank: 17 },
+  { name: "Aneyas Williams", pos: "RB", school: "Notre Dame", overallRank: 58, posRank: 18, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5079742.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/87.png", height: "5' 10\"", weight: "210 lbs" },
+  { name: "Waymond Jordan", pos: "RB", school: "USC", overallRank: 59, posRank: 19, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5295318.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/30.png", height: "5' 10\"", weight: "210 lbs" },
+  { name: "Brandon Inniss", pos: "WR", school: "Ohio State", overallRank: 60, posRank: 21, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4870835.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/194.png", height: "6' 0\"", weight: "197 lbs" },
+  { name: "Caden Durham", pos: "RB", school: "LSU", overallRank: 61, posRank: 20, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5079379.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/99.png", height: "5' 9\"", weight: "200 lbs" },
+  { name: "Kenny Johnson", pos: "WR", school: "Texas Tech", overallRank: 62, posRank: 22, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4923295.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/2641.png", height: "6' 1\"", weight: "200 lbs" },
+  { name: "Kaden Feagin", pos: "RB", school: "Illinois", overallRank: 63, posRank: 21, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4870728.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/356.png", height: "6' 3\"", weight: "260 lbs" },
+  { name: "Amare Thomas", pos: "WR", school: "Houston", overallRank: 64, posRank: 23, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5077060.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/248.png", height: "6' 0\"", weight: "205 lbs" },
+  { name: "CJ Baxter", pos: "RB", school: "Kentucky", overallRank: 65, posRank: 22, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4870609.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/96.png", height: "6' 1\"", weight: "230 lbs" },
+  { name: "Jaden Greathouse", pos: "WR", school: "Notre Dame", overallRank: 66, posRank: 24, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4870768.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/87.png", height: "6' 1\"", weight: "212 lbs" },
+  { name: "Darius Taylor", pos: "RB", school: "Minnesota", overallRank: 67, posRank: 23, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4920901.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/135.png", height: "6' 0\"", weight: "215 lbs" },
+  { name: "Benjamin Brahmer", pos: "TE", school: "Penn State", overallRank: 68, posRank: 6, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4870608.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/213.png", height: "6' 7\"", weight: "250 lbs" },
+  { name: "Jackson Harris", pos: "WR", school: "LSU", overallRank: 69, posRank: 25, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5114311.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/99.png", height: "6' 2\"", weight: "202 lbs" },
+  { name: "Ian Strong", pos: "WR", school: "California", overallRank: 70, posRank: 26, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5075390.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/25.png", height: "6' 4\"", weight: "215 lbs" },
+  { name: "Luke Reynolds", pos: "TE", school: "Virginia Tech", overallRank: 71, posRank: 7, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5138451.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/259.png", height: "6' 4\"", weight: "250 lbs" },
+  { name: "Luke Hasz", pos: "TE", school: "Ole Miss", overallRank: 72, posRank: 8, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4870797.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/145.png", height: "6' 2\"", weight: "240 lbs" },
+  { name: "Omarion Miller", pos: "WR", school: "Arizona State", overallRank: 73, posRank: 27, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/4870850.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/9.png", height: "6' 2\"", weight: "215 lbs" },
+  { name: "Decker DeGraaf", pos: "TE", school: "Washington", overallRank: 74, posRank: 9, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5079373.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/264.png", height: "6' 4\"", weight: "250 lbs" },
+  { name: "Braylon Staley", pos: "WR", school: "Tennessee", overallRank: 75, posRank: 28, headshot: "https://a.espncdn.com/i/headshots/college-football/players/full/5132629.png", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/2633.png", height: "6' 0\"", weight: "190 lbs" },
 ];

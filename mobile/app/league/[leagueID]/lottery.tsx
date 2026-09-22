@@ -7,6 +7,7 @@ import { rankTeams, determinePlayoffTeams, TeamSeedData } from "../../../lib/wha
 import {
   LOTTERY_LEAGUE_IDS,
   computeLotteryOdds,
+  computeBaselineDepth,
   buildMockDraftBoard,
   LotteryTeam,
   MockDraftPick,
@@ -27,6 +28,7 @@ export default function DraftLottery() {
   const [loading, setLoading] = useState(true);
   const [lottery, setLottery] = useState<LotteryTeam[]>([]);
   const [board, setBoard] = useState<MockDraftPick[]>([]);
+  const [isSuperflex, setIsSuperflex] = useState(false);
 
   useEffect(() => {
     if (!leagueID || !LOTTERY_LEAGUE_IDS.has(leagueID)) {
@@ -47,6 +49,8 @@ export default function DraftLottery() {
 
         const playoffSpots: number = league.settings?.playoff_teams ?? 6;
         const divisionsCount: number = league.settings?.divisions ?? 0;
+        const rosterPositions: string[] = league.roster_positions ?? [];
+        setIsSuperflex(rosterPositions.some((p) => p === "SUPER_FLEX" || p === "SUPERFLEX"));
 
         const teamMeta: Record<string, TeamMeta> = {};
         const wins: Record<string, number> = {};
@@ -99,7 +103,8 @@ export default function DraftLottery() {
           posCounts: posCountsByRoster[id],
         }));
 
-        const mockBoard = buildMockDraftBoard(draftOrder);
+        const baselineDepth = computeBaselineDepth(rosterPositions);
+        const mockBoard = buildMockDraftBoard(draftOrder, baselineDepth);
         if (!cancelled) setBoard(mockBoard);
       } catch (error) {
         console.error("Error loading draft lottery:", error);
@@ -165,47 +170,72 @@ export default function DraftLottery() {
       </View>
 
       <Text className="text-[11px] font-bold tracking-widest text-brand mb-1">DYNASTY EARLY BOARD</Text>
-      <Text className="text-gray-500 text-[12px] mb-4">
-        A way-too-early mock of next year&apos;s rookie draft - real 2027 prospect rankings, matched to each team&apos;s
-        actual biggest roster need at their current draft slot.
+      <Text className="text-gray-500 text-[12px] mb-1">
+        A way-too-early mock of next year&apos;s rookie draft - real 2027 {isSuperflex ? "superflex " : ""}prospect
+        rankings, matched to each team&apos;s actual roster needs under this league&apos;s own format and scoring.
       </Text>
+      {isSuperflex && (
+        <View className="flex-row items-center gap-1.5 mb-4 self-start bg-white/5 border border-white/10 rounded-full px-2.5 py-1">
+          <Feather name="repeat" size={10} color="#9ca3af" />
+          <Text className="text-gray-400 text-[10px] font-bold tracking-wide">SUPERFLEX VALUES</Text>
+        </View>
+      )}
 
-      <View className="rounded-2xl border border-white/10 overflow-hidden">
-        {board.map((pick, i) => (
-          <View
-            key={pick.rosterId}
-            className={`flex-row items-center px-4 py-3 ${i !== board.length - 1 ? "border-b border-white/5" : ""}`}
-          >
-            <View className="w-[26px] h-[26px] rounded-full bg-white/5 items-center justify-center mr-2.5">
-              <Text className="text-gray-400 text-[11px] font-bold">{pick.pickNumber}</Text>
-            </View>
-            <Image
-              source={pick.avatar ? { uri: pick.avatar } : helmet}
-              className="w-[30px] h-[30px] rounded-full mr-2.5 bg-white/10"
-            />
-            <View className="flex-1 mr-2">
-              <Text numberOfLines={1} className="text-white font-semibold text-[13px]">
+      <View className="gap-3">
+        {board.map((pick) => (
+          <View key={pick.rosterId} className="rounded-2xl border border-white/10 bg-[#101012] overflow-hidden">
+            <View className="flex-row items-center px-3.5 pt-3 pb-2.5">
+              <View className="w-[24px] h-[24px] rounded-full bg-brand/15 border border-brand/30 items-center justify-center mr-2">
+                <Text className="text-brand text-[10px] font-bold">{pick.pickNumber}</Text>
+              </View>
+              <Image
+                source={pick.avatar ? { uri: pick.avatar } : helmet}
+                className="w-[22px] h-[22px] rounded-full mr-2 bg-white/10"
+              />
+              <Text numberOfLines={1} className="flex-1 text-white font-semibold text-[12px] mr-2">
                 {pick.teamName}
               </Text>
-              <Text className="text-gray-500 text-[10px] mt-0.5">Need: {pick.need}</Text>
+              <View style={{ backgroundColor: `${POS_COLOR[pick.need]}22`, borderColor: `${POS_COLOR[pick.need]}55` }} className="rounded-full border px-2 py-0.5">
+                <Text style={{ color: POS_COLOR[pick.need] }} className="text-[9px] font-bold">
+                  NEEDS {pick.need}
+                </Text>
+              </View>
             </View>
+
             {pick.prospect ? (
-              <View className="items-end">
-                <View className="flex-row items-center gap-1.5">
-                  <View
-                    style={{ backgroundColor: POS_COLOR[pick.prospect.pos] }}
-                    className="rounded px-1.5 py-0.5"
-                  >
-                    <Text className="text-white text-[9px] font-bold">{pick.prospect.pos}</Text>
-                  </View>
-                  <Text numberOfLines={1} className="text-white text-[13px] font-bold max-w-[130px]">
-                    {pick.prospect.name}
-                  </Text>
+              <View className="flex-row items-center px-3.5 pb-3.5 pt-1">
+                <View className="w-[52px] h-[52px] rounded-full bg-white/5 border border-white/10 overflow-hidden mr-3">
+                  {pick.prospect.headshot && (
+                    <Image source={{ uri: pick.prospect.headshot }} className="w-full h-full" resizeMode="cover" />
+                  )}
                 </View>
-                <Text className="text-gray-500 text-[10px] mt-0.5">{pick.prospect.school}</Text>
+                <View className="flex-1">
+                  <View className="flex-row items-center gap-1.5 mb-0.5">
+                    <View style={{ backgroundColor: POS_COLOR[pick.prospect.pos] }} className="rounded px-1.5 py-0.5">
+                      <Text className="text-white text-[9px] font-bold">{pick.prospect.pos}</Text>
+                    </View>
+                    <Text numberOfLines={1} className="text-white text-[15px] font-bold flex-1">
+                      {pick.prospect.name}
+                    </Text>
+                    <Text className="text-gray-500 text-[10px] font-bold">#{pick.prospect.overallRank} OVR</Text>
+                  </View>
+                  <View className="flex-row items-center gap-1.5 mb-0.5">
+                    {pick.prospect.logo && (
+                      <Image source={{ uri: pick.prospect.logo }} className="w-[14px] h-[14px]" resizeMode="contain" />
+                    )}
+                    <Text numberOfLines={1} className="text-gray-300 text-[12px] font-semibold">
+                      {pick.prospect.school}
+                    </Text>
+                  </View>
+                  {(pick.prospect.height || pick.prospect.weight) && (
+                    <Text className="text-gray-500 text-[10px]">
+                      {[pick.prospect.height, pick.prospect.weight].filter(Boolean).join(" · ")}
+                    </Text>
+                  )}
+                </View>
               </View>
             ) : (
-              <Text className="text-gray-600 text-[11px]">-</Text>
+              <Text className="text-gray-600 text-[11px] px-3.5 pb-3.5">No prospect available</Text>
             )}
           </View>
         ))}
@@ -214,8 +244,8 @@ export default function DraftLottery() {
       <View className="flex-row items-center gap-1.5 mt-4">
         <Feather name="info" size={11} color="#6b7280" />
         <Text className="text-gray-600 text-[10px] flex-1">
-          Prospect rankings are from early 2027 draft big boards and will keep moving all season - this is a
-          snapshot, not a prediction.
+          Prospect rankings are from early 2027 superflex dynasty big boards and will keep moving all season - this
+          is a snapshot, not a prediction.
         </Text>
       </View>
     </ScrollView>

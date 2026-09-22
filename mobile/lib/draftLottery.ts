@@ -32,16 +32,47 @@ export interface TeamNeed {
   deficit: number;
 }
 
-// A typical competitive dynasty bench's depth at each position - not a
-// hard rule, just the baseline "biggest need" is measured against.
-const BASELINE_DEPTH: Record<PlayerPos, number> = { QB: 2, RB: 5, WR: 6, TE: 2 };
+/**
+ * How deep a competitive roster needs to be at each position, derived from
+ * this league's actual roster_positions - not a generic guess. Real
+ * starting demand first (a FLEX/SUPER_FLEX slot's demand is split across
+ * whatever's actually eligible to fill it), then a depth multiplier that's
+ * bigger for QB in a superflex league specifically - real QB scarcity plus
+ * 2 startable QB slots is what actually drives dynasty superflex startup
+ * strategy (hoard QBs), which a 1-QB league has no reason to do.
+ */
+export function computeBaselineDepth(rosterPositions: string[]): Record<PlayerPos, number> {
+  const count = (p: string) => rosterPositions.filter((s) => s === p).length;
+  const qbSlots = count("QB");
+  const sfSlots = count("SUPER_FLEX") + count("SUPERFLEX");
+  const rbSlots = count("RB");
+  const wrSlots = count("WR");
+  const teSlots = count("TE");
+  const flexSlots = count("FLEX") + count("WRRB_FLEX") + count("REC_FLEX");
 
-/** this team's single biggest positional need, from their real rostered player counts against typical competitive dynasty depth at each position */
-export function biggestNeed(posCounts: Record<PlayerPos, number>): TeamNeed {
-  const needs = (Object.keys(BASELINE_DEPTH) as PlayerPos[]).map((pos) => ({
+  const isSuperflex = sfSlots > 0;
+  // A superflex slot is usually filled by a QB on a competitive build, so
+  // it counts toward QB starting demand directly; a generic FLEX splits
+  // its demand three ways across RB/WR/TE.
+  const qbStarters = qbSlots + sfSlots;
+  const rbStarters = rbSlots + flexSlots / 3;
+  const wrStarters = wrSlots + flexSlots / 3;
+  const teStarters = teSlots + flexSlots / 3;
+
+  return {
+    QB: Math.ceil(qbStarters * (isSuperflex ? 1.8 : 1.5)),
+    RB: Math.ceil(rbStarters * 1.8),
+    WR: Math.ceil(wrStarters * 1.8),
+    TE: Math.ceil(teStarters * 1.6),
+  };
+}
+
+/** this team's single biggest positional need, from their real rostered player counts against this league's own real starting requirements (computeBaselineDepth) */
+export function biggestNeed(posCounts: Record<PlayerPos, number>, baselineDepth: Record<PlayerPos, number>): TeamNeed {
+  const needs = (Object.keys(baselineDepth) as PlayerPos[]).map((pos) => ({
     pos,
     count: posCounts[pos] ?? 0,
-    deficit: BASELINE_DEPTH[pos] - (posCounts[pos] ?? 0),
+    deficit: baselineDepth[pos] - (posCounts[pos] ?? 0),
   }));
   needs.sort((a, b) => b.deficit - a.deficit);
   return needs[0];
@@ -57,32 +88,29 @@ export interface MockDraftPick {
 }
 
 /**
- * A "way-too-early" mock rookie draft, real prospects (draftProspects.ts)
- * against real team needs (each roster's actual positional depth). Draft
- * order is current standings - lottery-position teams worst-to-best, then
- * playoff teams in reverse standings order, the same convention the real
- * NFL draft uses - since there's no actual randomized lottery draw to run
- * here, just the probabilities shown alongside it. At each pick, the team
- * takes the best remaining prospect at their single biggest positional
- * need; if their needs are already well covered, best-player-available
- * off a fixed value-order (WR/RB/QB/TE, matching how dynasty startup
- * rookie capital is typically valued).
+ * A "way-too-early" mock rookie draft, real prospects (draftProspects.ts,
+ * already ranked in superflex-weighted order) against real team needs
+ * (each roster's actual positional depth vs. this league's own real
+ * starting requirements). Draft order is current standings -
+ * lottery-position teams worst-to-best, then playoff teams in reverse
+ * standings order, the same convention the real NFL draft uses - since
+ * there's no actual randomized lottery draw to run here, just the
+ * probabilities shown alongside it. At each pick, the team takes the best
+ * remaining prospect at their single biggest positional need; if their
+ * needs are already well covered, best-player-available by overall
+ * (superflex) rank.
  */
 export function buildMockDraftBoard(
-  draftOrder: { rosterId: string; teamName: string; avatar?: string; posCounts: Record<PlayerPos, number> }[]
+  draftOrder: { rosterId: string; teamName: string; avatar?: string; posCounts: Record<PlayerPos, number> }[],
+  baselineDepth: Record<PlayerPos, number>
 ): MockDraftPick[] {
   const remaining = [...DRAFT_PROSPECTS];
   const bestAt = (pos: PlayerPos) => remaining.filter((p) => p.pos === pos).sort((a, b) => a.posRank - b.posRank)[0];
+  const bestOverall = () => [...remaining].sort((a, b) => a.overallRank - b.overallRank)[0];
 
   return draftOrder.map((team, i) => {
-    const need = biggestNeed(team.posCounts);
-    let prospect = need.deficit > 0 ? bestAt(need.pos) : undefined;
-    if (!prospect) {
-      for (const pos of ["WR", "RB", "QB", "TE"] as PlayerPos[]) {
-        prospect = bestAt(pos);
-        if (prospect) break;
-      }
-    }
+    const need = biggestNeed(team.posCounts, baselineDepth);
+    const prospect = (need.deficit > 0 && bestAt(need.pos)) || bestOverall();
     if (prospect) remaining.splice(remaining.indexOf(prospect), 1);
 
     return {
