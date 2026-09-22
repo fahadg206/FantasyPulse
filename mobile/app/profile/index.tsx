@@ -32,6 +32,7 @@ import {
 import { getFantasyProfileStats, FantasyProfileStats } from "../../lib/fantasyProfile";
 import { getFollowingUids, getFollowerUids } from "../../lib/follows";
 import ProfileActivity from "../../components/ProfileActivity";
+import { getManualTitles } from "../../lib/manualTitles";
 import Avatar from "../../components/Avatar";
 
 const CURRENT_SEASON = "2026";
@@ -158,7 +159,11 @@ export default function ProfileHome() {
         ) : statsLoading ? (
           <ActivityIndicator color="#af1222" className="mt-6" />
         ) : stats ? (
-          <ProfileActivity sleeperUserId={profile.sleeperUserId} stats={stats} />
+          <ProfileActivity
+            sleeperUserId={profile.sleeperUserId}
+            stats={stats}
+            extraTitles={getManualTitles(profile.username)}
+          />
         ) : null}
 
         <FindManagerCard />

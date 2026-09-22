@@ -9,6 +9,7 @@ import { getFantasyProfileStats, FantasyProfileStats } from "../../lib/fantasyPr
 import { followUser, unfollowUser, isFollowing, getFollowingUids, getFollowerUids } from "../../lib/follows";
 import { getPostsByAuthor, isPostLiked, isPostReposted, BOOGIE_UID, BOOGIE_USERNAME, BOOGIE_SLEEPER_USER_ID, Post } from "../../lib/posts";
 import ProfileActivity from "../../components/ProfileActivity";
+import { getManualTitles } from "../../lib/manualTitles";
 import Avatar from "../../components/Avatar";
 import PostCard from "../../components/PostCard";
 
@@ -99,7 +100,7 @@ function BoogieProfile() {
           <ProfileActivity
             sleeperUserId={BOOGIE_SLEEPER_USER_ID}
             stats={stats}
-            extraTitles={[{ leagueName: "Champions League", season: "2022" }]}
+            extraTitles={getManualTitles(BOOGIE_USERNAME)}
           />
         ) : null}
 
@@ -279,7 +280,11 @@ export default function PublicProfile() {
         ) : statsLoading ? (
           <ActivityIndicator color="#af1222" className="mt-4" />
         ) : stats ? (
-          <ProfileActivity sleeperUserId={profile.sleeperUserId} stats={stats} />
+          <ProfileActivity
+            sleeperUserId={profile.sleeperUserId}
+            stats={stats}
+            extraTitles={getManualTitles(profile.username)}
+          />
         ) : null}
       </ScrollView>
     </SafeAreaView>
