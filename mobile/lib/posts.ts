@@ -194,8 +194,10 @@ export async function getPostsByAuthor(authorUid: string, limitCount = 50): Prom
 // can never be created twice even if two clients race on the same id,
 // since the id (not the write) is what's unique.
 export const BOOGIE_UID = "boogie";
-/** Boogie's internal handle - his real Sleeper username, reused as the routable "username" for his profile (/profile/123Cancun), even though he's not a real Firebase account. */
+/** Boogie's internal handle - his real Sleeper username, used as the routable "username" for his profile (/profile/123Cancun) and to look up his real leagues, even though he's not a real Firebase account. Not shown in the UI - his profile displays as "Boogie The Writer" only. */
 export const BOOGIE_USERNAME = "123Cancun";
+/** Boogie's real Sleeper user_id (123Cancun) - verified live against Sleeper's API before shipping. Used to pull his actual Fantasy Profile stats onto his profile page. */
+export const BOOGIE_SLEEPER_USER_ID = "865355294702723072";
 /** @deprecated kept as an alias - use BOOGIE_UID */
 export const SYSTEM_AUTHOR_UID = BOOGIE_UID;
 

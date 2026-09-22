@@ -7,7 +7,7 @@ import type { User } from "firebase/auth";
 import { onAuthChange, isReadOnly, getUserProfileByUsername, ensureAvatarSynced, UserProfile } from "../../lib/socialAuth";
 import { getFantasyProfileStats, FantasyProfileStats } from "../../lib/fantasyProfile";
 import { followUser, unfollowUser, isFollowing, getFollowingUids, getFollowerUids } from "../../lib/follows";
-import { getPostsByAuthor, isPostLiked, isPostReposted, BOOGIE_UID, BOOGIE_USERNAME, Post } from "../../lib/posts";
+import { getPostsByAuthor, isPostLiked, isPostReposted, BOOGIE_UID, BOOGIE_USERNAME, BOOGIE_SLEEPER_USER_ID, Post } from "../../lib/posts";
 import ProfileActivity from "../../components/ProfileActivity";
 import Avatar from "../../components/Avatar";
 import PostCard from "../../components/PostCard";
@@ -16,16 +16,23 @@ const CURRENT_SEASON = "2026";
 
 // Boogie isn't a real Firebase account - there's no profiles/{uid} doc to
 // look up - so his profile is handled entirely separately from the real
-// lookup flow below, showing only what he's actually posted himself
-// (trades and final scores, per ensureSystemPost's scope) rather than any
-// Fantasy Profile stats a real manager's page would have.
+// lookup flow below. His Fantasy Profile stats (leagues, record, this
+// week's matchups) are pulled from his actual Sleeper account
+// (BOOGIE_SLEEPER_USER_ID) the same way any real manager's are, but his
+// handle (123Cancun - that account's real Sleeper username) is only ever
+// used internally for that lookup and for routing here - never shown in
+// the UI, where he's just "Boogie The Writer". His own posts (trades and
+// final scores, per ensureSystemPost's scope) sit in their own section
+// below the stats, not mixed in.
 function BoogieProfile() {
   const router = useRouter();
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [currentUid, setCurrentUid] = useState<string | undefined>(undefined);
+  const [stats, setStats] = useState<FantasyProfileStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(true);
   const [posts, setPosts] = useState<Post[]>([]);
   const [interactionState, setInteractionState] = useState<Record<string, { liked: boolean; reposted: boolean }>>({});
-  const [loading, setLoading] = useState(true);
+  const [postsLoading, setPostsLoading] = useState(true);
 
   useEffect(() => onAuthChange(setAuthUser), []);
 
@@ -36,6 +43,13 @@ function BoogieProfile() {
     }
     setCurrentUid(authUser.uid);
   }, [authUser]);
+
+  useEffect(() => {
+    getFantasyProfileStats(BOOGIE_SLEEPER_USER_ID, CURRENT_SEASON)
+      .then(setStats)
+      .catch((error) => console.error("Error loading Boogie's Sleeper stats:", error))
+      .finally(() => setStatsLoading(false));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,7 +68,7 @@ function BoogieProfile() {
         }
       })
       .catch((error) => console.error("Error loading Boogie's posts:", error))
-      .finally(() => !cancelled && setLoading(false));
+      .finally(() => !cancelled && setPostsLoading(false));
     return () => {
       cancelled = true;
     };
@@ -67,51 +81,57 @@ function BoogieProfile() {
           <Feather name="arrow-left" size={20} color="#fff" />
         </Pressable>
       </View>
-      <View className="items-center px-5 pt-4 pb-6">
-        <Avatar uid={BOOGIE_UID} name="Boogie The Writer" size={80} />
-        <View className="flex-row items-center gap-1.5 mt-2">
-          <Text className="text-white text-[20px] font-bold">Boogie The Writer</Text>
-          <Feather name="check-circle" size={15} color="#af1222" />
+      <ScrollView contentContainerClassName="px-5 pt-4 pb-12" showsVerticalScrollIndicator={false}>
+        <View className="items-center mb-6">
+          <Avatar uid={BOOGIE_UID} name="Boogie The Writer" size={80} />
+          <View className="flex-row items-center gap-1.5 mt-2">
+            <Text className="text-white text-[20px] font-bold">Boogie The Writer</Text>
+            <Feather name="check-circle" size={15} color="#af1222" />
+          </View>
+          <Text className="text-gray-300 text-[13px] mt-2 text-center px-6">
+            Fantasy Pulse Senior Staff Writer, covering every trade and final score across the league.
+          </Text>
         </View>
-        <Text className="text-gray-500 text-[13px]">@{BOOGIE_USERNAME}</Text>
-        <Text className="text-gray-300 text-[13px] mt-2 text-center px-6">
-          Fantasy Pulse Senior Staff Writer, covering every trade and final score across the league.
-        </Text>
-      </View>
 
-      {loading ? (
-        <View className="items-center py-10">
-          <ActivityIndicator color="#af1222" />
+        {statsLoading ? (
+          <ActivityIndicator color="#af1222" className="mb-4" />
+        ) : stats ? (
+          <ProfileActivity sleeperUserId={BOOGIE_SLEEPER_USER_ID} stats={stats} />
+        ) : null}
+
+        <View className="mt-2">
+          <Text className="text-[10px] font-bold tracking-widest text-gray-500 mb-2.5">POSTS</Text>
+          {postsLoading ? (
+            <ActivityIndicator color="#af1222" className="py-6" />
+          ) : posts.length === 0 ? (
+            <Text className="text-gray-500 text-[13px] text-center py-6">Nothing posted yet.</Text>
+          ) : (
+            <View className="border-y border-white/10">
+              {posts.map((post) => (
+                <PostCard
+                  key={post.id}
+                  post={post}
+                  currentUid={currentUid}
+                  liked={interactionState[post.id]?.liked ?? false}
+                  reposted={interactionState[post.id]?.reposted ?? false}
+                  onPressReply={() => router.push(`/post/${post.id}`)}
+                  onPressTarget={() => {
+                    if (post.targetType === "matchup" && post.targetId && post.leagueId) {
+                      const [week, matchupID] = post.targetId.split(":");
+                      router.push({
+                        pathname: "/league/[leagueID]/matchup",
+                        params: { leagueID: post.leagueId, week, matchupID },
+                      } as any);
+                    } else if ((post.targetType === "trade" || post.targetType === "waiver") && post.leagueId) {
+                      router.push({ pathname: "/league/[leagueID]/trades", params: { leagueID: post.leagueId } } as any);
+                    }
+                  }}
+                />
+              ))}
+            </View>
+          )}
         </View>
-      ) : posts.length === 0 ? (
-        <View className="items-center py-10 px-6">
-          <Text className="text-gray-500 text-[13px] text-center">Nothing posted yet.</Text>
-        </View>
-      ) : (
-        <ScrollView showsVerticalScrollIndicator={false}>
-          {posts.map((post) => (
-            <PostCard
-              key={post.id}
-              post={post}
-              currentUid={currentUid}
-              liked={interactionState[post.id]?.liked ?? false}
-              reposted={interactionState[post.id]?.reposted ?? false}
-              onPressReply={() => router.push(`/post/${post.id}`)}
-              onPressTarget={() => {
-                if (post.targetType === "matchup" && post.targetId && post.leagueId) {
-                  const [week, matchupID] = post.targetId.split(":");
-                  router.push({
-                    pathname: "/league/[leagueID]/matchup",
-                    params: { leagueID: post.leagueId, week, matchupID },
-                  } as any);
-                } else if ((post.targetType === "trade" || post.targetType === "waiver") && post.leagueId) {
-                  router.push({ pathname: "/league/[leagueID]/trades", params: { leagueID: post.leagueId } } as any);
-                }
-              }}
-            />
-          ))}
-        </ScrollView>
-      )}
+      </ScrollView>
     </SafeAreaView>
   );
 }
