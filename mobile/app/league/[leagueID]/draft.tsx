@@ -164,6 +164,8 @@ interface DraftUser {
   picks: DraftPlayer[];
   bestValuePicks: DraftPlayer[];
   draftGrade: string;
+  /** value-surplus-based composite used to curve draftGrade against the rest of this draft's managers - not itself shown in the UI */
+  draftScore: number;
   summary: string;
   projectedRecord: string;
   weeklyPoints: number[];
@@ -230,14 +232,44 @@ function PositionBreakdown({ picks }: { picks: DraftPlayer[] }) {
   );
 }
 
-function gradeFromValue(adjustedValue: number): string {
-  const ranges: [string, number, number][] = [
-    ["F", 100000, 109999], ["D", 110000, 114999], ["C-", 115000, 119999],
-    ["C", 120000, 129999], ["C+", 130000, 139999], ["B-", 140000, 144999],
-    ["B", 145000, 149999], ["B+", 150000, 154999], ["A-", 155000, 159999],
-    ["A", 160000, 164999], ["A+", 165000, Infinity],
-  ];
-  for (const [grade, min, max] of ranges) if (adjustedValue >= min && adjustedValue <= max) return grade;
+// The draft's own implied market order for the picks that actually feed
+// the grade (round <= 15, same cutoff bestValuePicks already uses) - no
+// external ADP feed needed. Sorting those picks by KTC value descending is
+// "the order the market says they should have gone in"; zipping that back
+// onto the real pick numbers (ascending) gives "the value a player picked
+// at slot N should have had." Comparing what a manager actually got at
+// each of their picks against that expected-value-at-that-slot is the
+// same value-surplus approach real draft graders (Dynasty Daddy's ADP
+// Daddy, Roster Audit) use to separate "who has the most value" from "who
+// actually beat their draft slot" - a manager picking 1st overall isn't
+// more skilled for ending up with the consensus #1 player, and a punt-heavy
+// 30-round dynasty startup shouldn't out-grade a lean 15-round one just for
+// accumulating a bigger raw sum, which is what this app graded on before.
+function buildExpectedValueByPickNo(eligiblePicks: { pick_no: number; value: number }[]): Record<number, number> {
+  const byPickNoAsc = [...eligiblePicks].sort((a, b) => a.pick_no - b.pick_no);
+  const byValueDesc = [...eligiblePicks].sort((a, b) => b.value - a.value);
+  const expected: Record<number, number> = {};
+  byPickNoAsc.forEach((p, i) => {
+    expected[p.pick_no] = byValueDesc[i]?.value ?? 0;
+  });
+  return expected;
+}
+
+// Grades are assigned on a curve against this specific draft's own field of
+// managers (percentile rank of draftScore, best = 1.0), not fixed absolute
+// thresholds - fixed thresholds tuned for one league size/format graded
+// every other league against a scale that had nothing to do with it (a
+// bigger league or a longer dynasty startup produces bigger raw sums
+// regardless of skill). Ranking within the draft itself is self-normalizing
+// across league size, round count, and scoring format.
+const GRADE_CURVE: [string, number][] = [
+  ["A+", 0.92], ["A", 0.8], ["A-", 0.68],
+  ["B+", 0.56], ["B", 0.44], ["B-", 0.32],
+  ["C+", 0.22], ["C", 0.14], ["C-", 0.08],
+  ["D", 0.03], ["F", 0],
+];
+function gradeFromPercentile(percentile: number): string {
+  for (const [grade, min] of GRADE_CURVE) if (percentile >= min) return grade;
   return "F";
 }
 
@@ -291,6 +323,10 @@ export default function Draft() {
         const { data: league } = await sleeper.getLeague(leagueID);
         const totalRosters: number = league.total_rosters;
         const rosterPositions: string[] = league.roster_positions;
+        // This league's actual regular season length, not a hardcoded 14 -
+        // some leagues run shorter or longer regular seasons, and using the
+        // wrong length silently mis-fetched or double-counted weeks.
+        const regularSeasonWeeks: number = Math.max(1, (league.settings?.playoff_week_start ?? 15) - 1);
 
         const [playersData, draftsRes, { data: usersRes }, { data: rostersRes }] = await Promise.all([
           backend.fetchPlayers(leagueID),
@@ -330,7 +366,7 @@ export default function Draft() {
 
         const weeklyMatchups: Record<number, any[]> = {};
         const weekResults = await Promise.all(
-          Array.from({ length: 14 }, (_, i) => i + 1).map((w) => sleeper.getMatchups(leagueID, w))
+          Array.from({ length: regularSeasonWeeks }, (_, i) => i + 1).map((w) => sleeper.getMatchups(leagueID, w))
         );
         weekResults.forEach((res, i) => (weeklyMatchups[i + 1] = res.data ?? []));
 
@@ -371,6 +407,7 @@ export default function Draft() {
               picks: [],
               bestValuePicks: [],
               draftGrade: "",
+              draftScore: 0,
               summary: "",
               projectedRecord: "",
               weeklyPoints: [],
@@ -381,7 +418,7 @@ export default function Draft() {
           if (round <= 15) users[pick.picked_by].bestValuePicks.push(player);
         });
 
-        for (let week = 1; week <= 14; week++) {
+        for (let week = 1; week <= regularSeasonWeeks; week++) {
           for (const matchup of weeklyMatchups[week]) {
             const userId = rosterToUser[matchup.roster_id];
             if (!users[userId]) continue;
@@ -393,7 +430,7 @@ export default function Draft() {
           }
         }
 
-        for (let week = 1; week <= 14; week++) {
+        for (let week = 1; week <= regularSeasonWeeks; week++) {
           for (const matchup of weeklyMatchups[week]) {
             const userId = rosterToUser[matchup.roster_id];
             if (!users[userId]) continue;
@@ -406,30 +443,59 @@ export default function Draft() {
           }
         }
 
+        // This draft's own implied market order, built only from the picks
+        // that feed the grade (round <= 15) across every manager - see
+        // buildExpectedValueByPickNo's comment for why this replaces a raw
+        // value sum as the core signal.
+        const expectedValueByPickNo = buildExpectedValueByPickNo(
+          sortedPicks
+            .map((p, i) => ({ pick_no: p.pick_no, round: p.round || 1, value: values[i] }))
+            .filter((p) => p.round <= 15)
+        );
+
+        // Roster-construction penalty, expressed in the same KTC-value
+        // scale as the surplus above (rather than the old flat "* 10",
+        // which was negligible against a 100,000+ raw value sum and
+        // effectively never changed a grade). A full missing starting
+        // position is a real, meaningful draft mistake worth a few hundred
+        // value-equivalent points, not a rounding error.
+        const NEED_PENALTY_PER_UNIT = 600;
+        // Redraft/keeper leagues are graded this season, not as a dynasty
+        // asset stash - projected competitiveness still matters there, just
+        // as one bounded term in the composite instead of the old
+        // totalRosters-scaled flat bonuses layered on top of an unrelated
+        // value scale. Dynasty drafts skip this entirely; this season's win
+        // total says nothing about whether the assets were drafted well.
+        const COMPETITIVENESS_WEIGHT = 6000;
+
         for (const userId in users) {
           const u = users[userId];
-          u.projectedRecord = `${u.projectedWins}-${14 - u.projectedWins}`;
+          u.projectedRecord = `${u.projectedWins}-${regularSeasonWeeks - u.projectedWins}`;
 
-          const draftValue = u.bestValuePicks.reduce((sum, p) => sum + (isNaN(p.value) ? 0 : p.value), 0);
-          const positionalNeeds = calculatePositionalNeeds(u.bestValuePicks, rosterPositions);
-          const synergy = u.bestValuePicks.reduce((sum, p) => {
-            const proj = parseFloat(playersData[p.player_id]?.wi?.[0]?.p || "0");
-            return sum + proj;
+          const surplus = u.bestValuePicks.reduce((sum, p) => {
+            const expected = expectedValueByPickNo[p.pick] ?? p.value;
+            return sum + (p.value - expected);
           }, 0);
+          const needsPenalty = calculatePositionalNeeds(u.bestValuePicks, rosterPositions) * NEED_PENALTY_PER_UNIT;
 
-          let adjusted = draftValue * 2 + synergy - positionalNeeds * 10;
+          let score = surplus - needsPenalty;
           if (!scoringType.includes("dynasty")) {
-            adjusted += u.projectedWins * totalRosters * 6;
-            adjusted -= (14 - u.projectedWins) * totalRosters * 6;
+            const winRatio = u.projectedWins / regularSeasonWeeks;
+            score += (winRatio - 0.5) * COMPETITIVENESS_WEIGHT;
           }
-          const winRatio = u.projectedWins / 14;
-          if (winRatio >= 0.7) adjusted += totalRosters * 20;
-          else if (winRatio >= 0.5) adjusted += totalRosters * 10;
-          else if (winRatio < 0.4) adjusted -= totalRosters * 35;
 
-          u.draftGrade = gradeFromValue(adjusted);
+          u.draftScore = score;
           u.bestValuePicks = u.bestValuePicks.slice(0, 3);
         }
+
+        // Grade on a curve against this specific draft's own managers - see
+        // GRADE_CURVE's comment for why that's the fix, not another fixed
+        // threshold table.
+        const ranked = Object.values(users).sort((a, b) => b.draftScore - a.draftScore);
+        ranked.forEach((u, i) => {
+          const percentile = ranked.length > 1 ? 1 - i / (ranked.length - 1) : 0.5;
+          u.draftGrade = gradeFromPercentile(percentile);
+        });
 
         if (!cancelled) {
           setDraftData(Object.values(users));

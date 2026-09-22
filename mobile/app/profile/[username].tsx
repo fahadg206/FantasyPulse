@@ -149,6 +149,7 @@ export default function PublicProfile() {
   const [stats, setStats] = useState<FantasyProfileStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [following, setFollowing] = useState(false);
+  const [followsYou, setFollowsYou] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
   const [followCounts, setFollowCounts] = useState({ following: 0, followers: 0 });
 
@@ -171,6 +172,10 @@ export default function PublicProfile() {
   useEffect(() => {
     if (!profile || !authUser || isReadOnly(authUser)) return;
     isFollowing(authUser.uid, profile.uid).then(setFollowing).catch(console.error);
+    // The reverse direction - does *this profile* follow the signed-in
+    // viewer - is what earns the "Follows you" tag next to their handle,
+    // same as Twitter's.
+    isFollowing(profile.uid, authUser.uid).then(setFollowsYou).catch(console.error);
   }, [profile, authUser]);
 
   useEffect(() => {
@@ -235,7 +240,14 @@ export default function PublicProfile() {
         <View className="items-center mb-6">
           <Avatar uid={profile.uid} url={profile.avatar} name={profile.displayName} size={80} />
           <Text className="text-white text-[20px] font-bold mt-2">{profile.displayName}</Text>
-          <Text className="text-gray-500 text-[13px]">@{profile.username}</Text>
+          <View className="flex-row items-center gap-2 mt-0.5">
+            <Text className="text-gray-500 text-[13px]">@{profile.username}</Text>
+            {followsYou && (
+              <View className="bg-white/10 rounded px-1.5 py-0.5">
+                <Text className="text-gray-400 text-[10px] font-semibold">Follows you</Text>
+              </View>
+            )}
+          </View>
           {profile.bio && <Text className="text-gray-300 text-[13px] mt-2 text-center px-6">{profile.bio}</Text>}
 
           <View className="flex-row gap-6 mt-4">
