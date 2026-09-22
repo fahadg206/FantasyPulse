@@ -17,6 +17,8 @@ export interface FeedPlay {
   homeScore: number;
   period: number;
   clock: string;
+  /** real-world timestamp (ms) this play actually happened - what the feed is sorted by now, not period/clock (those aren't comparable across the different concurrent games a matchup's players are spread across) */
+  wallclockMs: number | null;
   text: string;
   playType: string;
   pointsDelta: number | null;

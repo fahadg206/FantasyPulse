@@ -152,6 +152,7 @@ function buildPlayEntry({
   period,
   clockDisplay,
   clockSecondsRemaining,
+  wallclockMs,
   text,
   playType,
   player,
@@ -167,6 +168,7 @@ function buildPlayEntry({
     period: period || 0,
     clock: clockDisplay,
     clockSecondsRemaining: clockSecondsRemaining ?? 0,
+    wallclockMs: wallclockMs ?? null,
     text,
     playType,
     player,
@@ -221,20 +223,34 @@ export default async function handler(req, res) {
             ...(summary.drives?.previous || []),
             ...(summary.drives?.current ? [summary.drives.current] : []),
           ];
+          const plays = drives.flatMap((drive) => drive.plays || []);
+
+          // `scoringPlays` entries carry no real-time field of their own
+          // (verified live) - only period/clock, which is meaningless for
+          // ordering across different concurrent games. The full
+          // play-by-play in `drives` has the same plays (by id) WITH a
+          // real `wallclock` ISO timestamp, so this looks it up from
+          // there instead of guessing at one.
+          const wallclockById = new Map(
+            plays
+              .filter((p) => p.id && p.wallclock)
+              .map((p) => [p.id, Date.parse(p.wallclock)])
+          );
 
           return {
             eventId: event.id,
             away,
             home,
             scoringPlays: summary.scoringPlays || [],
-            plays: drives.flatMap((drive) => drive.plays || []),
+            plays,
+            wallclockById,
           };
         } catch (err) {
           console.error(
             `Error fetching ESPN summary for event ${event.id}:`,
             err
           );
-          return { eventId: event.id, away: null, home: null, scoringPlays: [], plays: [] };
+          return { eventId: event.id, away: null, home: null, scoringPlays: [], plays: [], wallclockById: new Map() };
         }
       })
     );
@@ -260,6 +276,7 @@ export default async function handler(req, res) {
           period: play.period?.number,
           clockDisplay: play.clock?.displayValue,
           clockSecondsRemaining: play.clock?.value,
+          wallclockMs: game.wallclockById.get(play.id) ?? null,
           text: play.text,
           playType,
         };
@@ -330,6 +347,7 @@ export default async function handler(req, res) {
           period: play.period?.number,
           clockDisplay: play.clock?.displayValue,
           clockSecondsRemaining: play.clock?.value,
+          wallclockMs: play.wallclock ? Date.parse(play.wallclock) : null,
           text: play.text,
           playType,
         };
@@ -382,13 +400,21 @@ export default async function handler(req, res) {
 
     // Newest first, like a real feed (and like the reference screenshot -
     // its top item was an OT play, the most recent thing that happened).
-    // Within the same period a lower clock value is later in real time;
-    // across periods, a higher period number is later - period 5 is OT,
-    // which comes after all of regulation, so it belongs at the top, not
-    // the bottom. Cross-game interleaving is inherently approximate
-    // without real timestamps (games run concurrently), so ties fall back
-    // to fetch order.
+    // Sorted by each play's real wallclock timestamp, not period/clock -
+    // a matchup's players are spread across multiple real games running
+    // concurrently or at different times of day, and one game's own Q1
+    // isn't comparable to another game's Q4 the way period+clock assumes.
+    // wallclockMs is only missing if ESPN's data itself didn't have it
+    // for that specific play (rare - verified live before shipping this),
+    // in which case it falls back to the old period/clock comparison
+    // against just the other plays missing it, and sorts behind every
+    // play that does have a real timestamp.
     feed.sort((a, b) => {
+      if (a.wallclockMs !== null && b.wallclockMs !== null) {
+        return b.wallclockMs - a.wallclockMs;
+      }
+      if (a.wallclockMs !== null) return -1;
+      if (b.wallclockMs !== null) return 1;
       if (a.period !== b.period) return b.period - a.period;
       return a.clockSecondsRemaining - b.clockSecondsRemaining;
     });
