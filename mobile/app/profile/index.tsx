@@ -448,7 +448,7 @@ function SignInUpScreen() {
             <TextInput
               value={email}
               onChangeText={setEmail}
-              placeholder="Email"
+              placeholder="Sleeper email"
               placeholderTextColor="#6b7280"
               autoCapitalize="none"
               autoCorrect={false}
@@ -466,8 +466,8 @@ function SignInUpScreen() {
           />
           {mode === "signup" && (
             <Text className="text-gray-600 text-[11px] mb-2.5 px-1">
-              Your email is only used to sign in and to recover your account if you ever forget
-              your username or password.
+              Use the email on your Sleeper account - you'll be able to sign back in with either
+              your Sleeper username or this email, and it's how you'd recover your account.
             </Text>
           )}
 
