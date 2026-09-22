@@ -106,7 +106,19 @@ service cloud.firestore {
     // change (a 2-person DM, not a group chat someone could add a third
     // person to after the fact).
     match /conversations/{conversationId} {
-      allow read: if request.auth != null && request.auth.uid in resource.data.participants;
+      // getOrCreateConversation's first move is checking whether this
+      // conversation already exists (a plain getDoc, before ever trying to
+      // create it) - on a document that doesn't exist yet, `resource` is
+      // null, and `resource.data` on null throws, which Firestore treats
+      // as permission-denied rather than "allowed, doc not found". Every
+      // brand-new conversation's very first check hit this. The
+      // `resource == null ||` guard lets that existence check succeed
+      // (returning "not found") so the client can legitimately fall
+      // through to create - same idea as ensureSystemPost's
+      // check-then-write pattern elsewhere, just needing the rule to
+      // explicitly allow the "check" half too.
+      allow read: if request.auth != null
+        && (resource == null || request.auth.uid in resource.data.participants);
       allow create: if request.auth != null
         && request.auth.uid in request.resource.data.participants
         && request.resource.data.participants.size() == 2;
