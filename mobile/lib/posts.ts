@@ -196,8 +196,6 @@ export async function getPostsByAuthor(authorUid: string, limitCount = 50): Prom
 export const BOOGIE_UID = "boogie";
 /** Boogie's internal handle - his real Sleeper username, reused as the routable "username" for his profile (/profile/123Cancun), even though he's not a real Firebase account. */
 export const BOOGIE_USERNAME = "123Cancun";
-/** Boogie's real Sleeper account's avatar (user_id 865355294702723072) - verified live against Sleeper's API before shipping. */
-export const BOOGIE_AVATAR_URL = "https://sleepercdn.com/avatars/thumbs/d5a9e9d18479a20b7de74332f3bfb3ee";
 /** @deprecated kept as an alias - use BOOGIE_UID */
 export const SYSTEM_AUTHOR_UID = BOOGIE_UID;
 
@@ -223,7 +221,7 @@ export async function ensureSystemPost(input: EnsureSystemPostInput): Promise<vo
     authorUid: BOOGIE_UID,
     authorUsername: BOOGIE_USERNAME,
     authorDisplayName: "Boogie The Writer",
-    authorAvatar: BOOGIE_AVATAR_URL,
+    authorAvatar: null,
     text: input.text,
     imageUrl: input.imageUrl ?? null,
     matchupCard: input.matchupCard ?? null,
