@@ -1,17 +1,22 @@
 // src/lib/bigPlayPoints.ts
 //
-// Turns a normalized scoring/turnover play (see fetchMatchupFeed.js) into a
-// fantasy point delta for whichever rostered player it belongs to, using
-// the league's own scoring settings (Sleeper's raw scoring_settings object,
-// e.g. rush_td, rec_yd, pass_int, fg_40_49). Positive for a player gaining
-// points (a touchdown, a field goal), negative for a player losing them
-// (an interception thrown, a fumble lost).
+// Turns a normalized play (see fetchMatchupFeed.js) into a fantasy point
+// delta for whichever rostered player it belongs to, using the league's
+// own scoring settings (Sleeper's raw scoring_settings object, e.g.
+// rush_yd, rush_td, rec, rec_yd, pass_yd, pass_int). Positive for a player
+// gaining points (a run, a catch, a touchdown), negative for a player
+// losing them (an interception thrown, a fumble lost).
+//
+// Each gain function takes `isTouchdown` so the same formula covers both
+// an ordinary gain and a scoring one (yardage points always apply; the
+// touchdown bonus only on top of them) - fetchMatchupFeed.js decides
+// whether a given play clears the "worth showing" bar itself, not this
+// module.
 //
 // Coverage is intentionally scoped to what can be reliably parsed from
-// ESPN's play text: rushing/receiving/passing touchdowns, field goals,
-// interceptions thrown, and lost fumbles. Two-point conversions and safeties
-// aren't handled (too rare in this feed to be worth the parsing risk) and
-// simply return 0.
+// ESPN's play text: rushes, receptions, field goals, interceptions thrown,
+// and lost fumbles. Two-point conversions and safeties aren't handled (too
+// rare in this feed to be worth the parsing risk) and simply return 0.
 
 export type ScoringSettings = { [stat: string]: number };
 
@@ -23,29 +28,32 @@ function fieldGoalPoints(yardage: number, scoring: ScoringSettings): number {
   return scoring.fg_0_19 || 0;
 }
 
-export function computeRushingTouchdownPoints(
+export function computeRushPoints(
   yardage: number,
+  isTouchdown: boolean,
   scoring: ScoringSettings
 ): number {
-  return (scoring.rush_td || 0) + yardage * (scoring.rush_yd || 0);
+  return yardage * (scoring.rush_yd || 0) + (isTouchdown ? scoring.rush_td || 0 : 0);
 }
 
-export function computeReceivingTouchdownPoints(
+export function computeReceptionPoints(
   yardage: number,
+  isTouchdown: boolean,
   scoring: ScoringSettings
 ): number {
   return (
-    (scoring.rec_td || 0) +
     yardage * (scoring.rec_yd || 0) +
-    (scoring.rec || 0)
+    (scoring.rec || 0) +
+    (isTouchdown ? scoring.rec_td || 0 : 0)
   );
 }
 
-export function computePassingTouchdownPoints(
+export function computePassPoints(
   yardage: number,
+  isTouchdown: boolean,
   scoring: ScoringSettings
 ): number {
-  return (scoring.pass_td || 0) + yardage * (scoring.pass_yd || 0);
+  return yardage * (scoring.pass_yd || 0) + (isTouchdown ? scoring.pass_td || 0 : 0);
 }
 
 export function computeFieldGoalPoints(

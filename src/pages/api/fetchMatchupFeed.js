@@ -1,42 +1,47 @@
 // pages/api/fetchMatchupFeed.js
 //
-// A per-fantasy-matchup "redzone" style feed: every real NFL scoring play
-// (touchdown, field goal) AND turnover (interception thrown, fumble lost)
-// involving a player rostered by either team in this matchup, merged across
-// however many real games those players are spread across, in
-// chronological order, with each play's fantasy point impact computed from
-// the league's own scoring settings.
+// A per-fantasy-matchup "redzone" style feed: every real NFL play worth at
+// least 5 fantasy points to a player rostered by either team in this
+// matchup - not just touchdowns - plus turnovers (interceptions thrown,
+// lost fumbles) regardless of point value, merged across however many real
+// games those players are spread across, in chronological order, with each
+// play's fantasy point impact computed from the league's own scoring
+// settings.
 //
 // There's no free source for this keyed directly off Sleeper or Dynasty
 // Daddy - Sleeper's API has no live play-by-play, and Dynasty Daddy's own
 // "Fantasy Redzone" feature runs on a paid third-party provider (Tank01).
 // This uses ESPN's free, public (if undocumented) scoreboard/summary API
-// instead, verified directly against live data rather than assumed:
-//   - a game summary's top-level `scoringPlays` array is already exactly
-//     the scoring plays for that game, in chronological order, with each
-//     play's `text` leading with the scoring player's full name (e.g.
-//     "Harrison Butker 40 Yd Field Goal", "Joshua Palmer 43 Yd pass from
-//     Josh Allen").
-//   - the full play-by-play (`drives.previous[].plays`, needed to find
-//     turnovers that don't result in a defensive score, since those never
-//     appear in scoringPlays) uses ABBREVIATED names instead ("J.Allen" not
-//     "Josh Allen"), and a different text structure - handled separately.
+// instead, verified directly against live data rather than assumed: the
+// full play-by-play (`drives.previous[]/current.plays`) covers every play
+// type used below - Rush, Pass Reception, Rushing/Passing Touchdown, Field
+// Goal Good, Pass Interception Return, Fumble Recovery (Opponent) - each
+// with a real `statYardage` number (not just parseable from `text`) and a
+// real `wallclock` ISO timestamp, and abbreviated player names ("J.Allen")
+// in a small number of consistent text shapes.
 //
-// Scope: rushing/receiving/passing touchdowns, field goals, interceptions
-// thrown, and lost fumbles. Two-point conversions, safeties, and
-// interception/fumble-return touchdowns (which would need crediting a
-// defense/IDP, not currently a supported roster concept here) are left out
-// rather than guessed at.
+// Scope: rushing/receiving/passing yardage (touchdown or not), field
+// goals, interceptions thrown, and lost fumbles. Two-point conversions,
+// safeties, and interception/fumble-return touchdowns (which would need
+// crediting a defense/IDP, not currently a supported roster concept here)
+// are left out rather than guessed at.
 import {
-  computeRushingTouchdownPoints,
-  computeReceivingTouchdownPoints,
-  computePassingTouchdownPoints,
+  computeRushPoints,
+  computeReceptionPoints,
+  computePassPoints,
   computeFieldGoalPoints,
   computeInterceptionThrownPoints,
   computeFumbleLostPoints,
 } from "@/lib/bigPlayPoints";
 
 export const config = { maxDuration: 30 };
+
+// Below this, a gain-type play (a run, a catch, a completion) isn't worth
+// surfacing as its own feed item - still lets ordinary touchdowns and long
+// gains through, just not every 3-yard dump-off. Turnovers are exempt:
+// those are worth knowing about regardless of the league's exact
+// interception/fumble penalty value.
+const MIN_GAIN_POINTS = 5;
 
 const ESPN_SCOREBOARD_URL =
   "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard";
@@ -66,61 +71,43 @@ function stripLeadingParen(text) {
   return (text || "").replace(/^\([^)]*\)\s*/, "");
 }
 
-// --- full-name matching, for scoringPlays text ---
+// --- abbreviated-name extraction ("J.Allen"), from the full play-by-play's
+// text - verified live against real plays of every type this route reads:
+//   Rush:                "K.Williams left end to LA 26 for 4 yards (...)"
+//   Field Goal Good:     "J.Bates 31 yard field goal is GOOD, ..."
+//   Rushing Touchdown:   "(No Huddle) J.Allen left guard for 1 yard, TOUCHDOWN...."
+//   Pass Reception:      "J.Allen pass short left to K.Shakir pushed ob at ... for 9 yards (...)"
+//   Passing Touchdown:   "(Shotgun) J.Allen pass deep middle to J.Palmer for 43 yards, TOUCHDOWN..."
+//   Pass Interception Return / Fumble Recovery (Opponent): same shapes as above
 
+/** the ball carrier / kicker - the leading name, for any non-pass play */
 function extractLeadingName(text) {
-  const match = (text || "").match(
-    /^([A-Z][A-Za-z'.-]+(?: [A-Z][A-Za-z'.-]+)+?) \d/
-  );
+  const stripped = stripLeadingParen(text);
+  const match = stripped.match(/^([A-Z]\.[A-Za-z'-]+)/);
   return match ? match[1] : null;
 }
 
-function extractPasser(text) {
-  const match = (text || "").match(
-    /pass from ([A-Z][A-Za-z'.-]+(?: [A-Z][A-Za-z'.-]+)+?)(?:\s*\(|$)/
-  );
-  return match ? match[1] : null;
-}
-
-function extractYardage(text) {
-  const match = (text || "").match(/(\d+)\s*Yd/);
-  return match ? parseInt(match[1], 10) : null;
-}
-
-function matchPlayerByFullName(name, players) {
-  if (!name) return null;
-  const cleaned = cleanNameString(name);
-
-  const exact = players.find(
-    (p) => cleanNameString(`${p.fn} ${p.ln}`) === cleaned
-  );
-  if (exact) return exact;
-
-  const lastNameToken = cleaned.split(" ").slice(-1)[0];
-  const lastNameMatches = players.filter(
-    (p) => cleanNameString(p.ln) === lastNameToken
-  );
-  return lastNameMatches.length === 1 ? lastNameMatches[0] : null;
-}
-
-// --- abbreviated-name matching ("J.Allen"), for full play-by-play text ---
-
-function extractInterceptionPasser(text) {
+/** the passer, for any passing play (completion, incompletion, TD, or interception) */
+function extractPasserName(text) {
   const stripped = stripLeadingParen(text);
   const match = stripped.match(/^([A-Z]\.[A-Za-z'-]+)\s+pass\s/i);
   return match ? match[1] : null;
 }
 
+/** the receiver, for a completed pass ("pass <depth> <direction> to NAME") */
+function extractReceiverName(text) {
+  const stripped = stripLeadingParen(text);
+  const match = stripped.match(/pass\s+\S+\s+\S+\s+to\s+([A-Z]\.[A-Za-z'-]+)/i);
+  return match ? match[1] : null;
+}
+
+/** whoever lost the ball on a fumble - the receiver if it happened on a pass play, the leading name (rusher) otherwise */
 function extractFumbler(text) {
   const stripped = stripLeadingParen(text);
   if (/\bpass\b/i.test(stripped)) {
-    const match = stripped.match(
-      /pass\s+\S+\s+\S+\s+to\s+([A-Z]\.[A-Za-z'-]+)/i
-    );
-    return match ? match[1] : null;
+    return extractReceiverName(text);
   }
-  const match = stripped.match(/^([A-Z]\.[A-Za-z'-]+)/);
-  return match ? match[1] : null;
+  return extractLeadingName(text);
 }
 
 function matchPlayerByAbbreviatedName(abbrevName, players) {
@@ -159,7 +146,7 @@ function buildPlayEntry({
   pointsDelta,
 }) {
   return {
-    id,
+    id: `${id}_${player.sleeperId}`,
     gameId,
     awayTeam: away,
     homeTeam: home,
@@ -223,34 +210,19 @@ export default async function handler(req, res) {
             ...(summary.drives?.previous || []),
             ...(summary.drives?.current ? [summary.drives.current] : []),
           ];
-          const plays = drives.flatMap((drive) => drive.plays || []);
-
-          // `scoringPlays` entries carry no real-time field of their own
-          // (verified live) - only period/clock, which is meaningless for
-          // ordering across different concurrent games. The full
-          // play-by-play in `drives` has the same plays (by id) WITH a
-          // real `wallclock` ISO timestamp, so this looks it up from
-          // there instead of guessing at one.
-          const wallclockById = new Map(
-            plays
-              .filter((p) => p.id && p.wallclock)
-              .map((p) => [p.id, Date.parse(p.wallclock)])
-          );
 
           return {
             eventId: event.id,
             away,
             home,
-            scoringPlays: summary.scoringPlays || [],
-            plays,
-            wallclockById,
+            plays: drives.flatMap((drive) => drive.plays || []),
           };
         } catch (err) {
           console.error(
             `Error fetching ESPN summary for event ${event.id}:`,
             err
           );
-          return { eventId: event.id, away: null, home: null, scoringPlays: [], plays: [], wallclockById: new Map() };
+          return { eventId: event.id, away: null, home: null, plays: [] };
         }
       })
     );
@@ -258,85 +230,9 @@ export default async function handler(req, res) {
     const feed = [];
 
     for (const game of gamesByEvent) {
-      // --- scoring plays: touchdowns and field goals ---
-      for (const play of game.scoringPlays) {
-        const scorer = matchPlayerByFullName(
-          extractLeadingName(play.text),
-          players
-        );
-        const yardage = extractYardage(play.text);
-        const playType = play.type?.text;
-        const base = {
-          id: play.id,
-          gameId: game.eventId,
-          away: game.away,
-          home: game.home,
-          awayScore: play.awayScore,
-          homeScore: play.homeScore,
-          period: play.period?.number,
-          clockDisplay: play.clock?.displayValue,
-          clockSecondsRemaining: play.clock?.value,
-          wallclockMs: game.wallclockById.get(play.id) ?? null,
-          text: play.text,
-          playType,
-        };
-
-        if (scorer && yardage !== null) {
-          let pointsDelta = null;
-          if (playType === "Rushing Touchdown") {
-            pointsDelta = computeRushingTouchdownPoints(yardage, scoring);
-          } else if (playType === "Passing Touchdown") {
-            pointsDelta = computeReceivingTouchdownPoints(yardage, scoring);
-          } else if (playType === "Field Goal Good") {
-            pointsDelta = computeFieldGoalPoints(yardage, scoring);
-          }
-
-          if (pointsDelta !== null) {
-            feed.push(
-              buildPlayEntry({
-                ...base,
-                player: {
-                  sleeperId: scorer.sleeperId,
-                  fn: scorer.fn,
-                  ln: scorer.ln,
-                  pos: scorer.pos,
-                  team: scorer.team,
-                  fantasyTeam: scorer.fantasyTeam,
-                },
-                pointsDelta,
-              })
-            );
-          }
-        }
-
-        // passing TD credit goes to a second, separately matched player
-        if (playType === "Passing Touchdown" && yardage !== null) {
-          const passer = matchPlayerByFullName(
-            extractPasser(play.text),
-            players
-          );
-          if (passer) {
-            feed.push(
-              buildPlayEntry({
-                ...base,
-                player: {
-                  sleeperId: passer.sleeperId,
-                  fn: passer.fn,
-                  ln: passer.ln,
-                  pos: passer.pos,
-                  team: passer.team,
-                  fantasyTeam: passer.fantasyTeam,
-                },
-                pointsDelta: computePassingTouchdownPoints(yardage, scoring),
-              })
-            );
-          }
-        }
-      }
-
-      // --- turnovers: interceptions thrown and lost fumbles ---
       for (const play of game.plays) {
         const playType = play.type?.text;
+        const yardage = play.statYardage ?? 0;
         const base = {
           id: play.id,
           gameId: game.eventId,
@@ -352,63 +248,74 @@ export default async function handler(req, res) {
           playType,
         };
 
-        if (playType === "Pass Interception Return") {
-          const passer = matchPlayerByAbbreviatedName(
-            extractInterceptionPasser(play.text),
-            players
+        const pushGainCredit = (matchedPlayer, pointsDelta) => {
+          if (!matchedPlayer || Math.abs(pointsDelta) < MIN_GAIN_POINTS) return;
+          feed.push(
+            buildPlayEntry({
+              ...base,
+              player: {
+                sleeperId: matchedPlayer.sleeperId,
+                fn: matchedPlayer.fn,
+                ln: matchedPlayer.ln,
+                pos: matchedPlayer.pos,
+                team: matchedPlayer.team,
+                fantasyTeam: matchedPlayer.fantasyTeam,
+              },
+              pointsDelta,
+            })
           );
-          if (passer) {
-            feed.push(
-              buildPlayEntry({
-                ...base,
-                player: {
-                  sleeperId: passer.sleeperId,
-                  fn: passer.fn,
-                  ln: passer.ln,
-                  pos: passer.pos,
-                  team: passer.team,
-                  fantasyTeam: passer.fantasyTeam,
-                },
-                pointsDelta: computeInterceptionThrownPoints(scoring),
-              })
-            );
-          }
+        };
+
+        const pushTurnoverCredit = (matchedPlayer, pointsDelta) => {
+          if (!matchedPlayer) return;
+          feed.push(
+            buildPlayEntry({
+              ...base,
+              player: {
+                sleeperId: matchedPlayer.sleeperId,
+                fn: matchedPlayer.fn,
+                ln: matchedPlayer.ln,
+                pos: matchedPlayer.pos,
+                team: matchedPlayer.team,
+                fantasyTeam: matchedPlayer.fantasyTeam,
+              },
+              pointsDelta,
+            })
+          );
+        };
+
+        if (playType === "Rush" || playType === "Rushing Touchdown") {
+          const isTd = playType === "Rushing Touchdown";
+          const rusher = matchPlayerByAbbreviatedName(extractLeadingName(play.text), players);
+          pushGainCredit(rusher, computeRushPoints(yardage, isTd, scoring));
+        } else if (playType === "Pass Reception" || playType === "Passing Touchdown") {
+          const isTd = playType === "Passing Touchdown";
+          const receiver = matchPlayerByAbbreviatedName(extractReceiverName(play.text), players);
+          pushGainCredit(receiver, computeReceptionPoints(yardage, isTd, scoring));
+          const passer = matchPlayerByAbbreviatedName(extractPasserName(play.text), players);
+          pushGainCredit(passer, computePassPoints(yardage, isTd, scoring));
+        } else if (playType === "Field Goal Good") {
+          const kicker = matchPlayerByAbbreviatedName(extractLeadingName(play.text), players);
+          pushGainCredit(kicker, computeFieldGoalPoints(yardage, scoring));
+        } else if (playType === "Pass Interception Return") {
+          const passer = matchPlayerByAbbreviatedName(extractPasserName(play.text), players);
+          pushTurnoverCredit(passer, computeInterceptionThrownPoints(scoring));
         } else if (playType === "Fumble Recovery (Opponent)") {
-          const fumbler = matchPlayerByAbbreviatedName(
-            extractFumbler(play.text),
-            players
-          );
-          if (fumbler) {
-            feed.push(
-              buildPlayEntry({
-                ...base,
-                player: {
-                  sleeperId: fumbler.sleeperId,
-                  fn: fumbler.fn,
-                  ln: fumbler.ln,
-                  pos: fumbler.pos,
-                  team: fumbler.team,
-                  fantasyTeam: fumbler.fantasyTeam,
-                },
-                pointsDelta: computeFumbleLostPoints(scoring),
-              })
-            );
-          }
+          const fumbler = matchPlayerByAbbreviatedName(extractFumbler(play.text), players);
+          pushTurnoverCredit(fumbler, computeFumbleLostPoints(scoring));
         }
       }
     }
 
-    // Newest first, like a real feed (and like the reference screenshot -
-    // its top item was an OT play, the most recent thing that happened).
-    // Sorted by each play's real wallclock timestamp, not period/clock -
-    // a matchup's players are spread across multiple real games running
-    // concurrently or at different times of day, and one game's own Q1
-    // isn't comparable to another game's Q4 the way period+clock assumes.
-    // wallclockMs is only missing if ESPN's data itself didn't have it
-    // for that specific play (rare - verified live before shipping this),
-    // in which case it falls back to the old period/clock comparison
-    // against just the other plays missing it, and sorts behind every
-    // play that does have a real timestamp.
+    // Newest first, like a real feed. Sorted by each play's real wallclock
+    // timestamp, not period/clock - a matchup's players are spread across
+    // multiple real games running concurrently or at different times of
+    // day, and one game's own Q1 isn't comparable to another game's Q4 the
+    // way period+clock assumes. wallclockMs is only missing if ESPN's data
+    // itself didn't have it for that specific play (rare - verified live
+    // before shipping this), in which case it falls back to the old
+    // period/clock comparison against just the other plays missing it, and
+    // sorts behind every play that does have a real timestamp.
     feed.sort((a, b) => {
       if (a.wallclockMs !== null && b.wallclockMs !== null) {
         return b.wallclockMs - a.wallclockMs;
