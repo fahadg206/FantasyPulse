@@ -10,6 +10,7 @@ import { followUser, unfollowUser, isFollowing, getFollowingUids, getFollowerUid
 import { getPostsByAuthor, isPostLiked, isPostReposted, BOOGIE_UID, BOOGIE_USERNAME, BOOGIE_SLEEPER_USER_ID, Post } from "../../lib/posts";
 import ProfileActivity from "../../components/ProfileActivity";
 import ProfileTabbedPosts from "../../components/ProfileTabbedPosts";
+import SwipeableTabs from "../../components/SwipeableTabs";
 import { getManualTitles } from "../../lib/manualTitles";
 import Avatar from "../../components/Avatar";
 import PostCard from "../../components/PostCard";
@@ -237,73 +238,80 @@ export default function PublicProfile() {
           <Feather name="arrow-left" size={20} color="#fff" />
         </Pressable>
       </View>
-      <ScrollView contentContainerClassName="px-5 pt-4 pb-12" showsVerticalScrollIndicator={false}>
-        <View className="items-center mb-6">
-          <Avatar uid={profile.uid} url={profile.avatar} name={profile.displayName} size={80} />
-          <Text className="text-white text-[20px] font-bold mt-2">{profile.displayName}</Text>
-          <View className="flex-row items-center gap-2 mt-0.5">
-            <Text className="text-gray-500 text-[13px]">@{profile.username}</Text>
-            {followsYou && (
-              <View className="bg-white/10 rounded px-1.5 py-0.5">
-                <Text className="text-gray-400 text-[10px] font-semibold">Follows you</Text>
-              </View>
-            )}
-          </View>
-          {profile.bio && <Text className="text-gray-300 text-[13px] mt-2 text-center px-6">{profile.bio}</Text>}
 
-          <View className="flex-row gap-6 mt-4">
-            <Pressable
-              onPress={() => router.push({ pathname: "/profile/connections", params: { username: profile.username, type: "following" } })}
-              className="items-center"
-            >
-              <Text className="text-white font-bold text-[15px]">{followCounts.following}</Text>
-              <Text className="text-gray-500 text-[11px]">Following</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => router.push({ pathname: "/profile/connections", params: { username: profile.username, type: "followers" } })}
-              className="items-center"
-            >
-              <Text className="text-white font-bold text-[15px]">{followCounts.followers}</Text>
-              <Text className="text-gray-500 text-[11px]">Followers</Text>
-            </Pressable>
-          </View>
-
-          {canFollow && (
-            <Pressable
-              onPress={toggleFollow}
-              disabled={followBusy}
-              className={`mt-4 px-6 py-2.5 rounded-full ${following ? "bg-transparent border border-white/20" : "bg-brand"}`}
-            >
-              {followBusy ? (
-                <ActivityIndicator color={following ? "#fff" : "#fff"} size="small" />
-              ) : (
-                <Text className={`font-bold text-[13px] ${following ? "text-white" : "text-white"}`}>
-                  {following ? "Following" : "Follow"}
-                </Text>
-              )}
-            </Pressable>
+      {/* Header stays put above the swipeable tabs - only the Player
+          Profile / Social Profile content underneath it swipes, the same
+          way X's own name/bio/follow-counts block doesn't move when you
+          swipe between For You and Following. */}
+      <View className="items-center px-5 pt-2 pb-3">
+        <Avatar uid={profile.uid} url={profile.avatar} name={profile.displayName} size={80} />
+        <Text className="text-white text-[20px] font-bold mt-2">{profile.displayName}</Text>
+        <View className="flex-row items-center gap-2 mt-0.5">
+          <Text className="text-gray-500 text-[13px]">@{profile.username}</Text>
+          {followsYou && (
+            <View className="bg-white/10 rounded px-1.5 py-0.5">
+              <Text className="text-gray-400 text-[10px] font-semibold">Follows you</Text>
+            </View>
           )}
         </View>
+        {profile.bio && <Text className="text-gray-300 text-[13px] mt-2 text-center px-6">{profile.bio}</Text>}
 
-        {!profile.sleeperUserId ? (
-          <Text className="text-gray-500 text-[13px] text-center">
-            This manager hasn't linked a Sleeper account yet.
-          </Text>
-        ) : statsLoading ? (
-          <ActivityIndicator color="#af1222" className="mt-4" />
-        ) : stats ? (
-          <ProfileActivity
-            sleeperUserId={profile.sleeperUserId}
-            stats={stats}
-            extraTitles={getManualTitles(profile.username)}
-          />
-        ) : null}
+        <View className="flex-row gap-6 mt-4">
+          <Pressable
+            onPress={() => router.push({ pathname: "/profile/connections", params: { username: profile.username, type: "following" } })}
+            className="items-center"
+          >
+            <Text className="text-white font-bold text-[15px]">{followCounts.following}</Text>
+            <Text className="text-gray-500 text-[11px]">Following</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => router.push({ pathname: "/profile/connections", params: { username: profile.username, type: "followers" } })}
+            className="items-center"
+          >
+            <Text className="text-white font-bold text-[15px]">{followCounts.followers}</Text>
+            <Text className="text-gray-500 text-[11px]">Followers</Text>
+          </Pressable>
+        </View>
+
+        {canFollow && (
+          <Pressable
+            onPress={toggleFollow}
+            disabled={followBusy}
+            className={`mt-4 px-6 py-2.5 rounded-full ${following ? "bg-transparent border border-white/20" : "bg-brand"}`}
+          >
+            {followBusy ? (
+              <ActivityIndicator color={following ? "#fff" : "#fff"} size="small" />
+            ) : (
+              <Text className={`font-bold text-[13px] ${following ? "text-white" : "text-white"}`}>
+                {following ? "Following" : "Follow"}
+              </Text>
+            )}
+          </Pressable>
+        )}
+      </View>
+
+      <SwipeableTabs labels={["Player Profile", "Social Profile"]}>
+        <View className="px-5 pt-4">
+          {!profile.sleeperUserId ? (
+            <Text className="text-gray-500 text-[13px] text-center">
+              This manager hasn't linked a Sleeper account yet.
+            </Text>
+          ) : statsLoading ? (
+            <ActivityIndicator color="#af1222" className="mt-4" />
+          ) : stats ? (
+            <ProfileActivity
+              sleeperUserId={profile.sleeperUserId}
+              stats={stats}
+              extraTitles={getManualTitles(profile.username)}
+            />
+          ) : null}
+        </View>
 
         <ProfileTabbedPosts
           profileUid={profile.uid}
           currentUid={authUser && !isReadOnly(authUser) ? authUser.uid : undefined}
         />
-      </ScrollView>
+      </SwipeableTabs>
     </SafeAreaView>
   );
 }

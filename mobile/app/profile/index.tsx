@@ -33,6 +33,7 @@ import { getFantasyProfileStats, FantasyProfileStats } from "../../lib/fantasyPr
 import { getFollowingUids, getFollowerUids } from "../../lib/follows";
 import ProfileActivity from "../../components/ProfileActivity";
 import ProfileTabbedPosts from "../../components/ProfileTabbedPosts";
+import SwipeableTabs from "../../components/SwipeableTabs";
 import { getManualTitles } from "../../lib/manualTitles";
 import Avatar from "../../components/Avatar";
 
@@ -134,58 +135,64 @@ export default function ProfileHome() {
         </Pressable>
         <Text className="text-white text-[17px] font-bold">Fantasy Profile</Text>
       </View>
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1">
-        <ScrollView contentContainerClassName="px-5 pt-8 pb-12" showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-          <View className="items-center mb-6">
-            <AvatarUploadButton profile={profile} onUploaded={(avatar) => setProfile((p) => (p ? { ...p, avatar, avatarIsCustom: true } : p))} />
-            <Text className="text-white text-[20px] font-bold mt-2">{profile?.displayName}</Text>
-            <Text className="text-gray-500 text-[13px]">@{profile?.username}</Text>
+      {/* Header stays put above the swipeable tabs - only the Player
+          Profile / Social Profile content underneath it swipes, the same
+          way X's own name/bio/follow-counts block doesn't move when you
+          swipe between For You and Following. */}
+      <View className="items-center px-5 pt-6 pb-2">
+        <AvatarUploadButton profile={profile} onUploaded={(avatar) => setProfile((p) => (p ? { ...p, avatar, avatarIsCustom: true } : p))} />
+        <Text className="text-white text-[20px] font-bold mt-2">{profile?.displayName}</Text>
+        <Text className="text-gray-500 text-[13px]">@{profile?.username}</Text>
 
-          <View className="flex-row gap-6 mt-4">
+        <View className="flex-row gap-6 mt-4">
+          <Pressable
+            onPress={() => router.push({ pathname: "/profile/connections", params: { username: profile.username, type: "following" } })}
+            className="items-center"
+          >
+            <Text className="text-white font-bold text-[15px]">{followCounts.following}</Text>
+            <Text className="text-gray-500 text-[11px]">Following</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => router.push({ pathname: "/profile/connections", params: { username: profile.username, type: "followers" } })}
+            className="items-center"
+          >
+            <Text className="text-white font-bold text-[15px]">{followCounts.followers}</Text>
+            <Text className="text-gray-500 text-[11px]">Followers</Text>
+          </Pressable>
+        </View>
+      </View>
+
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1">
+        <SwipeableTabs labels={["Player Profile", "Social Profile"]}>
+          <View className="px-5 pt-4 pb-12">
+            {!profile.sleeperUserId ? (
+              <LinkSleeperCard
+                uid={profile.uid}
+                onLinked={() => getUserProfile(profile.uid).then(setProfile)}
+              />
+            ) : statsLoading ? (
+              <ActivityIndicator color="#af1222" className="mt-6" />
+            ) : stats ? (
+              <ProfileActivity
+                sleeperUserId={profile.sleeperUserId}
+                stats={stats}
+                extraTitles={getManualTitles(profile.username)}
+              />
+            ) : null}
+
+            <FindManagerCard />
+
             <Pressable
-              onPress={() => router.push({ pathname: "/profile/connections", params: { username: profile.username, type: "following" } })}
-              className="items-center"
+              onPress={() => signOutUser()}
+              className="flex-row items-center justify-center gap-2 mt-8 py-3 rounded-2xl border border-white/10"
             >
-              <Text className="text-white font-bold text-[15px]">{followCounts.following}</Text>
-              <Text className="text-gray-500 text-[11px]">Following</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => router.push({ pathname: "/profile/connections", params: { username: profile.username, type: "followers" } })}
-              className="items-center"
-            >
-              <Text className="text-white font-bold text-[15px]">{followCounts.followers}</Text>
-              <Text className="text-gray-500 text-[11px]">Followers</Text>
+              <Feather name="log-out" size={16} color="#9ca3af" />
+              <Text className="text-gray-400 font-semibold">Sign Out</Text>
             </Pressable>
           </View>
-        </View>
 
-        {!profile.sleeperUserId ? (
-          <LinkSleeperCard
-            uid={profile.uid}
-            onLinked={() => getUserProfile(profile.uid).then(setProfile)}
-          />
-        ) : statsLoading ? (
-          <ActivityIndicator color="#af1222" className="mt-6" />
-        ) : stats ? (
-          <ProfileActivity
-            sleeperUserId={profile.sleeperUserId}
-            stats={stats}
-            extraTitles={getManualTitles(profile.username)}
-          />
-        ) : null}
-
-        <ProfileTabbedPosts profileUid={profile.uid} currentUid={profile.uid} />
-
-        <FindManagerCard />
-
-        <Pressable
-          onPress={() => signOutUser()}
-          className="flex-row items-center justify-center gap-2 mt-8 py-3 rounded-2xl border border-white/10"
-        >
-          <Feather name="log-out" size={16} color="#9ca3af" />
-          <Text className="text-gray-400 font-semibold">Sign Out</Text>
-        </Pressable>
-        </ScrollView>
+          <ProfileTabbedPosts profileUid={profile.uid} currentUid={profile.uid} />
+        </SwipeableTabs>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
