@@ -3,7 +3,7 @@ import { View, Text, Pressable, Image, Share, Alert } from "react-native";
 import { useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import type { Post } from "../lib/posts";
-import { toggleLike, toggleRepost, deletePost, BOOGIE_UID } from "../lib/posts";
+import { toggleLike, toggleRepost, deletePost, BOOGIE_UID, BOOGIE_USERNAME } from "../lib/posts";
 import { formatTwitterTimestamp } from "../lib/formatTime";
 import Avatar from "./Avatar";
 
@@ -104,7 +104,13 @@ export default function PostCard({
   // Boogie's profile is tappable too now - it's just scoped to only what
   // he's actually posted, handled by app/profile/[username].tsx
   // special-casing his username rather than looking up a real account.
-  const goToProfile = () => router.push(`/profile/${post.authorUsername}`);
+  // Always routes to the current BOOGIE_USERNAME constant rather than
+  // whatever's stored on this specific post doc - ensureSystemPost only
+  // ever writes a post once, so any post created before his handle
+  // changed to 123Cancun still has the old username baked in, and that's
+  // exactly what was producing "No manager found with that username."
+  const authorUsername = isBoogie ? BOOGIE_USERNAME : post.authorUsername;
+  const goToProfile = () => router.push(`/profile/${authorUsername}`);
 
   if (deleting) return null;
 
@@ -124,7 +130,7 @@ export default function PostCard({
               </View>
             </Pressable>
             <Text className="text-gray-500 text-[13px] ml-1">
-              @{post.authorUsername} · {formatTwitterTimestamp(post.createdAtMs)}
+              @{authorUsername} · {formatTwitterTimestamp(post.createdAtMs)}
             </Text>
           </View>
           {isOwnPost && (
