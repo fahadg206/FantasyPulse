@@ -2,6 +2,7 @@ import { View, Text, Pressable, ScrollView } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { storage } from "../../../lib/storage";
+import { LOTTERY_LEAGUE_IDS } from "../../../lib/draftLottery";
 
 type MenuItem = {
   label: string;
@@ -78,6 +79,16 @@ export default function More() {
       icon: <Feather name="clipboard" size={20} color="#af1222" />,
       path: `/league/${leagueID}/draft`,
     },
+    ...(LOTTERY_LEAGUE_IDS.has(leagueID)
+      ? [
+          {
+            label: "Draft Lottery",
+            description: "Lottery odds if the season ended today, plus next year's early rookie board",
+            icon: <Ionicons name="shuffle" size={20} color="#af1222" />,
+            path: `/league/${leagueID}/lottery`,
+          },
+        ]
+      : []),
     {
       label: "About Fantasy Pulse",
       description: "What we do, and frequently asked questions",
