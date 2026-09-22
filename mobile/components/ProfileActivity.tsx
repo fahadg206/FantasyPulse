@@ -8,7 +8,7 @@ import {
   getTopRosteredPlayers,
   getRecentAcquisitions,
   getWeeklyMatchups,
-  getCareerStats,
+  getAllTimeStats,
   TopRosteredPlayer,
   RecentAcquisition,
   WeeklyMatchup,
@@ -17,7 +17,7 @@ import {
 } from "../lib/profileActivity";
 import { formatTwitterTimestamp } from "../lib/formatTime";
 import { getTeamLogo } from "../lib/nflTeams";
-import { getStartSitAccuracy, StartSitAccuracy } from "../lib/startSitAccuracy";
+import { StartSitAccuracy } from "../lib/startSitAccuracy";
 import Avatar from "./Avatar";
 
 const POSITION_COLOR: Record<string, string> = {
@@ -72,11 +72,19 @@ export default function ProfileActivity({
     getRecentAcquisitions(sleeperUserId, leagues, 5)
       .then((r) => !cancelled && setAcquisitions(r))
       .catch(console.error);
-    getCareerStats(sleeperUserId, stats.season)
-      .then((r) => !cancelled && setCareer(r))
-      .catch(console.error);
-    getStartSitAccuracy(sleeperUserId, stats.season)
-      .then((r) => !cancelled && setStartSit(r))
+    // Career record and start/sit accuracy used to be two fully separate
+    // all-time crawls, each re-enumerating every season since 2017 and
+    // re-fetching every league's roster data independently - merged into
+    // one shared crawl (getAllTimeStats) since they're only ever needed
+    // together here, cutting the total Sleeper API request count roughly
+    // in half and making this the biggest lever on how long the top of
+    // the profile page takes to fill in.
+    getAllTimeStats(sleeperUserId, stats.season)
+      .then((r) => {
+        if (cancelled) return;
+        setCareer(r.career);
+        setStartSit(r.startSit);
+      })
       .catch(console.error);
 
     return () => {
@@ -107,7 +115,7 @@ export default function ProfileActivity({
 
       {/* Titles - which league and season each championship actually came
           from, not just the count already shown above. Covers leagues no
-          longer active too, since getCareerStats crawls every season
+          longer active too, since getAllTimeStats crawls every season
           ever, not just this manager's current leagues - plus anything
           passed in via extraTitles (a championship from before this
           platform tracked anything). */}

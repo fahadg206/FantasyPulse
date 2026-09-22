@@ -7,6 +7,7 @@ import {
   combineMatchupGameState,
   isPastMondayNightCutoff,
 } from "./nflGameStatus";
+import { optimalLineupPoints, NON_STARTER_SLOTS, StartSitAccuracy } from "./startSitAccuracy";
 import type { LeagueSeasonStats } from "./fantasyProfile";
 
 // Everything that makes a profile feel alive beyond a bare win/loss record:
@@ -58,7 +59,20 @@ const EARLIEST_SLEEPER_SEASON = 2017;
 // never could. Counts every championship a manager has actually won
 // (getManagerHistory only tracks the single best finish ever, not how
 // many times).
-export async function getCareerStats(sleeperUserId: string, currentSeason: string): Promise<CareerStats> {
+export interface AllTimeStats {
+  career: CareerStats;
+  startSit: StartSitAccuracy;
+}
+
+// Career totals AND all-time start/sit accuracy, computed together in one
+// pass - these used to be two fully independent crawls (getCareerStats and
+// getStartSitAccuracy), each separately enumerating every season since
+// EARLIEST_SLEEPER_SEASON and separately re-fetching every league's
+// /league/{id} + /rosters, which is what made the profile page slow to
+// load: the two crawls were the single biggest chunk of its network time
+// and most of that work was pure duplication. Merged here since both were
+// only ever called together, from ProfileActivity.tsx.
+export async function getAllTimeStats(sleeperUserId: string, currentSeason: string): Promise<AllTimeStats> {
   const endYear = parseInt(currentSeason, 10) || new Date().getFullYear();
   const seasons = Array.from(
     { length: Math.max(0, endYear - EARLIEST_SLEEPER_SEASON + 1) },
@@ -74,8 +88,19 @@ export async function getCareerStats(sleeperUserId: string, currentSeason: strin
     new Set(seasonLeagueLists.flat().map((l: any) => l.league_id as string).filter(Boolean))
   );
 
+  const emptyCareer: CareerStats = {
+    seasonsPlayed: 0,
+    wins: 0,
+    losses: 0,
+    ties: 0,
+    winPct: 0,
+    playoffAppearances: 0,
+    championships: 0,
+    titles: [],
+  };
+  const emptyStartSit: StartSitAccuracy = { actualPoints: 0, optimalPoints: 0, accuracy: 0, weeksAnalyzed: 0 };
   if (leagueIds.length === 0) {
-    return { seasonsPlayed: 0, wins: 0, losses: 0, ties: 0, winPct: 0, playoffAppearances: 0, championships: 0, titles: [] };
+    return { career: emptyCareer, startSit: emptyStartSit };
   }
 
   let wins = 0;
@@ -85,6 +110,14 @@ export async function getCareerStats(sleeperUserId: string, currentSeason: strin
   let playoffAppearances = 0;
   let championships = 0;
   const titles: Title[] = [];
+
+  let actualPoints = 0;
+  let optimalPoints = 0;
+  let weeksAnalyzed = 0;
+  // Player position lookup is global, not per-league - fetched once and
+  // shared across every league processed below, same as
+  // getTopRosteredPlayers/getStartSitAccuracy did independently before.
+  let posById: Record<string, string | undefined> | null = null;
 
   await Promise.all(
     leagueIds.map(async (leagueId) => {
@@ -104,41 +137,83 @@ export async function getCareerStats(sleeperUserId: string, currentSeason: strin
 
         // Only counts a season as "played" once games actually happened -
         // skips the current in-progress season's 0-0 placeholder record,
-        // same guard getManagerHistory.ts uses.
-        if (myRoster && w + l + t > 0) {
-          wins += w;
-          losses += l;
-          ties += t;
-          seasonsPlayed += 1;
+        // same guard getManagerHistory.ts uses. Applies to the start/sit
+        // side of this crawl too now (getStartSitAccuracy never used to
+        // skip the weekly-matchup fetches for an unplayed season, just
+        // wasted the network round trip on nothing to analyze).
+        if (!myRoster || w + l + t === 0) return;
 
-          const rosterIds = rosters.map((r: any) => String(r.roster_id));
-          const winsMap: Record<string, number> = {};
-          const pointsMap: Record<string, number> = {};
-          const seedMap: Record<string, { division?: number }> = {};
-          for (const r of rosters) {
-            const id = String(r.roster_id);
-            winsMap[id] = r.settings?.wins ?? 0;
-            pointsMap[id] = (r.settings?.fpts ?? 0) + (r.settings?.fpts_decimal ?? 0) / 100;
-            seedMap[id] = { division: r.settings?.division };
-          }
-          const playoffSpots = Math.min(leagueInfo.settings?.playoff_teams ?? 6, rosterIds.length);
-          const divisionsCount = leagueInfo.settings?.divisions ?? 0;
-          const ranked = rankTeams(rosterIds, winsMap, pointsMap);
-          const { qualifiers } = determinePlayoffTeams(ranked, seedMap, divisionsCount, playoffSpots);
-          if (qualifiers.includes(String(myRoster.roster_id))) {
-            playoffAppearances += 1;
-          }
+        wins += w;
+        losses += l;
+        ties += t;
+        seasonsPlayed += 1;
 
-          if (Array.isArray(bracket) && bracket.length > 0) {
-            const championshipGame = bracket.find((g: any) => g.p === 1 && g.w !== undefined);
-            if (championshipGame && championshipGame.w === myRoster.roster_id) {
-              championships += 1;
-              titles.push({ leagueName: leagueInfo.name ?? "Unknown League", season: leagueInfo.season ?? "" });
-            }
+        const rosterIds = rosters.map((r: any) => String(r.roster_id));
+        const winsMap: Record<string, number> = {};
+        const pointsMap: Record<string, number> = {};
+        const seedMap: Record<string, { division?: number }> = {};
+        for (const r of rosters) {
+          const id = String(r.roster_id);
+          winsMap[id] = r.settings?.wins ?? 0;
+          pointsMap[id] = (r.settings?.fpts ?? 0) + (r.settings?.fpts_decimal ?? 0) / 100;
+          seedMap[id] = { division: r.settings?.division };
+        }
+        const playoffSpots = Math.min(leagueInfo.settings?.playoff_teams ?? 6, rosterIds.length);
+        const divisionsCount = leagueInfo.settings?.divisions ?? 0;
+        const ranked = rankTeams(rosterIds, winsMap, pointsMap);
+        const { qualifiers } = determinePlayoffTeams(ranked, seedMap, divisionsCount, playoffSpots);
+        if (qualifiers.includes(String(myRoster.roster_id))) {
+          playoffAppearances += 1;
+        }
+
+        if (Array.isArray(bracket) && bracket.length > 0) {
+          const championshipGame = bracket.find((g: any) => g.p === 1 && g.w !== undefined);
+          if (championshipGame && championshipGame.w === myRoster.roster_id) {
+            championships += 1;
+            titles.push({ leagueName: leagueInfo.name ?? "Unknown League", season: leagueInfo.season ?? "" });
           }
         }
+
+        // --- start/sit accuracy for this same league, reusing leagueInfo/rosters/myRoster above ---
+        const slots: string[] = (leagueInfo.roster_positions || []).filter(
+          (p: string) => !NON_STARTER_SLOTS.has(p)
+        );
+        if (slots.length === 0) return;
+
+        if (!posById) {
+          const playersData = await backend.fetchPlayers(leagueId).catch(() => ({}));
+          const map: Record<string, string | undefined> = {};
+          for (const pid in playersData) map[pid] = (playersData as any)[pid]?.pos;
+          posById = map;
+        }
+
+        const weeksCount = Math.max(1, (leagueInfo.settings?.playoff_week_start ?? 15) - 1);
+        const weeks = Array.from({ length: weeksCount }, (_, i) => i + 1);
+        const weekResults = await Promise.all(
+          weeks.map((wk) => fetchJson(`${SLEEPER}/league/${leagueId}/matchups/${wk}`).catch(() => []))
+        );
+
+        for (const matchups of weekResults) {
+          const mine = (matchups as any[]).find((m) => m.roster_id === myRoster.roster_id);
+          if (!mine?.starters || !mine?.players_points || !mine?.players) continue;
+
+          const starters: string[] = mine.starters.filter((id: string) => id && id !== "0");
+          const rosterPlayerIds: string[] = mine.players;
+          if (starters.length === 0 || rosterPlayerIds.length === 0) continue;
+
+          const pointsById: Record<string, number> = mine.players_points;
+          const weekHasRealScoring = Object.values(pointsById).some((p) => (p as number) !== 0);
+          if (!weekHasRealScoring) continue;
+
+          const actual = starters.reduce((sum, id) => sum + (pointsById[id] ?? 0), 0);
+          const optimal = optimalLineupPoints(rosterPlayerIds, pointsById, posById!, slots);
+
+          actualPoints += actual;
+          optimalPoints += Math.max(optimal, actual);
+          weeksAnalyzed += 1;
+        }
       } catch (error) {
-        console.error(`Error loading career history for league ${leagueId}:`, error);
+        console.error(`Error loading all-time stats for league ${leagueId}:`, error);
       }
     })
   );
@@ -147,14 +222,22 @@ export async function getCareerStats(sleeperUserId: string, currentSeason: strin
 
   const games = wins + losses + ties || 1;
   return {
-    seasonsPlayed,
-    wins,
-    losses,
-    ties,
-    winPct: (wins + ties * 0.5) / games,
-    playoffAppearances,
-    championships,
-    titles,
+    career: {
+      seasonsPlayed,
+      wins,
+      losses,
+      ties,
+      winPct: (wins + ties * 0.5) / games,
+      playoffAppearances,
+      championships,
+      titles,
+    },
+    startSit: {
+      actualPoints,
+      optimalPoints,
+      accuracy: optimalPoints > 0 ? actualPoints / optimalPoints : 0,
+      weeksAnalyzed,
+    },
   };
 }
 
