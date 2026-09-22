@@ -7,6 +7,7 @@ import getMatchupData from "../../../lib/getMatchupData";
 import { storage, StorageKeys } from "../../../lib/storage";
 import WhatIfModal from "../../../components/WhatIfModal";
 import { runMonteCarlo } from "../../../lib/whatIfSimulation";
+import { getZoneForRank, isZoneStart, StandingsZone } from "../../../lib/leagueZones";
 
 const helmet = require("../../../assets/images/helmet2.png");
 
@@ -286,14 +287,19 @@ export default function Standings() {
         <FlatList
           data={sortedTeamData}
           keyExtractor={([userId]) => userId}
-          renderItem={({ item: [userId, user], index }) => (
-            <TeamRow
-              user={user}
-              rank={index + 1}
-              showPlayoffLine={index === playoffSpots && playoffSpots < sortedTeamData.length}
-              oddsField="playoffOdds"
-            />
-          )}
+          renderItem={({ item: [userId, user], index }) => {
+            const rank = index + 1;
+            return (
+              <TeamRow
+                user={user}
+                rank={rank}
+                showPlayoffLine={index === playoffSpots && playoffSpots < sortedTeamData.length}
+                oddsField="playoffOdds"
+                zone={getZoneForRank(leagueID, rank, sortedTeamData.length)}
+                zoneStarts={isZoneStart(leagueID, rank, sortedTeamData.length)}
+              />
+            );
+          }}
         />
       ) : (
         <ScrollView>
@@ -330,17 +336,30 @@ export default function Standings() {
   );
 }
 
+const ZONE_COLOR: Record<StandingsZone["color"], string> = {
+  red: "#ef4444",
+  green: "#22c55e",
+};
+
 function TeamRow({
   user,
   rank,
   showPlayoffLine,
   oddsField,
+  zone,
+  zoneStarts,
 }: {
   user: TeamData;
   rank: number;
   showPlayoffLine: boolean;
   oddsField: "playoffOdds" | "divisionOdds";
+  /** the promotion/relegation-style zone this rank falls in, if this league defines one (lib/leagueZones.ts) - not a Sleeper concept, manually configured per league */
+  zone?: StandingsZone;
+  /** true on the first row of `zone`, where its divider/label renders */
+  zoneStarts?: boolean;
 }) {
+  const zoneColor = zone ? ZONE_COLOR[zone.color] : undefined;
+
   const pointsFor =
     user.team_points_for !== undefined
       ? (
@@ -367,7 +386,19 @@ function TeamRow({
           <View className="flex-1 h-px bg-brand/40" />
         </View>
       )}
-      <View className="flex-row items-center px-4 py-3 border-b border-white/5">
+      {zone && zoneStarts && zoneColor && (
+        <View className="flex-row items-center px-4 py-1.5 bg-white/[0.03]">
+          <View style={{ backgroundColor: zoneColor }} className="flex-1 h-px opacity-40" />
+          <Text style={{ color: zoneColor }} className="text-[9px] font-bold tracking-wider mx-2 uppercase">
+            {zone.label}
+          </Text>
+          <View style={{ backgroundColor: zoneColor }} className="flex-1 h-px opacity-40" />
+        </View>
+      )}
+      <View
+        style={zoneColor ? { borderLeftWidth: 3, borderLeftColor: zoneColor, backgroundColor: `${zoneColor}14` } : undefined}
+        className="flex-row items-center px-4 py-3 border-b border-white/5"
+      >
         <RankBadge rank={rank} />
         <Image
           source={typeof user.avatar === "string" ? { uri: user.avatar } : user.avatar}
