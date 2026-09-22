@@ -414,12 +414,17 @@ function SignInUpScreen() {
           <TextInput
             value={username}
             onChangeText={setUsername}
-            placeholder={mode === "signup" ? "Username" : "Username or email"}
+            placeholder={mode === "signup" ? "Sleeper username" : "Sleeper username or email"}
             placeholderTextColor="#6b7280"
             autoCapitalize="none"
             autoCorrect={false}
             className="bg-white/5 border border-white/10 rounded-xl px-3.5 py-3 text-white mb-2.5"
           />
+          {mode === "signup" && (
+            <Text className="text-gray-600 text-[11px] mb-2.5 px-1">
+              This becomes your @handle here too, and links your Sleeper account automatically.
+            </Text>
+          )}
           {mode === "signup" && (
             <TextInput
               value={email}

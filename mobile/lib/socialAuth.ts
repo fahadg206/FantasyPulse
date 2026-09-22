@@ -78,23 +78,47 @@ export async function isUsernameTaken(username: string): Promise<boolean> {
   return snap.exists();
 }
 
+/**
+ * Signs up using a real Sleeper account rather than inventing a new
+ * username - that Sleeper username becomes this app's @handle too (no
+ * separate "pick a username" step), and the account is linked and its
+ * avatar defaulted to that Sleeper account's picture immediately, the
+ * same way a manual "Link Your Sleeper Account" would afterward - so a
+ * brand new signup never needs that extra step at all.
+ */
 export async function signUp(
-  username: string,
+  sleeperUsername: string,
   password: string,
   email: string,
   displayName?: string
 ): Promise<UserProfile> {
-  const normalizedUsername = normalizeUsername(username);
-  const usernameError = validateUsername(normalizedUsername);
-  if (usernameError) throw new Error(usernameError);
+  const trimmedSleeperUsername = sleeperUsername.trim();
+  if (!trimmedSleeperUsername) throw new Error("Enter your Sleeper username.");
   if (password.length < 6) throw new Error("Password must be at least 6 characters.");
 
   const normalizedEmail = normalizeEmail(email);
   const emailError = validateEmail(normalizedEmail);
   if (emailError) throw new Error(emailError);
 
+  const sleeperRes = await fetch(`https://api.sleeper.app/v1/user/${trimmedSleeperUsername}`);
+  if (!sleeperRes.ok) throw new Error("Couldn't find that Sleeper username.");
+  const sleeperUser = await sleeperRes.json();
+  if (!sleeperUser?.user_id || !sleeperUser?.username) {
+    throw new Error("Couldn't find that Sleeper username.");
+  }
+
+  // Sleeper's own stored username (not necessarily identical casing/
+  // spelling to whatever was typed) is what actually becomes the app
+  // handle, so two people typing the same account differently can't end
+  // up as two different-looking accounts here.
+  const normalizedUsername = normalizeUsername(sleeperUser.username);
+  const usernameError = validateUsername(normalizedUsername);
+  if (usernameError) {
+    throw new Error("That Sleeper username can't be used here - contact support.");
+  }
+
   if (await isUsernameTaken(normalizedUsername)) {
-    throw new Error("That username is already taken.");
+    throw new Error("An account for that Sleeper username already exists. Try signing in instead.");
   }
 
   let credential;
@@ -110,9 +134,13 @@ export async function signUp(
   const profile: UserProfile = {
     uid: credential.user.uid,
     username: normalizedUsername,
-    displayName: displayName?.trim() || normalizedUsername,
+    displayName: displayName?.trim() || sleeperUser.display_name || normalizedUsername,
     email: normalizedEmail,
+    sleeperUsername: sleeperUser.username,
+    sleeperUserId: sleeperUser.user_id,
+    avatarIsCustom: false,
     createdAt: new Date().toISOString(),
+    ...(sleeperUser.avatar ? { avatar: `https://sleepercdn.com/avatars/thumbs/${sleeperUser.avatar}` } : {}),
   };
 
   // The Auth account and its Firestore profile doc have to end up in sync -
