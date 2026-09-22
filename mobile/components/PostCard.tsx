@@ -23,6 +23,8 @@ interface PostCardProps {
   onPressTarget?: () => void;
   /** called after a successful delete, so the caller can drop this post from its own list */
   onDeleted?: () => void;
+  /** suppresses tap-to-expand - for the root post on its own thread screen, where tapping it would just re-open the screen it's already on */
+  disableExpand?: boolean;
 }
 
 export default function PostCard({
@@ -33,6 +35,7 @@ export default function PostCard({
   onPressReply,
   onPressTarget,
   onDeleted,
+  disableExpand,
 }: PostCardProps) {
   const router = useRouter();
   const [liked, setLiked] = useState(initialLiked);
@@ -111,11 +114,22 @@ export default function PostCard({
   // exactly what was producing "No manager found with that username."
   const authorUsername = isBoogie ? BOOGIE_USERNAME : post.authorUsername;
   const goToProfile = () => router.push(`/profile/${authorUsername}`);
+  // Tapping the post itself (not its avatar/name, not the target chip, not
+  // an action button - RN routes a tap to whichever Pressable is nested
+  // deepest under it) opens its thread, same as tapping a tweet does -
+  // separate from the reply icon's own onPressReply, which some callers
+  // wire to the same destination and others (e.g. a reply already on its
+  // own thread) leave unset entirely.
+  const expandPost = () => router.push(`/post/${post.id}`);
 
   if (deleting) return null;
 
   return (
-    <View className="flex-row px-4 py-3 border-b border-white/10">
+    <Pressable
+      onPress={disableExpand ? undefined : expandPost}
+      disabled={disableExpand}
+      className="flex-row px-4 py-3 border-b border-white/10"
+    >
       <Pressable onPress={goToProfile} hitSlop={4} className="mr-3">
         <Avatar uid={post.authorUid} url={post.authorAvatar} name={post.authorDisplayName} />
       </Pressable>
@@ -196,7 +210,7 @@ export default function PostCard({
           </Pressable>
         </View>
       </View>
-    </View>
+    </Pressable>
   );
 }
 

@@ -113,6 +113,7 @@ export default function PostThread() {
                 liked={interactionState[post.id]?.liked ?? false}
                 reposted={interactionState[post.id]?.reposted ?? false}
                 onDeleted={() => router.back()}
+                disableExpand
               />
               <View className="px-4 py-2.5 border-b border-white/10">
                 <Text className="text-[10px] font-bold tracking-widest text-gray-500">
