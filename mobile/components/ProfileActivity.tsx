@@ -91,6 +91,26 @@ export default function ProfileActivity({ sleeperUserId, stats }: { sleeperUserI
         />
       </View>
 
+      {/* Titles - which league and season each championship actually came
+          from, not just the count already shown above. Covers leagues no
+          longer active too, since getCareerStats crawls every season
+          ever, not just this manager's current leagues. */}
+      {career && career.titles.length > 0 && (
+        <Card>
+          <SectionLabel>CHAMPIONSHIPS</SectionLabel>
+          <View className="gap-2">
+            {career.titles.map((t, i) => (
+              <View key={`${t.leagueName}_${t.season}_${i}`} className="flex-row items-center justify-between">
+                <Text numberOfLines={1} className="text-white text-[13px] font-semibold flex-1 mr-2">
+                  🏆 {t.leagueName}
+                </Text>
+                <Text className="text-gray-500 text-[11px]">{t.season}</Text>
+              </View>
+            ))}
+          </View>
+        </Card>
+      )}
+
       {/* Start/Sit Accuracy - all-time lineup efficiency: points actually
           started vs. the best possible lineup from the full roster each
           week, across every league ever played. */}

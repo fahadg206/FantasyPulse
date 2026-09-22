@@ -19,6 +19,11 @@ async function fetchJson(url: string) {
   return res.json();
 }
 
+export interface Title {
+  leagueName: string;
+  season: string;
+}
+
 export interface CareerStats {
   seasonsPlayed: number;
   wins: number;
@@ -27,6 +32,8 @@ export interface CareerStats {
   winPct: number;
   playoffAppearances: number;
   championships: number;
+  /** which league + season each championship came from - covers leagues no longer active too, same as the rest of this crawl */
+  titles: Title[];
 }
 
 // Sleeper's earliest supported fantasy season - a safe floor for "every
@@ -62,7 +69,7 @@ export async function getCareerStats(sleeperUserId: string, currentSeason: strin
   );
 
   if (leagueIds.length === 0) {
-    return { seasonsPlayed: 0, wins: 0, losses: 0, ties: 0, winPct: 0, playoffAppearances: 0, championships: 0 };
+    return { seasonsPlayed: 0, wins: 0, losses: 0, ties: 0, winPct: 0, playoffAppearances: 0, championships: 0, titles: [] };
   }
 
   let wins = 0;
@@ -71,6 +78,7 @@ export async function getCareerStats(sleeperUserId: string, currentSeason: strin
   let seasonsPlayed = 0;
   let playoffAppearances = 0;
   let championships = 0;
+  const titles: Title[] = [];
 
   await Promise.all(
     leagueIds.map(async (leagueId) => {
@@ -119,6 +127,7 @@ export async function getCareerStats(sleeperUserId: string, currentSeason: strin
             const championshipGame = bracket.find((g: any) => g.p === 1 && g.w !== undefined);
             if (championshipGame && championshipGame.w === myRoster.roster_id) {
               championships += 1;
+              titles.push({ leagueName: leagueInfo.name ?? "Unknown League", season: leagueInfo.season ?? "" });
             }
           }
         }
@@ -128,8 +137,19 @@ export async function getCareerStats(sleeperUserId: string, currentSeason: strin
     })
   );
 
+  titles.sort((a, b) => Number(b.season) - Number(a.season));
+
   const games = wins + losses + ties || 1;
-  return { seasonsPlayed, wins, losses, ties, winPct: (wins + ties * 0.5) / games, playoffAppearances, championships };
+  return {
+    seasonsPlayed,
+    wins,
+    losses,
+    ties,
+    winPct: (wins + ties * 0.5) / games,
+    playoffAppearances,
+    championships,
+    titles,
+  };
 }
 
 export interface TopRosteredPlayer {
