@@ -4,11 +4,12 @@ import { useLocalSearchParams } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import { sleeper, backend } from "../../../lib/api";
 import { rankTeams, determinePlayoffTeams, TeamSeedData } from "../../../lib/whatIfSimulation";
+import { getLeagueValueSettings } from "../../../lib/playerValue";
 import {
   LOTTERY_LEAGUE_IDS,
   MOCK_DRAFT_ROUNDS,
   computeLotteryOdds,
-  computeBaselineDepth,
+  computeLeagueAvgBestValue,
   buildMockDraftBoard,
   LotteryTeam,
   MockDraftPick,
@@ -18,6 +19,7 @@ import { PlayerPos } from "../../../lib/draftProspects";
 
 const helmet = require("../../../assets/images/helmet2.png");
 const POS_COLOR: Record<PlayerPos, string> = { QB: "#ef4444", RB: "#22c55e", WR: "#3b82f6", TE: "#eab308" };
+const VALUE_POSITIONS: PlayerPos[] = ["QB", "RB", "WR", "TE"];
 
 interface TeamMeta {
   rosterId: string;
@@ -31,6 +33,22 @@ interface TradedPick {
   roster_id: number;
   owner_id: number;
   previous_owner_id: number;
+}
+
+// Fetches player values with at most `limit` requests in flight at once -
+// up to a couple hundred rostered players across 12 teams shouldn't fire
+// all at once.
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < items.length) {
+      const i = cursor++;
+      results[i] = await fn(items[i]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
 export default function DraftLottery() {
@@ -51,13 +69,15 @@ export default function DraftLottery() {
 
     (async () => {
       try {
-        const [{ data: league }, { data: rosters }, { data: users }, playersData, tradedPicksRes] = await Promise.all([
-          sleeper.getLeague(leagueID),
-          sleeper.getLeagueRosters(leagueID),
-          sleeper.getLeagueUsers(leagueID),
-          backend.fetchPlayers(leagueID),
-          fetch(`https://api.sleeper.app/v1/league/${leagueID}/traded_picks`).then((r) => r.json()),
-        ]);
+        const [{ data: league }, { data: rosters }, { data: users }, playersData, tradedPicksRes, valueSettings] =
+          await Promise.all([
+            sleeper.getLeague(leagueID),
+            sleeper.getLeagueRosters(leagueID),
+            sleeper.getLeagueUsers(leagueID),
+            backend.fetchPlayers(leagueID),
+            fetch(`https://api.sleeper.app/v1/league/${leagueID}/traded_picks`).then((r) => r.json()),
+            getLeagueValueSettings(leagueID),
+          ]);
         if (cancelled) return;
 
         const playoffSpots: number = league.settings?.playoff_teams ?? 6;
@@ -80,27 +100,52 @@ export default function DraftLottery() {
         const wins: Record<string, number> = {};
         const pointsFor: Record<string, number> = {};
         const managerInfo: Record<string, TeamSeedData> = {};
-        const posCountsByRoster: Record<string, Record<PlayerPos, number>> = {};
+        // Every rostered QB/RB/WR/TE across every team, tagged with which
+        // roster and position they count toward - flattened into one list
+        // so the value lookups below can run with real concurrency control
+        // instead of 12 separate sequential batches.
+        const valueTargets: { rosterId: string; playerId: string; pos: PlayerPos }[] = [];
 
         for (const roster of rosters as any[]) {
           const id = String(roster.roster_id);
           const user = (users as any[]).find((u) => u.user_id === roster.owner_id);
           teamMeta[id] = {
             rosterId: id,
-            teamName: user?.metadata?.team_name || user?.display_name || "Unknown Team",
+            // Real Sleeper usernames, not the custom team names - matches
+            // how managers actually refer to each other.
+            teamName: user?.display_name || "Unknown Manager",
             avatar: user?.avatar ? `https://sleepercdn.com/avatars/thumbs/${user.avatar}` : undefined,
           };
           wins[id] = roster.settings?.wins ?? 0;
           pointsFor[id] = (roster.settings?.fpts ?? 0) + (roster.settings?.fpts_decimal ?? 0) / 100;
           managerInfo[id] = { division: roster.settings?.division };
 
-          const counts: Record<PlayerPos, number> = { QB: 0, RB: 0, WR: 0, TE: 0 };
           for (const playerId of roster.players ?? []) {
             const pos = (playersData as any)?.[playerId]?.pos as PlayerPos | undefined;
-            if (pos && pos in counts) counts[pos]++;
+            if (pos && VALUE_POSITIONS.includes(pos)) valueTargets.push({ rosterId: id, playerId, pos });
           }
-          posCountsByRoster[id] = counts;
         }
+
+        // Real KeepTradeCut dynasty values, adjusted for this league's own
+        // actual format (superflex, PPR level, TE premium, passing-TD
+        // points) - not a roster-depth headcount, which is what flagged a
+        // team as "needing a TE" while they were rostering a legitimately
+        // elite one.
+        const values = await mapWithConcurrency(valueTargets, 10, (t) =>
+          backend
+            .fetchPlayerValue(t.playerId, "", valueSettings)
+            .then((r) => r.value ?? 0)
+            .catch(() => 0)
+        );
+        if (cancelled) return;
+
+        const bestValueByRoster: Record<string, Record<PlayerPos, number>> = {};
+        valueTargets.forEach((t, i) => {
+          const current = bestValueByRoster[t.rosterId] ?? ({ QB: 0, RB: 0, WR: 0, TE: 0 } as Record<PlayerPos, number>);
+          current[t.pos] = Math.max(current[t.pos] ?? 0, values[i]);
+          bestValueByRoster[t.rosterId] = current;
+        });
+        const leagueAvgBestValue = computeLeagueAvgBestValue(bestValueByRoster);
 
         const teamIds = Object.keys(teamMeta);
         const ranked = rankTeams(teamIds, wins, pointsFor);
@@ -131,7 +176,7 @@ export default function DraftLottery() {
               round,
               originalRosterId,
               currentRosterId,
-              teamName: teamMeta[currentRosterId]?.teamName ?? "Unknown Team",
+              teamName: teamMeta[currentRosterId]?.teamName ?? "Unknown Manager",
               avatar: teamMeta[currentRosterId]?.avatar,
               viaTeamName: traded ? teamMeta[originalRosterId]?.teamName : undefined,
               viaAvatar: traded ? teamMeta[originalRosterId]?.avatar : undefined,
@@ -139,8 +184,7 @@ export default function DraftLottery() {
           }
         }
 
-        const baselineDepth = computeBaselineDepth(rosterPositions);
-        const mockBoard = buildMockDraftBoard(slots, posCountsByRoster, baselineDepth);
+        const mockBoard = buildMockDraftBoard(slots, bestValueByRoster, leagueAvgBestValue);
         if (!cancelled) setBoard(mockBoard);
       } catch (error) {
         console.error("Error loading draft lottery:", error);
@@ -226,8 +270,8 @@ export default function DraftLottery() {
       <Text className="text-[11px] font-bold tracking-widest text-brand mb-1">DYNASTY EARLY BOARD</Text>
       <Text className="text-gray-500 text-[12px] mb-1">
         A way-too-early mock of the {draftSeason} rookie draft - real {isSuperflex ? "superflex " : ""}prospect
-        rankings, matched to each team&apos;s actual roster needs and real traded picks under this league&apos;s own
-        format and scoring.
+        rankings, matched to each team&apos;s actual roster needs (real KeepTradeCut dynasty values, not just
+        headcount) and real traded picks under this league&apos;s own format and scoring.
       </Text>
       {isSuperflex && (
         <View className="flex-row items-center gap-1.5 mb-4 self-start bg-white/5 border border-white/10 rounded-full px-2.5 py-1">
@@ -256,82 +300,88 @@ export default function DraftLottery() {
           const displayNeeds = hasMultiplePicks ? needsByManager.get(pick.currentRosterId) ?? [pick.need] : [pick.need];
 
           return (
-          <View key={`${pick.round}-${pick.originalRosterId}`} className="rounded-2xl border border-white/10 bg-[#101012] overflow-hidden">
-            <View className="flex-row items-center px-3.5 pt-3 pb-2.5">
-              <View className="w-[24px] h-[24px] rounded-full bg-brand/15 border border-brand/30 items-center justify-center mr-2">
-                <Text className="text-brand text-[10px] font-bold">{pick.pickNumber}</Text>
-              </View>
-              <Image
-                source={pick.avatar ? { uri: pick.avatar } : helmet}
-                className="w-[22px] h-[22px] rounded-full mr-2 bg-white/10"
-              />
-              <View className="flex-1 mr-2">
-                <Text numberOfLines={1} className="text-white font-semibold text-[12px]">
-                  {pick.teamName}
-                </Text>
-                {pick.viaTeamName && (
-                  <View className="flex-row items-center gap-1 mt-0.5">
-                    <Image
-                      source={pick.viaAvatar ? { uri: pick.viaAvatar } : helmet}
-                      className="w-[12px] h-[12px] rounded-full bg-white/10"
-                    />
-                    <Text numberOfLines={1} className="text-gray-500 text-[10px]">
-                      via {pick.viaTeamName}
+            <View
+              key={`${pick.round}-${pick.originalRosterId}`}
+              className="rounded-2xl border border-white/10 bg-[#101012] overflow-hidden"
+            >
+              <View className="flex-row items-center px-3.5 pt-3 pb-2.5">
+                <View className="w-[24px] h-[24px] rounded-full bg-brand/15 border border-brand/30 items-center justify-center mr-2">
+                  <Text className="text-brand text-[10px] font-bold">{pick.pickNumber}</Text>
+                </View>
+                <Image
+                  source={pick.avatar ? { uri: pick.avatar } : helmet}
+                  className="w-[22px] h-[22px] rounded-full mr-2 bg-white/10"
+                />
+                <View className="flex-1 mr-2">
+                  <Text numberOfLines={1} className="text-white font-semibold text-[12px]">
+                    {pick.teamName}
+                  </Text>
+                  {pick.viaTeamName && (
+                    <View className="flex-row items-center gap-1 mt-0.5">
+                      <Text numberOfLines={1} className="text-gray-500 text-[10px]">
+                        via {pick.viaTeamName}
+                      </Text>
+                      <Image
+                        source={pick.viaAvatar ? { uri: pick.viaAvatar } : helmet}
+                        className="w-[12px] h-[12px] rounded-full bg-white/10"
+                      />
+                    </View>
+                  )}
+                </View>
+                {displayNeeds.length === 1 ? (
+                  <View
+                    style={{ backgroundColor: `${POS_COLOR[displayNeeds[0]]}22`, borderColor: `${POS_COLOR[displayNeeds[0]]}55` }}
+                    className="rounded-full border px-2 py-0.5"
+                  >
+                    <Text style={{ color: POS_COLOR[displayNeeds[0]] }} className="text-[9px] font-bold">
+                      NEEDS {displayNeeds[0]}
+                    </Text>
+                  </View>
+                ) : (
+                  <View className="rounded-full border border-white/15 bg-white/5 px-2 py-0.5 max-w-[110px]">
+                    <Text numberOfLines={1} className="text-gray-300 text-[9px] font-bold">
+                      NEEDS {displayNeeds.join(", ")}
                     </Text>
                   </View>
                 )}
               </View>
-              {displayNeeds.length === 1 ? (
-                <View style={{ backgroundColor: `${POS_COLOR[displayNeeds[0]]}22`, borderColor: `${POS_COLOR[displayNeeds[0]]}55` }} className="rounded-full border px-2 py-0.5">
-                  <Text style={{ color: POS_COLOR[displayNeeds[0]] }} className="text-[9px] font-bold">
-                    NEEDS {displayNeeds[0]}
-                  </Text>
+
+              {pick.prospect ? (
+                <View className="flex-row items-center px-3.5 pb-3.5 pt-1">
+                  <View className="w-[52px] h-[52px] rounded-full bg-white/5 border border-white/10 overflow-hidden mr-3">
+                    {pick.prospect.headshot && (
+                      <Image source={{ uri: pick.prospect.headshot }} className="w-full h-full" resizeMode="cover" />
+                    )}
+                  </View>
+                  <View className="flex-1">
+                    <View className="flex-row items-center gap-1.5 mb-0.5">
+                      <View style={{ backgroundColor: POS_COLOR[pick.prospect.pos] }} className="rounded px-1.5 py-0.5">
+                        <Text className="text-white text-[9px] font-bold">{pick.prospect.pos}</Text>
+                      </View>
+                      <Text numberOfLines={1} className="text-white text-[15px] font-bold flex-1">
+                        {pick.prospect.name}
+                      </Text>
+                      <Text className="text-gray-500 text-[10px] font-bold">#{pick.prospect.overallRank} OVR</Text>
+                    </View>
+                    <View className="flex-row items-center gap-1.5 mb-0.5">
+                      {pick.prospect.logo && (
+                        <Image source={{ uri: pick.prospect.logo }} className="w-[14px] h-[14px]" resizeMode="contain" />
+                      )}
+                      <Text numberOfLines={1} className="text-gray-300 text-[12px] font-semibold">
+                        {pick.prospect.school}
+                      </Text>
+                    </View>
+                    {(pick.prospect.height || pick.prospect.weight) && (
+                      <Text className="text-gray-500 text-[10px]">
+                        {[pick.prospect.height, pick.prospect.weight].filter(Boolean).join(" · ")}
+                      </Text>
+                    )}
+                  </View>
                 </View>
               ) : (
-                <View className="rounded-full border border-white/15 bg-white/5 px-2 py-0.5 max-w-[110px]">
-                  <Text numberOfLines={1} className="text-gray-300 text-[9px] font-bold">
-                    NEEDS {displayNeeds.join(", ")}
-                  </Text>
-                </View>
+                <Text className="text-gray-600 text-[11px] px-3.5 pb-3.5">No prospect available</Text>
               )}
             </View>
-
-            {pick.prospect ? (
-              <View className="flex-row items-center px-3.5 pb-3.5 pt-1">
-                <View className="w-[52px] h-[52px] rounded-full bg-white/5 border border-white/10 overflow-hidden mr-3">
-                  {pick.prospect.headshot && (
-                    <Image source={{ uri: pick.prospect.headshot }} className="w-full h-full" resizeMode="cover" />
-                  )}
-                </View>
-                <View className="flex-1">
-                  <View className="flex-row items-center gap-1.5 mb-0.5">
-                    <View style={{ backgroundColor: POS_COLOR[pick.prospect.pos] }} className="rounded px-1.5 py-0.5">
-                      <Text className="text-white text-[9px] font-bold">{pick.prospect.pos}</Text>
-                    </View>
-                    <Text numberOfLines={1} className="text-white text-[15px] font-bold flex-1">
-                      {pick.prospect.name}
-                    </Text>
-                    <Text className="text-gray-500 text-[10px] font-bold">#{pick.prospect.overallRank} OVR</Text>
-                  </View>
-                  <View className="flex-row items-center gap-1.5 mb-0.5">
-                    {pick.prospect.logo && (
-                      <Image source={{ uri: pick.prospect.logo }} className="w-[14px] h-[14px]" resizeMode="contain" />
-                    )}
-                    <Text numberOfLines={1} className="text-gray-300 text-[12px] font-semibold">
-                      {pick.prospect.school}
-                    </Text>
-                  </View>
-                  {(pick.prospect.height || pick.prospect.weight) && (
-                    <Text className="text-gray-500 text-[10px]">
-                      {[pick.prospect.height, pick.prospect.weight].filter(Boolean).join(" · ")}
-                    </Text>
-                  )}
-                </View>
-              </View>
-            ) : (
-              <Text className="text-gray-600 text-[11px] px-3.5 pb-3.5">No prospect available</Text>
-            )}
-          </View>
           );
         })}
       </View>

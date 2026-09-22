@@ -28,83 +28,92 @@ export function computeLotteryOdds(
   }));
 }
 
+const POSITIONS: PlayerPos[] = ["QB", "RB", "WR", "TE"];
+
 /**
- * How deep a competitive roster needs to be at each position, derived from
- * this league's actual roster_positions - not a generic guess. Real
- * starting demand first (a FLEX/SUPER_FLEX slot's demand is split across
- * whatever's actually eligible to fill it), then a depth multiplier that's
- * bigger for QB in a superflex league specifically - real QB scarcity plus
- * 2 startable QB slots is what actually drives dynasty superflex startup
- * strategy (hoard QBs), which a 1-QB league has no reason to do.
+ * The league's own bar for "a real starter" at each position - the
+ * average, across every team, of that team's single most valuable real
+ * rostered player at the position (real KeepTradeCut dynasty values, via
+ * this app's own player-value API, format-adjusted for this league's
+ * actual scoring/superflex settings). Computed once, from real rosters
+ * only, and held fixed for the rest of a mock draft - the bar shouldn't
+ * drift just because mock picks are being simulated against it.
  */
-export function computeBaselineDepth(rosterPositions: string[]): Record<PlayerPos, number> {
-  const count = (p: string) => rosterPositions.filter((s) => s === p).length;
-  const qbSlots = count("QB");
-  const sfSlots = count("SUPER_FLEX") + count("SUPERFLEX");
-  const rbSlots = count("RB");
-  const wrSlots = count("WR");
-  const teSlots = count("TE");
-  const flexSlots = count("FLEX") + count("WRRB_FLEX") + count("REC_FLEX");
-
-  const isSuperflex = sfSlots > 0;
-  const qbStarters = qbSlots + sfSlots;
-  const rbStarters = rbSlots + flexSlots / 3;
-  const wrStarters = wrSlots + flexSlots / 3;
-  const teStarters = teSlots + flexSlots / 3;
-
-  return {
-    QB: Math.ceil(qbStarters * (isSuperflex ? 1.8 : 1.5)),
-    RB: Math.ceil(rbStarters * 1.8),
-    WR: Math.ceil(wrStarters * 1.8),
-    TE: Math.ceil(teStarters * 1.6),
-  };
+export function computeLeagueAvgBestValue(
+  bestValueByRosterAndPos: Record<string, Record<PlayerPos, number>>
+): Record<PlayerPos, number> {
+  const rosterIds = Object.keys(bestValueByRosterAndPos);
+  const avg = {} as Record<PlayerPos, number>;
+  for (const pos of POSITIONS) {
+    const sum = rosterIds.reduce((s, id) => s + (bestValueByRosterAndPos[id]?.[pos] ?? 0), 0);
+    avg[pos] = rosterIds.length > 0 ? sum / rosterIds.length : 0;
+  }
+  return avg;
 }
 
 export interface TeamNeed {
   pos: PlayerPos;
-  count: number;
-  deficit: number;
+  /** 0 = has a real starter at or above the league's own bar at this position; closer to 1 = far below it (or nothing rostered there at all) */
+  score: number;
 }
-
-/** this team's single biggest positional need, from their real rostered player counts against this league's own real starting requirements - display-only (the "NEEDS X" badge); pick selection uses the blended scorer below, not this alone */
-export function biggestNeed(posCounts: Record<PlayerPos, number>, baselineDepth: Record<PlayerPos, number>): TeamNeed {
-  const needs = (Object.keys(baselineDepth) as PlayerPos[]).map((pos) => ({
-    pos,
-    count: posCounts[pos] ?? 0,
-    deficit: baselineDepth[pos] - (posCounts[pos] ?? 0),
-  }));
-  needs.sort((a, b) => b.deficit - a.deficit);
-  return needs[0];
-}
-
-// How much one unit of positional need is worth against the prospect
-// pool's own value spread (0..poolSize on overallRank) - tuned so a real
-// need can flip a close value decision (a mid-pack rank gap) without ever
-// justifying reaching for a deep-bench prospect over a true blue-chip at
-// a position the team doesn't need. Superflex value still wins the big
-// gaps; need only wins the close ones - which is the balance actually
-// asked for here.
-const NEED_WEIGHT = 6;
 
 /**
- * The actual pick: scores every remaining prospect as (value from their
- * superflex-weighted overall rank) + (need bonus at their position for
- * this team), and takes the highest. Not "fill the biggest need no matter
- * what," and not pure best-player-available either - both matter, the
- * same way a real dynasty rookie draft decision actually gets made.
+ * Real, value-based need: how far below the league's own bar (see
+ * computeLeagueAvgBestValue) this team's best real player at each
+ * position sits - not a roster-depth headcount, which is exactly what
+ * flagged a team as "needing a TE" while they were already rostering a
+ * legitimately elite one. A team that's thin in bodies at a position but
+ * has one genuinely great starter there isn't actually needy at it; a
+ * team with plenty of bodies but nobody good is.
  */
+export function needScoresForTeam(
+  bestValueForTeam: Record<PlayerPos, number>,
+  leagueAvg: Record<PlayerPos, number>
+): Record<PlayerPos, number> {
+  const scores = {} as Record<PlayerPos, number>;
+  for (const pos of POSITIONS) {
+    const avg = leagueAvg[pos];
+    const best = bestValueForTeam[pos] ?? 0;
+    scores[pos] = avg > 0 ? Math.max(0, (avg - best) / avg) : 0;
+  }
+  return scores;
+}
+
+/** the single position this team is weakest at, real-value-wise - display-only (the "NEEDS X" badge); pick selection uses the blended scorer below, not this alone */
+export function biggestNeed(scores: Record<PlayerPos, number>): TeamNeed {
+  const entries = POSITIONS.map((pos) => ({ pos, score: scores[pos] ?? 0 }));
+  entries.sort((a, b) => b.score - a.score);
+  return entries[0];
+}
+
+/**
+ * A rough dynasty-rookie-capital curve: how a prospect's superflex
+ * overall rank translates to a KTC-like value, so a mock pick can update
+ * a team's "best value at this position" the same way a real acquisition
+ * would (letting round 2+ needs reflect what a team actually took in
+ * round 1 of this same mock) - not real KTC data (these players aren't
+ * NFL assets yet), just a reasonable, consistent decay curve matching how
+ * real rookie pick value charts taper off.
+ */
+export function impliedProspectValue(overallRank: number): number {
+  return Math.round(9500 * Math.pow(0.955, overallRank - 1));
+}
+
+// How much a full (ratio 1.0 - nothing rostered at all) need is worth
+// against the prospect pool's own implied-value spread - tuned so a real
+// need can flip a close value decision without ever justifying a reach
+// for a scrub-tier prospect over a true blue-chip at a position the team
+// doesn't need.
+const NEED_WEIGHT = 3500;
+
 function pickBestProspect(
   remaining: DraftProspect[],
-  posCounts: Record<PlayerPos, number>,
-  baselineDepth: Record<PlayerPos, number>
+  needScores: Record<PlayerPos, number>
 ): DraftProspect | undefined {
-  const poolSize = remaining.length;
   let best: DraftProspect | undefined;
   let bestScore = -Infinity;
   for (const p of remaining) {
-    const deficit = Math.max(0, baselineDepth[p.pos] - (posCounts[p.pos] ?? 0));
-    const valueScore = poolSize - p.overallRank;
-    const score = valueScore + deficit * NEED_WEIGHT;
+    const score = impliedProspectValue(p.overallRank) + (needScores[p.pos] ?? 0) * NEED_WEIGHT;
     if (score > bestScore) {
       bestScore = score;
       best = p;
@@ -135,29 +144,31 @@ export interface MockDraftPick extends DraftSlot {
  * Runs the full mock draft across every round in `slots` (already in
  * round-major pick order - round 1 picks 1..N, then round 2, etc.), one
  * shrinking prospect pool shared across all of it so nobody gets drafted
- * twice, and each team's own positional counts updated as they pick -
- * a team's round 2 need already reflects what they took in round 1 of
- * this same mock, same as a real draft.
+ * twice, and each team's own "best value at position" updated as they
+ * pick (via impliedProspectValue) so a team's round 2 need already
+ * reflects what they took in round 1 of this same mock.
  */
 export function buildMockDraftBoard(
   slots: DraftSlot[],
-  initialPosCounts: Record<string, Record<PlayerPos, number>>,
-  baselineDepth: Record<PlayerPos, number>
+  initialBestValueByRoster: Record<string, Record<PlayerPos, number>>,
+  leagueAvg: Record<PlayerPos, number>
 ): MockDraftPick[] {
   const remaining = [...DRAFT_PROSPECTS];
-  const posCounts: Record<string, Record<PlayerPos, number>> = {};
-  for (const [rosterId, counts] of Object.entries(initialPosCounts)) {
-    posCounts[rosterId] = { ...counts };
+  const bestValue: Record<string, Record<PlayerPos, number>> = {};
+  for (const [id, v] of Object.entries(initialBestValueByRoster)) {
+    bestValue[id] = { ...v };
   }
 
   return slots.map((slot, i) => {
-    const counts = posCounts[slot.currentRosterId] ?? { QB: 0, RB: 0, WR: 0, TE: 0 };
-    const need = biggestNeed(counts, baselineDepth);
-    const prospect = pickBestProspect(remaining, counts, baselineDepth);
+    const current = bestValue[slot.currentRosterId] ?? ({} as Record<PlayerPos, number>);
+    const needs = needScoresForTeam(current, leagueAvg);
+    const need = biggestNeed(needs);
+    const prospect = pickBestProspect(remaining, needs);
     if (prospect) {
       remaining.splice(remaining.indexOf(prospect), 1);
-      counts[prospect.pos] = (counts[prospect.pos] ?? 0) + 1;
-      posCounts[slot.currentRosterId] = counts;
+      const implied = impliedProspectValue(prospect.overallRank);
+      current[prospect.pos] = Math.max(current[prospect.pos] ?? 0, implied);
+      bestValue[slot.currentRosterId] = current;
     }
 
     return {

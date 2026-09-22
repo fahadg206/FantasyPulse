@@ -82,11 +82,21 @@ export const backend = {
       body: JSON.stringify({ leagueId }),
     }).then((r) => r.json()),
 
-  fetchPlayerValue: (sleeperId: string, scoringType: string): Promise<{ value: number }> =>
+  // `leagueSettings` (lib/playerValue.ts's LeagueValueSettings) gives the
+  // real format-aware value - superflex, TE premium, PPR level, passing-TD
+  // points all actually affect a real KTC-derived value, most obviously
+  // superflex QBs. `scoringType` is the older back-compat path (draft.tsx's
+  // grading, which doesn't need per-format precision) - pass one or the
+  // other, not both.
+  fetchPlayerValue: (
+    sleeperId: string,
+    scoringType: string,
+    leagueSettings?: import("./playerValue").LeagueValueSettings
+  ): Promise<{ value: number }> =>
     fetch(`${APP_ORIGIN}/api/fetchPlayerValues`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sleeperId, scoringType }),
+      body: JSON.stringify(leagueSettings ? { sleeperId, leagueSettings } : { sleeperId, scoringType }),
     }).then((r) => r.json()),
 
   fetchHeadlines: (leagueId: string) =>
