@@ -120,8 +120,9 @@ export interface DraftSlot {
   currentRosterId: string;
   teamName: string;
   avatar?: string;
-  /** set when this pick was traded away from its original team - the original team's name, for the "via" note */
+  /** set when this pick was traded away from its original team - the original team's name/avatar, for the "via" note */
   viaTeamName?: string;
+  viaAvatar?: string;
 }
 
 export interface MockDraftPick extends DraftSlot {

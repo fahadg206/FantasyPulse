@@ -134,6 +134,7 @@ export default function DraftLottery() {
               teamName: teamMeta[currentRosterId]?.teamName ?? "Unknown Team",
               avatar: teamMeta[currentRosterId]?.avatar,
               viaTeamName: traded ? teamMeta[originalRosterId]?.teamName : undefined,
+              viaAvatar: traded ? teamMeta[originalRosterId]?.avatar : undefined,
             });
           }
         }
@@ -174,6 +175,22 @@ export default function DraftLottery() {
   }
 
   const roundPicks = board.filter((p) => p.round === activeRound);
+
+  // A manager with several picks in the same round (Kaboweyne owning 5
+  // round-1 picks, say) had each pick's "need" computed as their biggest
+  // need *at that exact moment in the draft* - accurate per-pick, but
+  // scanning down the list it just looks like their need keeps
+  // flip-flopping. Showing every distinct need they hit across all their
+  // picks this round, comma-separated, on each of their cards instead is
+  // clearer at a glance and still just as true.
+  const picksPerManager = new Map<string, number>();
+  const needsByManager = new Map<string, PlayerPos[]>();
+  for (const pick of roundPicks) {
+    picksPerManager.set(pick.currentRosterId, (picksPerManager.get(pick.currentRosterId) ?? 0) + 1);
+    const needs = needsByManager.get(pick.currentRosterId) ?? [];
+    if (!needs.includes(pick.need)) needs.push(pick.need);
+    needsByManager.set(pick.currentRosterId, needs);
+  }
 
   return (
     <ScrollView className="flex-1 bg-[#0c0c0e]" contentContainerClassName="p-4 pb-10">
@@ -234,7 +251,11 @@ export default function DraftLottery() {
       </View>
 
       <View className="gap-3">
-        {roundPicks.map((pick) => (
+        {roundPicks.map((pick) => {
+          const hasMultiplePicks = (picksPerManager.get(pick.currentRosterId) ?? 0) > 1;
+          const displayNeeds = hasMultiplePicks ? needsByManager.get(pick.currentRosterId) ?? [pick.need] : [pick.need];
+
+          return (
           <View key={`${pick.round}-${pick.originalRosterId}`} className="rounded-2xl border border-white/10 bg-[#101012] overflow-hidden">
             <View className="flex-row items-center px-3.5 pt-3 pb-2.5">
               <View className="w-[24px] h-[24px] rounded-full bg-brand/15 border border-brand/30 items-center justify-center mr-2">
@@ -249,16 +270,30 @@ export default function DraftLottery() {
                   {pick.teamName}
                 </Text>
                 {pick.viaTeamName && (
-                  <Text numberOfLines={1} className="text-gray-500 text-[10px] mt-0.5">
-                    via {pick.viaTeamName}
-                  </Text>
+                  <View className="flex-row items-center gap-1 mt-0.5">
+                    <Image
+                      source={pick.viaAvatar ? { uri: pick.viaAvatar } : helmet}
+                      className="w-[12px] h-[12px] rounded-full bg-white/10"
+                    />
+                    <Text numberOfLines={1} className="text-gray-500 text-[10px]">
+                      via {pick.viaTeamName}
+                    </Text>
+                  </View>
                 )}
               </View>
-              <View style={{ backgroundColor: `${POS_COLOR[pick.need]}22`, borderColor: `${POS_COLOR[pick.need]}55` }} className="rounded-full border px-2 py-0.5">
-                <Text style={{ color: POS_COLOR[pick.need] }} className="text-[9px] font-bold">
-                  NEEDS {pick.need}
-                </Text>
-              </View>
+              {displayNeeds.length === 1 ? (
+                <View style={{ backgroundColor: `${POS_COLOR[displayNeeds[0]]}22`, borderColor: `${POS_COLOR[displayNeeds[0]]}55` }} className="rounded-full border px-2 py-0.5">
+                  <Text style={{ color: POS_COLOR[displayNeeds[0]] }} className="text-[9px] font-bold">
+                    NEEDS {displayNeeds[0]}
+                  </Text>
+                </View>
+              ) : (
+                <View className="rounded-full border border-white/15 bg-white/5 px-2 py-0.5 max-w-[110px]">
+                  <Text numberOfLines={1} className="text-gray-300 text-[9px] font-bold">
+                    NEEDS {displayNeeds.join(", ")}
+                  </Text>
+                </View>
+              )}
             </View>
 
             {pick.prospect ? (
@@ -297,7 +332,8 @@ export default function DraftLottery() {
               <Text className="text-gray-600 text-[11px] px-3.5 pb-3.5">No prospect available</Text>
             )}
           </View>
-        ))}
+          );
+        })}
       </View>
 
       <View className="flex-row items-center gap-1.5 mt-4">
