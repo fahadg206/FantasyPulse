@@ -257,31 +257,35 @@ export default function Standings() {
           </Pressable>
         </View>
 
-        {LOTTERY_LEAGUE_IDS.has(leagueID) && (
-          <View className="items-end mt-2">
-            <Pressable
-              onPress={() => router.push(`/league/${leagueID}/lottery`)}
-              className="flex-row items-center gap-1.5 bg-white/5 border border-white/10 rounded-full px-3 py-1.5"
-            >
-              <Ionicons name="shuffle" size={12} color="#af1222" />
-              <Text className="text-brand text-[11px] font-bold">Draft Lottery</Text>
-            </Pressable>
-          </View>
-        )}
+        {(hasDivisions || LOTTERY_LEAGUE_IDS.has(leagueID)) && (
+          <View className="flex-row items-center justify-between mt-3.5">
+            {hasDivisions ? (
+              <View className="flex-row bg-[#1c1c1e] rounded-full p-1 self-start">
+                {(["overall", "division"] as const).map((mode) => (
+                  <Pressable
+                    key={mode}
+                    onPress={() => setViewMode(mode)}
+                    className={`px-4 py-1.5 rounded-full ${viewMode === mode ? "bg-brand" : ""}`}
+                  >
+                    <Text className={`text-[11px] font-bold ${viewMode === mode ? "text-white" : "text-gray-400"}`}>
+                      {mode === "overall" ? "Overall" : "Division"}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : (
+              <View />
+            )}
 
-        {hasDivisions && (
-          <View className="flex-row bg-[#1c1c1e] rounded-full p-1 mt-3.5 self-start">
-            {(["overall", "division"] as const).map((mode) => (
+            {LOTTERY_LEAGUE_IDS.has(leagueID) && (
               <Pressable
-                key={mode}
-                onPress={() => setViewMode(mode)}
-                className={`px-4 py-1.5 rounded-full ${viewMode === mode ? "bg-brand" : ""}`}
+                onPress={() => router.push(`/league/${leagueID}/lottery`)}
+                className="flex-row items-center gap-1.5 bg-white/5 border border-white/10 rounded-full px-3 py-1.5"
               >
-                <Text className={`text-[11px] font-bold ${viewMode === mode ? "text-white" : "text-gray-400"}`}>
-                  {mode === "overall" ? "Overall" : "Division"}
-                </Text>
+                <Ionicons name="shuffle" size={12} color="#af1222" />
+                <Text className="text-brand text-[11px] font-bold">Draft Lottery</Text>
               </Pressable>
-            ))}
+            )}
           </View>
         )}
       </View>
