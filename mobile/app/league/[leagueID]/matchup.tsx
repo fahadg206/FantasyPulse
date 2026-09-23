@@ -228,6 +228,45 @@ export default function MatchupDetail() {
     };
   }, [loading, team1, team2, leagueID, matchupID, week, season, scoringSettings, playersDataForFeed, nflGameStatusByTeam]);
 
+  // The initial load above only ever fetches once - real scores keep
+  // moving every few seconds while these players' games are live, so
+  // without this the screen would only ever show a stale snapshot from
+  // whenever it was opened, until someone backed out and back in. Refetches
+  // just the live-moving pieces (matchup points, live game details) on a
+  // short interval - not the whole heavy initial load (league settings,
+  // roster averages, top performers) - and stops entirely once the
+  // matchup's actually final, since there's nothing left to move.
+  useEffect(() => {
+    if (!leagueID || !matchupID || !week || loading || !season || !team1 || !team2) return;
+    const s1 = team1.starters_full_data ?? [];
+    const s2 = team2.starters_full_data ?? [];
+    const rosterFullySet = (s: Starter[]) => s.length > 0 && s.every((x) => x && Object.keys(x).length > 0);
+    const state1 = computeFantasyTeamGameState(s1.map((s) => s.team), nflGameStatusByTeam, rosterFullySet(s1));
+    const state2 = computeFantasyTeamGameState(s2.map((s) => s.team), nflGameStatusByTeam, rosterFullySet(s2));
+    if (combineMatchupGameState(state1, state2, isPastMondayNightCutoff()) === "final") return;
+
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const [{ updatedScheduleData }, details] = await Promise.all([
+          getMatchupData(leagueID, week),
+          getLiveGameDetailsByTeam(week, season),
+        ]);
+        if (cancelled) return;
+        setScheduleData((prev) => ({ ...prev, ...updatedScheduleData }));
+        setLiveGameDetailsByTeam(details);
+      } catch (error) {
+        console.error("Error refreshing live matchup score:", error);
+      }
+    };
+
+    const interval = setInterval(refresh, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [leagueID, matchupID, week, loading, season, team1, team2, nflGameStatusByTeam]);
+
   if (!leagueID || !matchupID || !week) return null;
 
   if (loading) {

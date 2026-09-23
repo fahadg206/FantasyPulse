@@ -200,6 +200,62 @@ export default function Schedule() {
     };
   }, [leagueID, counter, season, matchups, scheduleData, nflGameStatusByTeam, playersData, scoringSettings]);
 
+  // The loads above only run once per week change, so without this the
+  // whole board would sit on a stale snapshot from whenever it was opened
+  // until the week counter changes - scores actually move every few
+  // seconds while games are live. Refreshes on a short interval while any
+  // matchup this week hasn't gone final yet, and stops once every game
+  // here has - nothing left to move. Depending on `matchups`/`scheduleData`
+  // (which this same refresh updates) means each tick reschedules the next
+  // one only after the previous fetch lands, so this can't pile up
+  // overlapping requests.
+  useEffect(() => {
+    if (!leagueID || loading || matchups.length === 0 || !season) return;
+
+    const allFinal = matchups.every(([, teams]) => {
+      const [team1, team2] = teams;
+      if (!team1 || !team2) return true;
+      const starters1Full = scheduleData[team1.user_id ?? ""]?.starters_full_data ?? [];
+      const starters2Full = scheduleData[team2.user_id ?? ""]?.starters_full_data ?? [];
+      const rosterFullySet = (slots: typeof starters1Full) =>
+        slots.length > 0 && slots.every((s) => s && Object.keys(s).length > 0);
+      const team1GameState = computeFantasyTeamGameState(
+        starters1Full.map((s) => s.team),
+        nflGameStatusByTeam,
+        rosterFullySet(starters1Full)
+      );
+      const team2GameState = computeFantasyTeamGameState(
+        starters2Full.map((s) => s.team),
+        nflGameStatusByTeam,
+        rosterFullySet(starters2Full)
+      );
+      return combineMatchupGameState(team1GameState, team2GameState, isPastMondayNightCutoff()) === "final";
+    });
+    if (allFinal) return;
+
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const [{ matchupMap, updatedScheduleData }, statusByTeam] = await Promise.all([
+          getMatchupData(leagueID, counter, playersData),
+          getNflGameStatusByTeam(counter, season),
+        ]);
+        if (cancelled) return;
+        setMatchups(Array.from(matchupMap.entries()));
+        setScheduleData(updatedScheduleData);
+        setNflGameStatusByTeam(statusByTeam);
+      } catch (error) {
+        console.error("Error refreshing live schedule scores:", error);
+      }
+    };
+
+    const interval = setInterval(refresh, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [leagueID, counter, loading, matchups, scheduleData, nflGameStatusByTeam, season, playersData]);
+
   if (!leagueID) return null;
 
   const changeWeek = (delta: number) => {

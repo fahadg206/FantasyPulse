@@ -50,7 +50,11 @@ interface UseBigPlayFeedArgs {
 // interval, and surfaces newly-arrived plays (touchdowns, field goals,
 // interceptions, lost fumbles) with their fantasy point impact - never
 // treating plays that already happened before the screen was opened as
-// "new". Mirrors src/app/libs/useBigPlayFeed.tsx on the web app.
+// "new". Mirrors src/app/libs/useBigPlayFeed.tsx on the web app. Default
+// cadence tightened from 30s to 15s - ESPN's underlying play-by-play
+// itself updates faster than that during live action, and this endpoint
+// isn't cached server-side, so 30s was leaving real speed on the table
+// for free.
 export default function useBigPlayFeed({
   week,
   season,
@@ -58,7 +62,7 @@ export default function useBigPlayFeed({
   team2,
   playersData,
   scoringSettings,
-  pollIntervalMs = 30000,
+  pollIntervalMs = 15000,
   enabled = true,
 }: UseBigPlayFeedArgs) {
   const [plays, setPlays] = useState<FeedPlay[]>([]);
