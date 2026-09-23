@@ -19,8 +19,8 @@ import {
 
 type MatchupEntry = [string, MatchupMapData[]];
 type GameStatus = "live" | "upcoming" | "final";
-/** This team's projected spread + the matchup's shared O/U, shown in place of top performers before kickoff. */
-type SpreadLine = { text: string; isFavorite: boolean; overUnder: number };
+/** The matchup's projected favorite + spread (top line) and O/U (bottom line), shown identically on both rows in place of top performers before kickoff. */
+type SpreadLine = { favoriteText: string; overUnder: number };
 
 const STATUS_META: Record<GameStatus, { label: string; color: string }> = {
   live: { label: "LIVE NOW", color: "#dc2626" },
@@ -321,24 +321,20 @@ export default function Schedule() {
         if (proj !== undefined && !Number.isNaN(proj)) team2Proj += proj;
       }
 
-      // The spread/O-U line each row shows in place of top performers while
-      // the game hasn't started - undefined (blank slot) when there's no
+      // The spread/O-U info each row shows in place of top performers while
+      // the game hasn't started - the same two lines on both rows (who's
+      // favored and by how much, then the O-U), not each team's own
+      // relative number, so it reads the same regardless of which row
+      // you're looking at. undefined (blank slot) when there's no
       // projection data at all for this matchup yet.
       const hasProjection = status === "upcoming" && (team1Proj > 0 || team2Proj > 0);
-      const overUnder = Math.round(team1Proj + team2Proj);
       const tied = Math.round(team1Proj) === Math.round(team2Proj);
-      const team1Line: SpreadLine | undefined = hasProjection
+      const favoriteName = team1Proj > team2Proj ? team1.name : team2.name;
+      const spread = Math.round(Math.abs(team1Proj - team2Proj));
+      const line: SpreadLine | undefined = hasProjection
         ? {
-            text: tied ? "PICK'EM" : team1Proj > team2Proj ? `-${Math.round(team1Proj - team2Proj)}` : `+${Math.round(team2Proj - team1Proj)}`,
-            isFavorite: !tied && team1Proj > team2Proj,
-            overUnder,
-          }
-        : undefined;
-      const team2Line: SpreadLine | undefined = hasProjection
-        ? {
-            text: tied ? "PICK'EM" : team2Proj > team1Proj ? `-${Math.round(team2Proj - team1Proj)}` : `+${Math.round(team1Proj - team2Proj)}`,
-            isFavorite: !tied && team2Proj > team1Proj,
-            overUnder,
+            favoriteText: tied ? "PICK'EM" : `${abbrevName(favoriteName)} -${spread}`,
+            overUnder: Math.round(team1Proj + team2Proj),
           }
         : undefined;
 
@@ -352,8 +348,7 @@ export default function Schedule() {
         team2Leading,
         team1Top2,
         team2Top2,
-        team1Line,
-        team2Line,
+        line,
       };
     })
     .filter((g): g is NonNullable<typeof g> => g !== null);
@@ -397,7 +392,7 @@ export default function Schedule() {
               <View className="flex-1 h-px bg-white/10" />
             </View>
 
-            {section.games.map(({ matchupID, team1, team2, preGame, status, team1Leading, team2Leading, team1Top2, team2Top2, team1Line, team2Line }) => (
+            {section.games.map(({ matchupID, team1, team2, preGame, status, team1Leading, team2Leading, team1Top2, team2Top2, line }) => (
               <Pressable
                 key={matchupID}
                 onPress={() =>
@@ -425,7 +420,7 @@ export default function Schedule() {
                     emphasize={team1Leading}
                     live={status === "live"}
                     performers={team1Top2}
-                    line={team1Line}
+                    line={line}
                   />
                   <View className="h-px bg-white/10 my-3.5" />
                   <ScheduleTeamRow
@@ -436,7 +431,7 @@ export default function Schedule() {
                     emphasize={team2Leading}
                     live={status === "live"}
                     performers={team2Top2}
-                    line={team2Line}
+                    line={line}
                   />
                 </View>
               </Pressable>
@@ -446,6 +441,10 @@ export default function Schedule() {
       </ScrollView>
     </View>
   );
+}
+
+function abbrevName(name: string) {
+  return name.length > 12 ? `${name.slice(0, 11)}…` : name;
 }
 
 function PerformerLine({ performer }: { performer: TopPerformer }) {
@@ -573,10 +572,10 @@ function ScheduleTeamRow({
       <View className="justify-center" style={{ width: 108 }}>
         {line ? (
           <View className="items-end">
-            <Text className={`text-[15px] font-bold ${line.isFavorite ? "text-[#e2465a]" : "text-gray-400"}`}>
-              {line.text}
+            <Text numberOfLines={1} className="text-[13px] font-bold text-[#e2465a]">
+              {line.favoriteText}
             </Text>
-            <Text className="text-[10px] text-gray-500 mt-0.5">O/U {line.overUnder}</Text>
+            <Text className="text-[10px] text-gray-500 mt-1">O/U {line.overUnder}</Text>
           </View>
         ) : (
           <View className="gap-1.5">
