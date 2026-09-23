@@ -28,7 +28,7 @@ const LEAGUE_ZONES: Record<string, StandingsZone[]> = {
     { label: "Relegation Zone", color: "red", from: 9, to: 12 },
   ],
   // Hell League
-  "1396298716083675136": [{ label: "Banished If Season Ends Today", color: "red", from: "last", to: "last" }],
+  "1396298716083675136": [{ label: "Banished If Season Ended Today", color: "red", from: "last", to: "last" }],
 };
 
 function resolvePosition(pos: number | "last", totalTeams: number): number {
