@@ -589,7 +589,7 @@ function ScheduleTeamRow({
             </Text>
           </View>
         ) : overUnderText ? (
-          <Text numberOfLines={1} className="text-right text-[12px] font-semibold text-gray-400">
+          <Text numberOfLines={1} className="text-center text-[12px] font-semibold text-gray-400">
             {overUnderText}
           </Text>
         ) : (
