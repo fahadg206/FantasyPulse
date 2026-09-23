@@ -24,6 +24,7 @@ import MatchupFeed from "../../../components/MatchupFeed";
 import CommentsSection from "../../../components/CommentsSection";
 import useBigPlayFeed from "../../../lib/useBigPlayFeed";
 import { ensureMatchupRecapPosted } from "../../../lib/ensureMatchupRecap";
+import { ensureInjuryPostsForMatchup } from "../../../lib/ensureInjuryPost";
 
 const POSITION_COLOR: Record<string, string> = {
   QB: "#ef4444",
@@ -258,6 +259,21 @@ export default function MatchupDetail() {
       } catch (error) {
         console.error("Error refreshing live matchup score:", error);
       }
+
+      // Same cadence, riding the same tick - Boogie's live injury wire for
+      // this matchup. ensureInjuryPostsForMatchup is self-deduping (each
+      // post's id comes from the play itself), so it's fine to just re-run
+      // this every tick rather than diffing anything here.
+      ensureInjuryPostsForMatchup({
+        leagueId: leagueID,
+        week,
+        season,
+        matchupId: matchupID,
+        team1: { name: team1.name, starters: s1 },
+        team2: { name: team2.name, starters: s2 },
+        playersData: playersDataForFeed,
+        scoringSettings,
+      }).catch((error) => console.error("Error posting injury updates to feed:", error));
     };
 
     const interval = setInterval(refresh, 15000);
@@ -265,7 +281,7 @@ export default function MatchupDetail() {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [leagueID, matchupID, week, loading, season, team1, team2, nflGameStatusByTeam]);
+  }, [leagueID, matchupID, week, loading, season, team1, team2, nflGameStatusByTeam, playersDataForFeed, scoringSettings]);
 
   if (!leagueID || !matchupID || !week) return null;
 

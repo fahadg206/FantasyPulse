@@ -25,6 +25,19 @@
 // safeties, and interception/fumble-return touchdowns (which would need
 // crediting a defense/IDP, not currently a supported roster concept here)
 // are left out rather than guessed at.
+//
+// Also scans every play's text (not just the scoring-play types above) for
+// ESPN's own injury commentary, which rides along inside an otherwise
+// ordinary play's `text` rather than being its own play type - verified
+// live against real mid-game text: "MIA-M.Washington was injured during
+// the play." and, later, "** Injury Update: MIA-M.Washington has returned
+// to the game." Surfaced as playType "Injury" / "Injury Return" with no
+// pointsDelta (there isn't one). This is real, structured in-game
+// commentary - not the separate pre-game weekly injury report (which
+// ESPN's summary endpoint exposes as a different `injuries` field entirely
+// and uses Questionable/Doubtful/Out, not these two events).
+const INJURED_RE = /([A-Z]{2,3})-([A-Z]\.[A-Za-z'-]+) was injured during the play/g;
+const RETURNED_RE = /\*\* Injury Update: ([A-Z]{2,3})-([A-Z]\.[A-Za-z'-]+) has returned to the game/g;
 import {
   computeRushPoints,
   computeReceptionPoints,
@@ -117,6 +130,27 @@ function matchPlayerByAbbreviatedName(abbrevName, players) {
   const cleanedLast = cleanNameString(lastName);
   const candidates = players.filter(
     (p) =>
+      p.fn?.[0]?.toLowerCase() === initial.toLowerCase() &&
+      cleanNameString(p.ln) === cleanedLast
+  );
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
+// Injury commentary includes the team abbreviation right in the text
+// ("MIA-M.Washington"), unlike every other play type's bare "M.Washington"
+// - matched on team + name here rather than name alone, which is actually
+// more precise than matchPlayerByAbbreviatedName above (no ambiguity
+// possible between two same-initial-and-lastname players on different
+// teams).
+function matchPlayerByTeamAndAbbreviatedName(teamAbbr, abbrevName, players) {
+  const match = (abbrevName || "").match(/^([A-Za-z])\.([A-Za-z'-]+)$/);
+  if (!match) return null;
+  const [, initial, lastName] = match;
+  const cleanedLast = cleanNameString(lastName);
+  const sleeperTeam = toSleeperAbbreviation(teamAbbr);
+  const candidates = players.filter(
+    (p) =>
+      p.team === sleeperTeam &&
       p.fn?.[0]?.toLowerCase() === initial.toLowerCase() &&
       cleanNameString(p.ln) === cleanedLast
   );
@@ -303,6 +337,58 @@ export default async function handler(req, res) {
         } else if (playType === "Fumble Recovery (Opponent)") {
           const fumbler = matchPlayerByAbbreviatedName(extractFumbler(play.text), players);
           pushTurnoverCredit(fumbler, computeFumbleLostPoints(scoring));
+        }
+
+        // Injury commentary rides along inside whatever play it happened
+        // on (a run, a penalty, anything) rather than being its own play
+        // type, so this runs unconditionally on every play's text, not
+        // just the scoring types handled above. A single play's text can
+        // carry more than one of these (someone hurt earlier in the drive
+        // returning on this play, plus someone new going down on it), so
+        // every match is walked, not just the first.
+        for (const m of play.text.matchAll(INJURED_RE)) {
+          const [, teamAbbr, name] = m;
+          const player = matchPlayerByTeamAndAbbreviatedName(teamAbbr, name, players);
+          if (!player) continue;
+          feed.push(
+            buildPlayEntry({
+              ...base,
+              id: `${base.id}_injured`,
+              text: `${player.team}-${player.fn[0]}.${player.ln} was injured during the play.`,
+              playType: "Injury",
+              player: {
+                sleeperId: player.sleeperId,
+                fn: player.fn,
+                ln: player.ln,
+                pos: player.pos,
+                team: player.team,
+                fantasyTeam: player.fantasyTeam,
+              },
+              pointsDelta: null,
+            })
+          );
+        }
+        for (const m of play.text.matchAll(RETURNED_RE)) {
+          const [, teamAbbr, name] = m;
+          const player = matchPlayerByTeamAndAbbreviatedName(teamAbbr, name, players);
+          if (!player) continue;
+          feed.push(
+            buildPlayEntry({
+              ...base,
+              id: `${base.id}_returned`,
+              text: `${player.team}-${player.fn[0]}.${player.ln} has returned to the game.`,
+              playType: "Injury Return",
+              player: {
+                sleeperId: player.sleeperId,
+                fn: player.fn,
+                ln: player.ln,
+                pos: player.pos,
+                team: player.team,
+                fantasyTeam: player.fantasyTeam,
+              },
+              pointsDelta: null,
+            })
+          );
         }
       }
     }

@@ -8,6 +8,7 @@ import getMatchupData, { MatchupMapData, ScheduleData } from "../../../lib/getMa
 import { getTopNCurrentForTeam, TopPerformer } from "../../../lib/getTopPerformers";
 import { getTeamLogo } from "../../../lib/nflTeams";
 import { ensureMatchupRecapPosted } from "../../../lib/ensureMatchupRecap";
+import { ensureInjuryPostsForMatchup } from "../../../lib/ensureInjuryPost";
 import AnimatedNumber from "../../../components/AnimatedNumber";
 import {
   getNflGameStatusByTeam,
@@ -236,6 +237,28 @@ export default function Schedule() {
       } catch (error) {
         console.error("Error refreshing live schedule scores:", error);
       }
+
+      // Same tick - Boogie's live injury wire for every not-yet-final
+      // matchup this week, not just whichever one someone has open in the
+      // Matchup detail screen. ensureInjuryPostsForMatchup is
+      // self-deduping (each post's id comes from the play itself), so
+      // re-running this every tick for every matchup here is fine.
+      for (const [, teams] of matchups) {
+        const [team1, team2] = teams;
+        if (!team1 || !team2) continue;
+        const starters1Full = scheduleData[team1.user_id ?? ""]?.starters_full_data ?? [];
+        const starters2Full = scheduleData[team2.user_id ?? ""]?.starters_full_data ?? [];
+        ensureInjuryPostsForMatchup({
+          leagueId: leagueID,
+          week: counter,
+          season,
+          matchupId: team1.matchup_id ?? "",
+          team1: { name: team1.name, starters: starters1Full },
+          team2: { name: team2.name, starters: starters2Full },
+          playersData,
+          scoringSettings,
+        }).catch((error) => console.error("Error posting injury updates to feed:", error));
+      }
     };
 
     const interval = setInterval(refresh, 15000);
@@ -243,7 +266,7 @@ export default function Schedule() {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [leagueID, counter, loading, matchups, scheduleData, nflGameStatusByTeam, season, playersData]);
+  }, [leagueID, counter, loading, matchups, scheduleData, nflGameStatusByTeam, season, playersData, scoringSettings]);
 
   if (!leagueID) return null;
 

@@ -3,6 +3,7 @@ import type { Starter } from "./getMatchupData";
 import { ensureSystemPost } from "./posts";
 import { finalScoreText } from "./announceTransactions";
 import { detectRunsAndComebacks, buildMatchupRecap } from "./runsAndComebacks";
+import { buildMatchupFeedPlayers } from "./matchupFeedPlayers";
 
 // Posts a matchup's final-score recap into the feed - extracted out of the
 // Matchup detail screen, which used to be the ONLY place this ever ran.
@@ -26,16 +27,7 @@ export async function ensureMatchupRecapPosted(params: {
 }): Promise<void> {
   const { leagueId, week, season, matchupId, team1, team2, playersData, scoringSettings } = params;
 
-  const buildPlayers = (starters: Starter[], fantasyTeam: "team1" | "team2") =>
-    starters
-      .map((s) => {
-        if (!s.id) return null;
-        const meta = playersData[s.id];
-        if (!meta || !meta.fn || !meta.ln || !meta.t) return null;
-        return { sleeperId: s.id, fn: meta.fn, ln: meta.ln, pos: meta.pos, team: meta.t, fantasyTeam };
-      })
-      .filter(Boolean);
-  const players = [...buildPlayers(team1.starters, "team1"), ...buildPlayers(team2.starters, "team2")];
+  const players = buildMatchupFeedPlayers(team1.starters, team2.starters, playersData);
 
   let text = finalScoreText(team1.name, team1.points, team2.name, team2.points);
   if (players.length > 0) {
