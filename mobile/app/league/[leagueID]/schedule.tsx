@@ -5,7 +5,7 @@ import { Feather } from "@expo/vector-icons";
 import { MotiView } from "moti";
 import { sleeper, backend } from "../../../lib/api";
 import getMatchupData, { MatchupMapData, ScheduleData } from "../../../lib/getMatchupData";
-import { getSeasonTotals, getTopNForTeam, getTopNCurrentForTeam, SeasonTotals, TopPerformer } from "../../../lib/getTopPerformers";
+import { getTopNCurrentForTeam, TopPerformer } from "../../../lib/getTopPerformers";
 import { getTeamLogo } from "../../../lib/nflTeams";
 import { ensureMatchupRecapPosted } from "../../../lib/ensureMatchupRecap";
 import AnimatedNumber from "../../../components/AnimatedNumber";
@@ -19,6 +19,8 @@ import {
 
 type MatchupEntry = [string, MatchupMapData[]];
 type GameStatus = "live" | "upcoming" | "final";
+/** This team's projected spread + the matchup's shared O/U, shown in place of top performers before kickoff. */
+type SpreadLine = { text: string; isFavorite: boolean; overUnder: number };
 
 const STATUS_META: Record<GameStatus, { label: string; color: string }> = {
   live: { label: "LIVE NOW", color: "#dc2626" },
@@ -60,13 +62,11 @@ export default function Schedule() {
   const { leagueID } = useLocalSearchParams<{ leagueID: string }>();
   const router = useRouter();
   const [counter, setCounter] = useState(1);
-  const [displayWeek, setDisplayWeek] = useState<number>();
   const [matchups, setMatchups] = useState<MatchupEntry[]>([]);
   const [scheduleData, setScheduleData] = useState<ScheduleData>({});
   const [loading, setLoading] = useState(true);
   const [initialized, setInitialized] = useState(false);
   const [playersData, setPlayersData] = useState<any>(null);
-  const [seasonTotals, setSeasonTotals] = useState<SeasonTotals>({});
   const [season, setSeason] = useState<string>();
   const [nflGameStatusByTeam, setNflGameStatusByTeam] = useState<Record<string, NflTeamGameState>>({});
   const [scoringSettings, setScoringSettings] = useState<Record<string, number>>({});
@@ -84,16 +84,6 @@ export default function Schedule() {
     backend.fetchPlayers(leagueID).then(setPlayersData).catch(console.error);
   }, [leagueID]);
 
-  // Season totals only depend on how many weeks have been completed - not
-  // on which week the user is currently browsing - so this is fetched once
-  // per league visit rather than every time the week counter changes.
-  useEffect(() => {
-    if (!leagueID || displayWeek === undefined) return;
-    getSeasonTotals(leagueID, Math.max(0, displayWeek - 1))
-      .then(setSeasonTotals)
-      .catch((e) => console.error("Error fetching season totals:", e));
-  }, [leagueID, displayWeek]);
-
   useEffect(() => {
     if (!leagueID) return;
     let cancelled = false;
@@ -110,7 +100,6 @@ export default function Schedule() {
           setCounter(week);
           setInitialized(true);
         }
-        setDisplayWeek(nflState.display_week);
         setSeason(nflState.season);
 
         const { matchupMap, updatedScheduleData } = await getMatchupData(leagueID, week, playersData);
@@ -311,25 +300,12 @@ export default function Schedule() {
       const team1Leading = postGame && team1Points >= team2Points;
       const team2Leading = postGame && team2Points >= team1Points;
 
-      const team1Full = scheduleData[team1.user_id ?? ""];
-      const team2Full = scheduleData[team2.user_id ?? ""];
-      // Pre-game: who's *expected* to lead scoring (season average, or a
-      // projection fallback before there's any history) - a forecast.
-      // Live or final: who's *actually* leading scoring this week, off the
-      // real points already on the board, not a season number that has
-      // nothing to do with what's happening in this matchup right now.
-      const team1Top2 =
-        status === "upcoming"
-          ? team1Full?.roster_id && displayWeek !== undefined
-            ? getTopNForTeam(seasonTotals, team1Full.roster_id, starters1Full, playersData, displayWeek, 2)
-            : []
-          : getTopNCurrentForTeam(starters1Full, 2);
-      const team2Top2 =
-        status === "upcoming"
-          ? team2Full?.roster_id && displayWeek !== undefined
-            ? getTopNForTeam(seasonTotals, team2Full.roster_id, starters2Full, playersData, displayWeek, 2)
-            : []
-          : getTopNCurrentForTeam(starters2Full, 2);
+      // Who's *actually* leading scoring this week, off the real points
+      // already on the board - only meaningful once there's a real game in
+      // progress or finished, so upcoming games don't compute this at all
+      // anymore (that slot shows the spread/O-U instead - see below).
+      const team1Top2 = status === "upcoming" ? [] : getTopNCurrentForTeam(starters1Full, 2);
+      const team2Top2 = status === "upcoming" ? [] : getTopNCurrentForTeam(starters2Full, 2);
 
       // Same projected-margin / over-under the Dashboard's Scoreboard card
       // shows for an upcoming game - each side's starters' projections for
@@ -345,6 +321,27 @@ export default function Schedule() {
         if (proj !== undefined && !Number.isNaN(proj)) team2Proj += proj;
       }
 
+      // The spread/O-U line each row shows in place of top performers while
+      // the game hasn't started - undefined (blank slot) when there's no
+      // projection data at all for this matchup yet.
+      const hasProjection = status === "upcoming" && (team1Proj > 0 || team2Proj > 0);
+      const overUnder = Math.round(team1Proj + team2Proj);
+      const tied = Math.round(team1Proj) === Math.round(team2Proj);
+      const team1Line: SpreadLine | undefined = hasProjection
+        ? {
+            text: tied ? "PICK'EM" : team1Proj > team2Proj ? `-${Math.round(team1Proj - team2Proj)}` : `+${Math.round(team2Proj - team1Proj)}`,
+            isFavorite: !tied && team1Proj > team2Proj,
+            overUnder,
+          }
+        : undefined;
+      const team2Line: SpreadLine | undefined = hasProjection
+        ? {
+            text: tied ? "PICK'EM" : team2Proj > team1Proj ? `-${Math.round(team2Proj - team1Proj)}` : `+${Math.round(team1Proj - team2Proj)}`,
+            isFavorite: !tied && team2Proj > team1Proj,
+            overUnder,
+          }
+        : undefined;
+
       return {
         matchupID,
         team1,
@@ -355,8 +352,8 @@ export default function Schedule() {
         team2Leading,
         team1Top2,
         team2Top2,
-        team1Proj,
-        team2Proj,
+        team1Line,
+        team2Line,
       };
     })
     .filter((g): g is NonNullable<typeof g> => g !== null);
@@ -400,7 +397,7 @@ export default function Schedule() {
               <View className="flex-1 h-px bg-white/10" />
             </View>
 
-            {section.games.map(({ matchupID, team1, team2, preGame, status, team1Leading, team2Leading, team1Top2, team2Top2, team1Proj, team2Proj }) => (
+            {section.games.map(({ matchupID, team1, team2, preGame, status, team1Leading, team2Leading, team1Top2, team2Top2, team1Line, team2Line }) => (
               <Pressable
                 key={matchupID}
                 onPress={() =>
@@ -428,6 +425,7 @@ export default function Schedule() {
                     emphasize={team1Leading}
                     live={status === "live"}
                     performers={team1Top2}
+                    line={team1Line}
                   />
                   <View className="h-px bg-white/10 my-3.5" />
                   <ScheduleTeamRow
@@ -438,26 +436,9 @@ export default function Schedule() {
                     emphasize={team2Leading}
                     live={status === "live"}
                     performers={team2Top2}
+                    line={team2Line}
                   />
                 </View>
-
-                {/* Projected margin + over/under - the same "nice data" the
-                    Dashboard's Scoreboard card shows for an upcoming game,
-                    now here too. Only means anything as a forecast, so it
-                    only shows pre-game - once real points are on the
-                    board the projection isn't news anymore. */}
-                {status === "upcoming" && (team1Proj > 0 || team2Proj > 0) && (
-                  <View className="border-t border-white/10 px-4 py-2 flex-row items-center justify-between">
-                    <Text numberOfLines={1} className="text-[10px] text-gray-400 font-semibold flex-1 mr-2">
-                      {Math.round(team1Proj) === Math.round(team2Proj)
-                        ? "PICK'EM"
-                        : team1Proj > team2Proj
-                          ? `${abbrevName(team1.name)} -${Math.round(team1Proj - team2Proj)}`
-                          : `${abbrevName(team2.name)} -${Math.round(team2Proj - team1Proj)}`}
-                    </Text>
-                    <Text className="text-[10px] text-gray-500">O/U {Math.round(team1Proj + team2Proj)}</Text>
-                  </View>
-                )}
               </Pressable>
             ))}
           </View>
@@ -465,10 +446,6 @@ export default function Schedule() {
       </ScrollView>
     </View>
   );
-}
-
-function abbrevName(name: string) {
-  return name.length > 14 ? `${name.slice(0, 13)}…` : name;
 }
 
 function PerformerLine({ performer }: { performer: TopPerformer }) {
@@ -512,6 +489,7 @@ function ScheduleTeamRow({
   emphasize,
   live,
   performers,
+  line,
 }: {
   name: string;
   avatar?: string | ImageSourcePropType;
@@ -520,41 +498,41 @@ function ScheduleTeamRow({
   emphasize: boolean;
   live?: boolean;
   performers: TopPerformer[];
+  line?: SpreadLine;
 }) {
   // Bold+white still means "the confirmed winner" (final only) - now also
-  // marked with a red caret before the avatar, pointing at that team's row.
-  // While the game's still going, neither side is declared a winner, but
-  // the score is live and worth reading clearly - white, just not bold -
-  // instead of the same muted gray a game that hasn't started yet gets.
+  // marked with a solid red triangle right before the score, pointing into
+  // it. While the game's still going, neither side is declared a winner,
+  // but the score is live and worth reading clearly - white, just not
+  // bold - instead of the same muted gray a game that hasn't started yet
+  // gets.
   const textColor = emphasize || live ? "text-white" : "text-gray-500";
   const weight = emphasize ? "font-bold" : live ? "font-semibold" : "font-medium";
 
-  // Two columns: team info + score on the left, a vertical rule, then that
-  // team's top performers stacked on the right. `items-stretch` on the row
-  // makes the rule's height track whichever column is taller, so it runs
+  // Two columns: team info + score on the left, a vertical rule, then a
+  // fixed-width column on the right showing that team's top performers
+  // once the game has real plays on the board, or its projected
+  // spread/O-U before kickoff instead. `items-stretch` on the row makes
+  // the rule's height track whichever column is taller, so it runs
   // exactly the height of this one team's block and stops right at the
   // horizontal divider between the two teams - not a line that runs the
   // full card.
   //
-  // The score and the divider/performers column both used to size
-  // themselves off their own content, so a team with a wider name or
-  // longer performer names pushed everything in ITS row over relative to
-  // the other team's row - nothing actually lined up vertically between
-  // the two teams. The performers column now has a fixed width and is
-  // always rendered (even with zero performers) so both rows in a card
-  // reserve identical space, which pins the score's right edge and the
-  // divider to the same x position on both rows; each performer line's
-  // points also sits in its own fixed-width right-aligned slot for the
-  // same reason.
+  // The score and the divider/right column both used to size themselves
+  // off their own content, so a team with a wider name or longer
+  // performer names pushed everything in ITS row over relative to the
+  // other team's row - nothing actually lined up vertically between the
+  // two teams. The right column now has a fixed width and is always
+  // rendered (even when empty) so both rows in a card reserve identical
+  // space, which pins the score's right edge and the divider to the same
+  // x position on both rows. The score is the last item in this
+  // `justify-between` row, so its right edge sits at that same fixed
+  // container edge whether or not the winner triangle is showing next to
+  // it - the triangle only ever eats into the score's *left* side.
   return (
     <View className="flex-row items-stretch">
       <View className="flex-1 flex-row items-center justify-between mr-3">
         <View className="flex-row items-center flex-1 mr-3">
-          {/* Fixed-width slot so the caret's presence/absence never shifts
-              the avatar - only the winning team (final only) gets one. */}
-          <View className="w-[14px] items-center mr-1">
-            {emphasize && <Feather name="chevron-right" size={14} color="#e2465a" />}
-          </View>
           <Image
             source={typeof avatar === "string" ? { uri: avatar } : avatar}
             className="w-[44px] h-[44px] rounded-full mr-3 bg-white/10"
@@ -563,22 +541,50 @@ function ScheduleTeamRow({
             {name}
           </Text>
         </View>
-        {showScore ? (
-          <AnimatedNumber
-            value={parseFloat(points || "0")}
-            decimals={1}
-            style={{ fontVariant: ["tabular-nums"] }}
-            className={`text-[23px] ${emphasize ? "font-bold" : "font-semibold"} ${textColor}`}
-          />
-        ) : (
-          <Text className="text-[13px] text-gray-500">--</Text>
-        )}
+        <View className="flex-row items-center">
+          {emphasize && (
+            <View
+              style={{
+                width: 0,
+                height: 0,
+                marginRight: 7,
+                borderTopWidth: 7,
+                borderBottomWidth: 7,
+                borderLeftWidth: 11,
+                borderTopColor: "transparent",
+                borderBottomColor: "transparent",
+                borderLeftColor: "#e2465a",
+              }}
+            />
+          )}
+          {showScore ? (
+            <AnimatedNumber
+              value={parseFloat(points || "0")}
+              decimals={1}
+              style={{ fontVariant: ["tabular-nums"] }}
+              className={`text-[23px] ${emphasize ? "font-bold" : "font-semibold"} ${textColor}`}
+            />
+          ) : (
+            <Text className="text-[13px] text-gray-500">--</Text>
+          )}
+        </View>
       </View>
       <View className="w-px bg-white/10 mr-3" />
-      <View className="justify-center gap-1.5" style={{ width: 108 }}>
-        {performers.map((p, i) => (
-          <PerformerLine key={i} performer={p} />
-        ))}
+      <View className="justify-center" style={{ width: 108 }}>
+        {line ? (
+          <View className="items-end">
+            <Text className={`text-[15px] font-bold ${line.isFavorite ? "text-[#e2465a]" : "text-gray-400"}`}>
+              {line.text}
+            </Text>
+            <Text className="text-[10px] text-gray-500 mt-0.5">O/U {line.overUnder}</Text>
+          </View>
+        ) : (
+          <View className="gap-1.5">
+            {performers.map((p, i) => (
+              <PerformerLine key={i} performer={p} />
+            ))}
+          </View>
+        )}
       </View>
     </View>
   );
