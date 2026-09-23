@@ -499,13 +499,14 @@ function ScheduleTeamRow({
   performers: TopPerformer[];
   line?: SpreadLine;
 }) {
-  // Bold+white still means "the confirmed winner" (final only) - now also
-  // marked with a solid red triangle right before the score, pointing into
-  // it. While the game's still going, neither side is declared a winner,
-  // but the score is live and worth reading clearly - white, just not
-  // bold - instead of the same muted gray a game that hasn't started yet
-  // gets.
-  const textColor = emphasize || live ? "text-white" : "text-gray-500";
+  // Team names are always white - only the score dims to gray for a
+  // final's non-winning side (bold+white still means "the confirmed
+  // winner", now also marked with a solid red triangle right before the
+  // score, pointing into it). While the game's still going, neither side
+  // is declared a winner, but the score is live and worth reading
+  // clearly - white, just not bold - instead of the same muted gray a
+  // game that hasn't started yet gets.
+  const scoreColor = emphasize || live ? "text-white" : "text-gray-500";
   const weight = emphasize ? "font-bold" : live ? "font-semibold" : "font-medium";
 
   // Two columns: team info + score on the left, a vertical rule, then a
@@ -536,7 +537,7 @@ function ScheduleTeamRow({
             source={typeof avatar === "string" ? { uri: avatar } : avatar}
             className="w-[44px] h-[44px] rounded-full mr-3 bg-white/10"
           />
-          <Text numberOfLines={1} className={`text-[16px] flex-1 ${weight} ${textColor}`}>
+          <Text numberOfLines={1} className={`text-[16px] flex-1 ${weight} text-white`}>
             {name}
           </Text>
         </View>
@@ -561,7 +562,7 @@ function ScheduleTeamRow({
               value={parseFloat(points || "0")}
               decimals={1}
               style={{ fontVariant: ["tabular-nums"] }}
-              className={`text-[23px] ${emphasize ? "font-bold" : "font-semibold"} ${textColor}`}
+              className={`text-[23px] ${emphasize ? "font-bold" : "font-semibold"} ${scoreColor}`}
             />
           ) : (
             <Text className="text-[13px] text-gray-500">--</Text>
