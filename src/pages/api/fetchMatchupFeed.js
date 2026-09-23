@@ -28,16 +28,50 @@
 //
 // Also scans every play's text (not just the scoring-play types above) for
 // ESPN's own injury commentary, which rides along inside an otherwise
-// ordinary play's `text` rather than being its own play type - verified
-// live against real mid-game text: "MIA-M.Washington was injured during
-// the play." and, later, "** Injury Update: MIA-M.Washington has returned
-// to the game." Surfaced as playType "Injury" / "Injury Return" with no
-// pointsDelta (there isn't one). This is real, structured in-game
-// commentary - not the separate pre-game weekly injury report (which
-// ESPN's summary endpoint exposes as a different `injuries` field entirely
-// and uses Questionable/Doubtful/Out, not these two events).
-const INJURED_RE = /([A-Z]{2,3})-([A-Z]\.[A-Za-z'-]+) was injured during the play/g;
-const RETURNED_RE = /\*\* Injury Update: ([A-Z]{2,3})-([A-Z]\.[A-Za-z'-]+) has returned to the game/g;
+// ordinary play's `text` rather than being its own play type.
+//
+// Two of the patterns below are confirmed against real completed-game
+// play-by-play text, fetched and inspected directly before shipping this:
+// "MIA-M.Washington was injured during the play." and, later,
+// "** Injury Update: MIA-M.Washington has returned to the game." Those are
+// the two events that actually showed up, every time, across a full
+// Sunday's worth of games checked.
+//
+// The other three entries are real designations ESPN/broadcasts use
+// in-game ("questionable to return," "doubtful to return," "won't
+// return"/"out for the game") - added defensively in case ESPN's live
+// text uses this phrasing while a game is actually in progress, which
+// wasn't verifiable at the time this shipped (no NFL game was live to
+// check - only final, already-archived play-by-play was available, and a
+// day-to-day in-game designation like "questionable to return" plausibly
+// gets resolved into "returned" or dropped by the time a game goes
+// final). If a real one of these never actually appears, it's harmless -
+// this only ever posts something when a pattern actually matches live
+// text, never speculatively.
+//
+// Separate from the pre-game weekly injury report, which ESPN's summary
+// endpoint exposes as a different `injuries` field entirely and uses
+// Questionable/Doubtful/Out/IR as this-week roster designations, not
+// in-game events.
+const INJURY_PATTERNS = [
+  { status: "injured", re: /([A-Z]{2,3})-([A-Z]\.[A-Za-z'-]+) was injured during the play/g },
+  { status: "questionable", re: /([A-Z]{2,3})-([A-Z]\.[A-Za-z'-]+) is questionable to return/gi },
+  { status: "doubtful", re: /([A-Z]{2,3})-([A-Z]\.[A-Za-z'-]+) is doubtful to return/gi },
+  {
+    status: "out",
+    re: /([A-Z]{2,3})-([A-Z]\.[A-Za-z'-]+) (?:will not return|is out for the (?:game|remainder of the game))/gi,
+  },
+  { status: "returned", re: /\*\* Injury Update: ([A-Z]{2,3})-([A-Z]\.[A-Za-z'-]+) has returned to the game/g },
+];
+
+const INJURY_STATUS_TEXT = {
+  injured: { playType: "Injury", suffix: "was injured during the play." },
+  questionable: { playType: "Injury Questionable", suffix: "is questionable to return." },
+  doubtful: { playType: "Injury Doubtful", suffix: "is doubtful to return." },
+  out: { playType: "Injury Out", suffix: "is out for the game." },
+  returned: { playType: "Injury Return", suffix: "has returned to the game." },
+};
+
 import {
   computeRushPoints,
   computeReceptionPoints,
@@ -345,50 +379,31 @@ export default async function handler(req, res) {
         // just the scoring types handled above. A single play's text can
         // carry more than one of these (someone hurt earlier in the drive
         // returning on this play, plus someone new going down on it), so
-        // every match is walked, not just the first.
-        for (const m of play.text.matchAll(INJURED_RE)) {
-          const [, teamAbbr, name] = m;
-          const player = matchPlayerByTeamAndAbbreviatedName(teamAbbr, name, players);
-          if (!player) continue;
-          feed.push(
-            buildPlayEntry({
-              ...base,
-              id: `${base.id}_injured`,
-              text: `${player.team}-${player.fn[0]}.${player.ln} was injured during the play.`,
-              playType: "Injury",
-              player: {
-                sleeperId: player.sleeperId,
-                fn: player.fn,
-                ln: player.ln,
-                pos: player.pos,
-                team: player.team,
-                fantasyTeam: player.fantasyTeam,
-              },
-              pointsDelta: null,
-            })
-          );
-        }
-        for (const m of play.text.matchAll(RETURNED_RE)) {
-          const [, teamAbbr, name] = m;
-          const player = matchPlayerByTeamAndAbbreviatedName(teamAbbr, name, players);
-          if (!player) continue;
-          feed.push(
-            buildPlayEntry({
-              ...base,
-              id: `${base.id}_returned`,
-              text: `${player.team}-${player.fn[0]}.${player.ln} has returned to the game.`,
-              playType: "Injury Return",
-              player: {
-                sleeperId: player.sleeperId,
-                fn: player.fn,
-                ln: player.ln,
-                pos: player.pos,
-                team: player.team,
-                fantasyTeam: player.fantasyTeam,
-              },
-              pointsDelta: null,
-            })
-          );
+        // every match against every pattern is walked, not just the first.
+        for (const { status, re } of INJURY_PATTERNS) {
+          for (const m of play.text.matchAll(re)) {
+            const [, teamAbbr, name] = m;
+            const player = matchPlayerByTeamAndAbbreviatedName(teamAbbr, name, players);
+            if (!player) continue;
+            const meta = INJURY_STATUS_TEXT[status];
+            feed.push(
+              buildPlayEntry({
+                ...base,
+                id: `${base.id}_${status}`,
+                text: `${player.team}-${player.fn[0]}.${player.ln} ${meta.suffix}`,
+                playType: meta.playType,
+                player: {
+                  sleeperId: player.sleeperId,
+                  fn: player.fn,
+                  ln: player.ln,
+                  pos: player.pos,
+                  team: player.team,
+                  fantasyTeam: player.fantasyTeam,
+                },
+                pointsDelta: null,
+              })
+            );
+          }
         }
       }
     }

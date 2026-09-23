@@ -7,34 +7,64 @@ function pick<T>(options: T[]): T {
   return options[Math.floor(Math.random() * options.length)];
 }
 
-function injuredText(name: string, team: string, pos?: string): string {
-  const who = pos ? `${team}'s ${name} (${pos})` : `${team}'s ${name}`;
-  return pick([
-    `🚑 ${who} was banged up on that play - trainers are out to check on him.`,
-    `Uh oh - ${who} just went down. Not up yet.`,
-    `${who} took a hit on that one and needs a look before he's back out there.`,
-  ]);
-}
+const INJURY_PLAY_TYPES = new Set([
+  "Injury",
+  "Injury Questionable",
+  "Injury Doubtful",
+  "Injury Out",
+  "Injury Return",
+]);
 
-function returnedText(name: string, team: string): string {
-  return pick([
-    `✅ ${team}'s ${name} has returned to the game.`,
-    `Good news - ${name} is back on the field for ${team}.`,
-    `${name} shook it off - back in action for ${team}.`,
-  ]);
+// Boogie's voice per status. "Injury" and "Injury Return" are confirmed
+// against real completed-game play-by-play text (see the matching comment
+// in /api/fetchMatchupFeed.js); the Questionable/Doubtful/Out ones are
+// real in-game designations ESPN/broadcasts use, wired up defensively in
+// case they show up in ESPN's live text the same way - not verified live
+// (no game was in progress while this shipped), but harmless if they
+// never actually match anything.
+function textFor(playType: string, name: string, team: string, pos?: string): string {
+  const who = pos ? `${team}'s ${name} (${pos})` : `${team}'s ${name}`;
+  switch (playType) {
+    case "Injury":
+      return pick([
+        `🚑 ${who} was banged up on that play - trainers are out to check on him.`,
+        `Uh oh - ${who} just went down. Not up yet.`,
+        `${who} took a hit on that one and needs a look before he's back out there.`,
+      ]);
+    case "Injury Questionable":
+      return pick([
+        `⚠️ ${who} is questionable to return.`,
+        `Update: ${who} is being labeled questionable to return.`,
+      ]);
+    case "Injury Doubtful":
+      return pick([
+        `⚠️ ${who} is now doubtful to return.`,
+        `Not looking good - ${who} is doubtful to return.`,
+      ]);
+    case "Injury Out":
+      return pick([
+        `❌ ${who} is out for the rest of the game.`,
+        `${who} won't be returning - done for the day.`,
+      ]);
+    case "Injury Return":
+      return pick([
+        `✅ ${team}'s ${name} has returned to the game.`,
+        `Good news - ${name} is back on the field for ${team}.`,
+        `${name} shook it off - back in action for ${team}.`,
+      ]);
+    default:
+      return `${who} - injury update.`;
+  }
 }
 
 // Boogie's real-time injury wire, riding the same 15s live-scoring poll
-// Matchup and Schedule already run - not a separate crawl. ESPN's live
-// play-by-play carries exactly two structured injury events ("was injured
-// during the play" and "has returned to the game" - see
-// /api/fetchMatchupFeed.js), not the full vocabulary a broadcast uses
-// ("questionable to return" is an official in-game designation ESPN
-// doesn't expose here), so these two are what's actually reported rather
-// than invented. ensureSystemPost's own existence check (keyed off each
-// play's own id, which the server already makes unique per player+event)
-// means this is safe to call every poll tick without tracking "have I
-// already posted this" here.
+// Matchup and Schedule already run - not a separate crawl. Posts straight
+// to the league's own Feed (same leagueId-tagged ensureSystemPost every
+// other Boogie post uses - trades, final scores - so it shows up exactly
+// where those do, via getFeedPostsForLeague). ensureSystemPost's own
+// existence check (keyed off each play's own id, which the server already
+// makes unique per player+status) means this is safe to call every poll
+// tick without tracking "have I already posted this" here.
 export async function ensureInjuryPostsForMatchup(params: {
   leagueId: string;
   week: number;
@@ -58,18 +88,13 @@ export async function ensureInjuryPostsForMatchup(params: {
     return;
   }
 
-  const injuryPlays = (feedData.plays || []).filter(
-    (p: any) => p.playType === "Injury" || p.playType === "Injury Return"
-  );
+  const injuryPlays = (feedData.plays || []).filter((p: any) => INJURY_PLAY_TYPES.has(p.playType));
   if (injuryPlays.length === 0) return;
 
   await Promise.all(
     injuryPlays.map((play: any) => {
       const name = `${play.player.fn} ${play.player.ln}`;
-      const text =
-        play.playType === "Injury"
-          ? injuredText(name, play.player.team, play.player.pos)
-          : returnedText(name, play.player.team);
+      const text = textFor(play.playType, name, play.player.team, play.player.pos);
 
       return ensureSystemPost({
         id: `injury_${leagueId}_${week}_${play.id}`,
