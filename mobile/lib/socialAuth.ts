@@ -7,7 +7,7 @@ import {
   deleteUser,
   type User,
 } from "firebase/auth";
-import { doc, getDoc, setDoc } from "firebase/firestore/lite";
+import { doc, getDoc, setDoc, collection, query, where, limit as fsLimit, getDocs } from "firebase/firestore/lite";
 import { auth, db, authReady } from "./firebase";
 import { pickImage, uploadImageAsync } from "./mediaUpload";
 
@@ -249,6 +249,19 @@ export async function getUserProfileByUsername(username: string): Promise<UserPr
   if (!snap.exists()) return null;
   const { uid } = snap.data() as { uid: string };
   return getUserProfile(uid);
+}
+
+/**
+ * Resolves a Sleeper user id (what every league screen actually has -
+ * rosters, standings, a matchup) to this app's own profile, for "tap a
+ * team, go to that manager's Fantasy Pulse profile" - not every Sleeper
+ * manager in a league has necessarily signed up here, so this is null for
+ * plenty of real Sleeper users, not just a lookup-failed case.
+ */
+export async function getUserProfileBySleeperId(sleeperUserId: string): Promise<UserProfile | null> {
+  const q = query(collection(db, "profiles"), where("sleeperUserId", "==", sleeperUserId), fsLimit(1));
+  const snap = await getDocs(q);
+  return snap.empty ? null : (snap.docs[0].data() as UserProfile);
 }
 
 export async function updateProfile(

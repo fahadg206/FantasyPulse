@@ -9,6 +9,7 @@ import WhatIfModal from "../../../components/WhatIfModal";
 import { runMonteCarlo } from "../../../lib/whatIfSimulation";
 import { getZoneForRank, isZoneStart, StandingsZone } from "../../../lib/leagueZones";
 import { LOTTERY_LEAGUE_IDS } from "../../../lib/draftLottery";
+import { getUserProfileBySleeperId } from "../../../lib/socialAuth";
 
 const helmet = require("../../../assets/images/helmet2.png");
 
@@ -376,6 +377,7 @@ function TeamRow({
   /** true on the first row of `zone`, where its divider/label renders */
   zoneStarts?: boolean;
 }) {
+  const router = useRouter();
   const zoneColor = zone ? ZONE_COLOR[zone.color] : undefined;
 
   const pointsFor =
@@ -413,7 +415,15 @@ function TeamRow({
           <View style={{ backgroundColor: zoneColor }} className="flex-1 h-px opacity-40" />
         </View>
       )}
-      <View
+      <Pressable
+        onPress={async () => {
+          if (!user.user_id) return;
+          // Not every Sleeper manager in a league has actually signed up
+          // here - this just quietly does nothing for one who hasn't,
+          // rather than navigating to a dead-end "no profile" screen.
+          const profile = await getUserProfileBySleeperId(user.user_id).catch(() => null);
+          if (profile) router.push(`/profile/${profile.username}`);
+        }}
         style={zoneColor ? { borderLeftWidth: 3, borderLeftColor: zoneColor, backgroundColor: `${zoneColor}14` } : undefined}
         className="flex-row items-center px-4 py-3 border-b border-white/5"
       >
@@ -440,7 +450,7 @@ function TeamRow({
         <Text style={{ fontVariant: ["tabular-nums"], color: oddsColor }} className="w-[50px] text-right text-[12px] font-bold">
           {odds !== undefined ? `${odds.toFixed(0)}%` : "-"}
         </Text>
-      </View>
+      </Pressable>
     </>
   );
 }
