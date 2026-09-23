@@ -140,14 +140,14 @@ service cloud.firestore {
     // Pre-existing shared league content (lib/api.ts's firestoreCollections,
     // same collections the web app's client components read/write
     // directly): "Weekly Articles", "Home Poll", "Matchup Polls",
-    // "Weekly Headlines". Not owned by any one user - any signed-in
-    // client (incl. anonymous/read-only) can read, and can create/update
-    // them, matching how these features worked before this app had any
-    // custom rules at all. No deletes anywhere in the code.
+    // "Weekly Headlines", "Weekly Poll". Not owned by any one user - any
+    // signed-in client (incl. anonymous/read-only) can read, and can
+    // create/update them, matching how these features worked before this
+    // app had any custom rules at all. No deletes anywhere in the code.
     match /{sharedCollection}/{docId} {
       allow read, create, update: if request.auth != null
         && sharedCollection in [
-             'Weekly Articles', 'Home Poll', 'Matchup Polls', 'Weekly Headlines'
+             'Weekly Articles', 'Home Poll', 'Matchup Polls', 'Weekly Headlines', 'Weekly Poll'
            ];
       allow delete: if false;
     }

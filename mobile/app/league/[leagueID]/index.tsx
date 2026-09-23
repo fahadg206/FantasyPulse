@@ -269,11 +269,8 @@ export default function Dashboard() {
         <ArticleCarousel leagueID={leagueID} />
       </View>
 
-      <View className="mt-7 mb-8 px-4">
-        <Text className="text-[13px] font-bold tracking-wider text-gray-500 mb-3">LEAGUE POLL</Text>
-        <View className="bg-white/5 border border-white/10 rounded-2xl py-4">
-          <HomePoll />
-        </View>
+      <View className="mt-7 mb-8">
+        <HomePoll leagueID={leagueID} />
       </View>
     </ScrollView>
   );

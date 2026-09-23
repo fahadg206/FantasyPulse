@@ -148,4 +148,6 @@ export const firestoreCollections = {
   homePoll: "Home Poll", // single doc with id === "homepoll", votes: PlayerVoteInfo[]
   matchupPolls: "Matchup Polls", // { league_id, matchups: [{ matchup_id, votes: VoteInfo[] }] }
   weeklyHeadlines: "Weekly Headlines", // { league_id, headlines: HeadlineItem[] }
+  // lib/weeklyPoll.ts - one doc per league per week, id `${leagueId}_${week}`, real "who was the real MVP" poll built off that week's actual results.
+  weeklyPoll: "Weekly Poll",
 };

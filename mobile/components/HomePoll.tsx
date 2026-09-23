@@ -1,126 +1,141 @@
 import { useEffect, useState } from "react";
-import { View, Text, Image, Pressable } from "react-native";
+import { View, Text, Image, Pressable, ActivityIndicator } from "react-native";
 import { MotiView } from "moti";
-import { collection, query, where, getDocs, addDoc, updateDoc, limit } from "firebase/firestore/lite";
-import { db } from "../lib/firebase";
-import { firestoreCollections } from "../lib/api";
+import { Feather } from "@expo/vector-icons";
+import { getLastCompletedWeek, getOrCreateWeeklyPoll, voteOnWeeklyPoll, WeeklyPollOption } from "../lib/weeklyPoll";
+import { storage, StorageKeys } from "../lib/storage";
 
-interface PlayerVoteInfo {
-  playerName: string;
-  avatar: string;
-  matchup: string;
-  votes: number;
-  color: string;
-}
+const helmet = require("../assets/images/helmet2.png");
 
-const DEFAULT_VOTES: PlayerVoteInfo[] = [
-  {
-    playerName: "Jared Goff",
-    avatar: "https://sleepercdn.com/content/nfl/players/thumb/3163.jpg",
-    matchup: "@ LAR",
-    votes: 0,
-    color: "#af1222",
-  },
-  {
-    playerName: "Jayden Daniels",
-    avatar: "https://sleepercdn.com/content/nfl/players/thumb/11566.jpg",
-    matchup: "@ TB",
-    votes: 0,
-    color: "#1a1a1a",
-  },
-  {
-    playerName: "Tua Tagovailoa",
-    avatar: "https://sleepercdn.com/content/nfl/players/thumb/6768.jpg",
-    matchup: "vs. JAC",
-    votes: 0,
-    color: "#e45263",
-  },
-];
-
-export default function HomePoll() {
-  const [votes, setVotes] = useState<PlayerVoteInfo[]>(DEFAULT_VOTES);
+export default function HomePoll({ leagueID }: { leagueID: string }) {
+  const [loading, setLoading] = useState(true);
+  const [week, setWeek] = useState<number | null>(null);
+  const [question, setQuestion] = useState("");
+  const [options, setOptions] = useState<WeeklyPollOption[]>([]);
   const [voted, setVoted] = useState(false);
 
-  const getVotes = async () => {
-    try {
-      const voteInfo = collection(db, firestoreCollections.homePoll);
-      const snap = await getDocs(query(voteInfo, where("id", "==", "homepoll"), limit(1)));
-      if (!snap.empty) setVotes(snap.docs[0].data().votes);
-    } catch (error) {
-      console.error("Error getting votes from the database:", error);
-    }
-  };
-
   useEffect(() => {
-    getVotes();
-  }, []);
+    if (!leagueID) return;
+    let cancelled = false;
 
-  const totalVotes = votes.reduce((acc, v) => acc + v.votes, 0);
-
-  const handleVote = async (vote: PlayerVoteInfo) => {
-    const newVotes = votes.map((v) =>
-      v.playerName === vote.playerName ? { ...v, votes: v.votes + 1 } : v
-    );
-    setVotes(newVotes);
-    setVoted(true);
-    try {
-      const voteInfo = collection(db, firestoreCollections.homePoll);
-      const snap = await getDocs(query(voteInfo, where("id", "==", "homepoll")));
-      if (!snap.empty) {
-        await updateDoc(snap.docs[0].ref, { votes: newVotes });
-      } else {
-        await addDoc(voteInfo, { votes: newVotes, id: "homepoll" });
+    (async () => {
+      try {
+        const { week: lastWeek } = await getLastCompletedWeek();
+        const poll = await getOrCreateWeeklyPoll(leagueID, lastWeek);
+        if (cancelled) return;
+        if (!poll) {
+          setWeek(null);
+          return;
+        }
+        setWeek(poll.week);
+        setQuestion(poll.question);
+        setOptions(poll.options);
+        const locked = await storage.getItem(StorageKeys.voteLock(leagueID, `weeklypoll_${poll.week}`));
+        if (!cancelled && locked) setVoted(true);
+      } catch (error) {
+        console.error("Error loading weekly poll:", error);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [leagueID]);
+
+  const handleVote = async (picked: WeeklyPollOption) => {
+    if (week === null || voted) return;
+    const updated = options.map((o) => (o.label === picked.label ? { ...o, votes: o.votes + 1 } : o));
+    setOptions(updated);
+    setVoted(true);
+    await storage.setItem(StorageKeys.voteLock(leagueID, `weeklypoll_${week}`), "true");
+    try {
+      await voteOnWeeklyPoll(leagueID, week, updated);
     } catch (error) {
-      console.error("Error adding votes to the database:", error);
+      console.error("Error voting on weekly poll:", error);
     }
   };
+
+  // No real results yet to build a question off of (week 1 before anyone's
+  // played, most likely) - nothing worth asking, so the whole section
+  // quietly renders nothing rather than an empty/broken-looking card.
+  if (!loading && (week === null || options.length === 0)) return null;
+
+  const totalVotes = options.reduce((sum, o) => sum + o.votes, 0);
 
   return (
-    <View className="w-full px-4 mb-6">
-      <Text className="mb-2 text-lg font-semibold text-center text-white">
-        Vote for who you&apos;d rather start!
-      </Text>
-
-      {!voted && (
-        <View className="items-center gap-2">
-          {votes.map((vote) => (
-            <Pressable
-              key={vote.playerName}
-              onPress={() => handleVote(vote)}
-              style={{ backgroundColor: vote.color }}
-              className="w-[80%] max-w-xs rounded-xl py-2 px-3 flex-row justify-between items-center"
-            >
-              <Image source={{ uri: vote.avatar }} className="w-[36px] h-[36px] rounded-full" />
-              <Text className="ml-2 flex-1 text-left text-sm text-white">{vote.playerName}</Text>
-              <Text className="text-xs italic text-[#e8dede]">{vote.matchup}</Text>
-            </Pressable>
-          ))}
-        </View>
-      )}
-
-      <View className="flex-row justify-center gap-2 mt-4 h-[120px]">
-        {votes.map((vote) => {
-          const height = totalVotes ? (vote.votes / totalVotes) * 100 : 0;
-          return (
-            <View
-              key={vote.playerName}
-              className="w-[70px] rounded-2xl bg-slate-800 overflow-hidden justify-end"
-            >
-              <MotiView
-                animate={{ height: `${height}%` }}
-                transition={{ type: "spring" }}
-                style={{ backgroundColor: vote.color, width: "100%" }}
-              />
-              <Text className="absolute bottom-1 self-center text-[10px] text-white text-center px-1">
-                {vote.votes} votes
-              </Text>
+    <View className="px-4">
+      <Text className="text-[13px] font-bold tracking-wider text-gray-500 mb-3">LEAGUE POLL</Text>
+      <View className="bg-white/5 border border-white/10 rounded-2xl p-4">
+        {loading ? (
+          <View className="items-center py-2">
+            <ActivityIndicator color="#af1222" size="small" />
+          </View>
+        ) : (
+          <>
+            <View className="flex-row items-center gap-1.5 mb-3">
+              <Feather name="bar-chart-2" size={13} color="#af1222" />
+              <Text className="text-white text-[14px] font-bold flex-1">{question}</Text>
             </View>
-          );
-        })}
-      </View>
 
-      <Text className="italic text-gray-400 text-sm text-center mt-2">{totalVotes} votes</Text>
+            <View className="gap-2">
+              {options.map((option) => {
+                const pct = totalVotes > 0 ? Math.round((option.votes / totalVotes) * 100) : 0;
+                return (
+                  <Pressable
+                    key={option.label}
+                    onPress={() => handleVote(option)}
+                    disabled={voted}
+                    className="flex-row items-center gap-3 bg-white/5 border border-white/10 rounded-2xl px-3 py-2.5"
+                  >
+                    <Image
+                      source={option.avatar ? { uri: option.avatar } : helmet}
+                      resizeMode={option.isTeamLogo ? "contain" : "cover"}
+                      className={option.isTeamLogo ? "w-[38px] h-[38px]" : "w-[38px] h-[38px] rounded-full bg-white/10"}
+                    />
+                    <View className="flex-1">
+                      <View className="flex-row items-center justify-between">
+                        <Text numberOfLines={1} className="text-white text-[13px] font-bold flex-1 mr-2">
+                          {option.label}
+                        </Text>
+                        {voted && (
+                          <Text style={{ color: option.color }} className="text-[13px] font-bold">
+                            {pct}%
+                          </Text>
+                        )}
+                      </View>
+                      <Text numberOfLines={1} className="text-gray-500 text-[11px] mt-0.5">
+                        {option.sublabel}
+                      </Text>
+                      {voted && (
+                        <View className="h-1.5 rounded-full bg-white/10 overflow-hidden mt-2">
+                          <MotiView
+                            from={{ width: "0%" }}
+                            animate={{ width: `${pct}%` }}
+                            transition={{ type: "timing", duration: 450 }}
+                            style={{ backgroundColor: option.color }}
+                            className="h-full rounded-full"
+                          />
+                        </View>
+                      )}
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {voted && (
+              <View className="flex-row items-center justify-center gap-1 mt-3">
+                <Feather name="check-circle" size={11} color="#22c55e" />
+                <Text className="text-[10px] text-gray-500">
+                  Thanks for voting · {totalVotes} {totalVotes === 1 ? "vote" : "votes"}
+                </Text>
+              </View>
+            )}
+          </>
+        )}
+      </View>
     </View>
   );
 }
