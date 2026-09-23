@@ -395,6 +395,7 @@ function SignInUpScreen() {
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -470,14 +471,25 @@ function SignInUpScreen() {
               className="bg-white/5 border border-white/10 rounded-xl px-3.5 py-3 text-white mb-2.5"
             />
           )}
-          <TextInput
-            value={password}
-            onChangeText={setPassword}
-            placeholder="Password"
-            placeholderTextColor="#6b7280"
-            secureTextEntry
-            className="bg-white/5 border border-white/10 rounded-xl px-3.5 py-3 text-white mb-2.5"
-          />
+          <View className="relative mb-2.5">
+            <TextInput
+              value={password}
+              onChangeText={setPassword}
+              placeholder="Password"
+              placeholderTextColor="#6b7280"
+              secureTextEntry={!showPassword}
+              autoCapitalize="none"
+              autoCorrect={false}
+              className="bg-white/5 border border-white/10 rounded-xl px-3.5 py-3 pr-11 text-white"
+            />
+            <Pressable
+              onPress={() => setShowPassword((v) => !v)}
+              hitSlop={8}
+              className="absolute right-0 top-0 bottom-0 w-11 items-center justify-center"
+            >
+              <Feather name={showPassword ? "eye-off" : "eye"} size={18} color="#6b7280" />
+            </Pressable>
+          </View>
           {mode === "signup" && (
             <Text className="text-gray-600 text-[11px] mb-2.5 px-1">
               Use the email on your Sleeper account - you'll be able to sign back in with either
