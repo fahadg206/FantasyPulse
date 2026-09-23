@@ -3,6 +3,15 @@ import { View, Text, Image, ScrollView } from "react-native";
 import { backend } from "../lib/api";
 import { getTeamLogo } from "../lib/nflTeams";
 
+// Only ever stepped a count down to "K" - a genuinely large count (into
+// the millions) just kept dividing by 1,000 with no further tier, so
+// 7,560,000 rendered as "7560K" instead of "7.6M".
+function formatAddCount(count: number): string {
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
+  if (count >= 1000) return `${(count / 1000).toFixed(0)}K`;
+  return String(count);
+}
+
 interface TrendingItem {
   playerId: string;
   name: string;
@@ -75,7 +84,7 @@ export default function TrendingPlayers({ leagueID }: { leagueID: string }) {
                 {item.name}
               </Text>
               <Text className="text-gray-500 text-[9px] mt-0.5">
-                {item.count >= 1000 ? `${(item.count / 1000).toFixed(0)}K` : item.count} adds
+                {formatAddCount(item.count)} adds
               </Text>
             </View>
           );
