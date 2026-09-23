@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { View, Text, Image, Pressable, ScrollView, Modal, FlatList } from "react-native";
+import { View, Text, Image, Pressable, ScrollView, Modal, FlatList, ActivityIndicator } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { Feather, FontAwesome } from "@expo/vector-icons";
 import { sleeper, backend } from "../../../lib/api";
@@ -7,6 +7,17 @@ import ManagerPicker, { PickableManager } from "../../../components/ManagerPicke
 import PlayerCard from "../../../components/PlayerCard";
 import TradeHistory from "../../../components/TradeHistory";
 import { displayName } from "../../../lib/getTopPerformers";
+import { getLeagueValueSettings, LeagueValueSettings, RawPlayerValue, computeAdjustedValue } from "../../../lib/playerValue";
+import { NON_STARTER_SLOTS } from "../../../lib/startSitAccuracy";
+import {
+  computeOptimalLineupAssignment,
+  computeTeamNeeds,
+  computeLeagueNeedBaseline,
+  computeWinImpact,
+  TeamNeedsResult,
+} from "../../../lib/tradeAnalysis";
+import { buildLeagueSimData, projectedLineupPoints, LeagueSimData, SimTeamInfo } from "../../../lib/leagueSimData";
+import type { PlayerPos } from "../../../lib/draftProspects";
 
 const helmet = require("../../../assets/images/helmet2.png");
 
@@ -19,7 +30,19 @@ interface Player {
   value: number;
 }
 
-const ACCEPTANCE_BUFFER = 1000;
+interface TradeItem {
+  playerId: string;
+  player: Player;
+  fromUserId: string;
+  toUserId: string;
+}
+
+const TEAM_ACCENTS = ["#af1222", "#3b82f6", "#eab308"];
+
+function formatValue(v: number): string {
+  if (Math.abs(v) >= 1000) return `${(v / 1000).toFixed(1)}k`;
+  return String(Math.round(v));
+}
 
 function Stars({ value }: { value: number }) {
   const full = Math.floor(value / 2000);
@@ -35,241 +58,514 @@ function Stars({ value }: { value: number }) {
   );
 }
 
-function tradeStatus(diffToEven: number, rawDiff: number) {
-  if (diffToEven <= ACCEPTANCE_BUFFER) return { text: "Fair trade", color: "#22c55e" };
-  if (rawDiff <= ACCEPTANCE_BUFFER) return { text: "Almost fair", color: "#eab308" };
-  if (rawDiff <= ACCEPTANCE_BUFFER * 2) return { text: "Unfair", color: "#f97316" };
-  return { text: "Highway Robbery", color: "#ef4444" };
+function fairnessVerdict(maxAbsNet: number) {
+  if (maxAbsNet <= 1000) return { text: "Fair trade", color: "#22c55e" };
+  if (maxAbsNet <= 2500) return { text: "Slightly lopsided", color: "#eab308" };
+  if (maxAbsNet <= 5000) return { text: "Unfair", color: "#f97316" };
+  return { text: "Highway robbery", color: "#ef4444" };
 }
 
 export default function TradeCalculator() {
   const { leagueID } = useLocalSearchParams<{ leagueID: string }>();
+
+  // --- league-wide, loaded once ---
   const [users, setUsers] = useState<PickableManager[]>([]);
-  const [playersData, setPlayersData] = useState<Record<string, Player>>({});
-  const [scoringType, setScoringType] = useState("");
-  const [selectedOne, setSelectedOne] = useState<string | null>(null);
-  const [selectedTwo, setSelectedTwo] = useState<string | null>(null);
-  const [team1Roster, setTeam1Roster] = useState<string[]>([]);
-  const [team2Roster, setTeam2Roster] = useState<string[]>([]);
-  const [team1Trade, setTeam1Trade] = useState<Player[]>([]);
-  const [team2Trade, setTeam2Trade] = useState<Player[]>([]);
-  const [pickerFor, setPickerFor] = useState<1 | 2 | null>(null);
+  const [playersData, setPlayersData] = useState<Record<string, any>>({});
+  const [valueSettings, setValueSettings] = useState<LeagueValueSettings | null>(null);
+  const [valuesBySleeperId, setValuesBySleeperId] = useState<Record<string, RawPlayerValue>>({});
+  const [allRosters, setAllRosters] = useState<Record<string, { rosterPlayerIds: string[] }>>({});
+  const [leagueAvgNeed, setLeagueAvgNeed] = useState<Record<PlayerPos, number> | null>(null);
+  const [startingSlots, setStartingSlots] = useState<string[]>([]);
+  const [projWeek, setProjWeek] = useState<number>(1);
+  const [loadingLeague, setLoadingLeague] = useState(true);
+
+  // --- the trade itself ---
+  const [teamIds, setTeamIds] = useState<(string | null)[]>([null, null]);
+  const [items, setItems] = useState<TradeItem[]>([]);
+  const [picker, setPicker] = useState<{ forTeam: string; chosenPlayerId?: string } | null>(null);
+  const [expandedLineup, setExpandedLineup] = useState<Record<string, boolean>>({});
+
+  // --- win-impact, fetched lazily + recomputed on trade edits ---
+  const [simData, setSimData] = useState<LeagueSimData | null>(null);
+  const [loadingSim, setLoadingSim] = useState(false);
+  const [winImpactByTeam, setWinImpactByTeam] = useState<Record<string, number | null>>({});
 
   useEffect(() => {
     if (!leagueID) return;
-    sleeper.getLeagueUsers(leagueID).then((res) => {
-      setUsers(
-        res.data.map((u: any) => ({
-          id: u.user_id,
-          name: u.display_name,
-          avatar: u.avatar ? `https://sleepercdn.com/avatars/${u.avatar}` : undefined,
-        }))
-      );
-    });
-    backend.fetchPlayers(leagueID).then(setPlayersData).catch(console.error);
-    sleeper.getLeague(leagueID).then(async (leagueRes) => {
+    let cancelled = false;
+    (async () => {
       try {
-        const draftsRes = await fetch(`https://api.sleeper.app/v1/league/${leagueID}/drafts`);
-        const drafts = await draftsRes.json();
-        setScoringType(drafts[0]?.metadata?.scoring_type || "");
-      } catch (e) {
-        console.error(e);
+        const [usersRes, rostersRes, settings, values, playersDataRes, leagueRes, nflStateRes] = await Promise.all([
+          sleeper.getLeagueUsers(leagueID),
+          sleeper.getLeagueRosters(leagueID),
+          getLeagueValueSettings(leagueID),
+          backend.fetchAllPlayerValues(),
+          backend.fetchPlayers(leagueID),
+          sleeper.getLeague(leagueID),
+          sleeper.getNflState(),
+        ]);
+        if (cancelled) return;
+
+        setUsers(
+          usersRes.data.map((u: any) => ({
+            id: u.user_id,
+            name: u.display_name,
+            avatar: u.avatar ? `https://sleepercdn.com/avatars/thumbs/${u.avatar}` : undefined,
+          }))
+        );
+        setPlayersData(playersDataRes);
+        setValueSettings(settings);
+        setValuesBySleeperId(values);
+
+        const rosterMap: Record<string, { rosterPlayerIds: string[] }> = {};
+        rostersRes.data.forEach((r: any) => {
+          rosterMap[r.owner_id] = { rosterPlayerIds: r.players ?? [] };
+        });
+        setAllRosters(rosterMap);
+
+        const managerInfoForNeeds: Record<string, SimTeamInfo> = {};
+        rostersRes.data.forEach((r: any) => {
+          managerInfoForNeeds[r.owner_id] = {
+            name: "",
+            rosterId: r.roster_id,
+            rosterPlayerIds: r.players ?? [],
+          };
+        });
+        setLeagueAvgNeed(computeLeagueNeedBaseline(managerInfoForNeeds, playersDataRes, values, settings));
+
+        setStartingSlots((leagueRes.data.roster_positions || []).filter((p: string) => !NON_STARTER_SLOTS.has(p)));
+        setProjWeek(nflStateRes.data.display_week || 1);
+      } catch (error) {
+        console.error("Error loading trade calculator data:", error);
+      } finally {
+        if (!cancelled) setLoadingLeague(false);
       }
-    });
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [leagueID]);
 
+  const activeTeamIds = teamIds.filter((id): id is string => !!id);
+
+  // Fetch the heavier season-schedule/projection data (needed for real
+  // win-impact) only once at least 2 teams are picked, and only once -
+  // recomputing win impact on every trade edit after that reuses this,
+  // it doesn't refetch it.
   useEffect(() => {
-    if (!leagueID || !selectedOne || !selectedTwo) return;
-    sleeper.getLeagueRosters(leagueID).then((res) => {
-      const rosters = res.data;
-      const t1 = rosters.find((r: any) => r.owner_id === selectedOne);
-      const t2 = rosters.find((r: any) => r.owner_id === selectedTwo);
-      setTeam1Roster(t1?.players ?? []);
-      setTeam2Roster(t2?.players ?? []);
-      setTeam1Trade([]);
-      setTeam2Trade([]);
-    });
-  }, [leagueID, selectedOne, selectedTwo]);
+    if (!leagueID || activeTeamIds.length < 2 || simData) return;
+    let cancelled = false;
+    setLoadingSim(true);
+    buildLeagueSimData(leagueID)
+      .then((data) => {
+        if (!cancelled) setSimData(data);
+      })
+      .catch((error) => console.error("Error building league sim data:", error))
+      .finally(() => !cancelled && setLoadingSim(false));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leagueID, activeTeamIds.length]);
 
-  const addPlayer = async (team: 1 | 2, playerId: string) => {
-    const player = playersData[playerId];
-    if (!player) return;
-    const { value } = await backend.fetchPlayerValue(playerId, scoringType).catch(() => ({ value: 500 }));
-    const withId: Player = { ...player, id: playerId, value: value ?? 500 };
-    if (team === 1) {
-      setTeam1Trade((t) => [...t, withId]);
-      setTeam1Roster((r) => r.filter((id) => id !== playerId));
-    } else {
-      setTeam2Trade((t) => [...t, withId]);
-      setTeam2Roster((r) => r.filter((id) => id !== playerId));
-    }
-    setPickerFor(null);
+  // Reset the trade whenever the team lineup changes (swapping a team out
+  // mid-build would otherwise leave stale items pointing at a team no
+  // longer in the trade).
+  useEffect(() => {
+    setItems([]);
+    setWinImpactByTeam({});
+  }, [teamIds.join(",")]);
+
+  function postTradeRoster(userId: string): string[] {
+    const base = allRosters[userId]?.rosterPlayerIds ?? [];
+    const leaving = new Set(items.filter((it) => it.fromUserId === userId).map((it) => it.playerId));
+    const arriving = items.filter((it) => it.toUserId === userId).map((it) => it.playerId);
+    return base.filter((id) => !leaving.has(id)).concat(arriving);
+  }
+
+  // Real projected-wins impact via the same deterministic engine Standings'
+  // What-If uses - debounced off simData + the current trade so it doesn't
+  // recompute on every single render, only once the trade settles for a
+  // moment.
+  useEffect(() => {
+    if (!simData || activeTeamIds.length < 2) return;
+    const handle = setTimeout(() => {
+      const adjusted: Record<number, Record<string, number>> = {};
+      for (const week of simData.weekNumbers) {
+        adjusted[week] = { ...simData.projectionCache[week] };
+      }
+      for (const userId of activeTeamIds) {
+        const roster = postTradeRoster(userId);
+        for (const week of simData.weekNumbers) {
+          adjusted[week][userId] = projectedLineupPoints(roster, week, playersData, simData.startingSlots);
+        }
+      }
+      const next: Record<string, number | null> = {};
+      for (const userId of activeTeamIds) {
+        const impact = computeWinImpact(
+          simData.teamIds,
+          simData.managerInfo,
+          simData.matchupData,
+          simData.projectionCache,
+          adjusted,
+          simData.playoffStartWeek,
+          userId
+        );
+        next[userId] = impact.winsDelta;
+      }
+      setWinImpactByTeam(next);
+    }, 400);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [simData, items, activeTeamIds.join(",")]);
+
+  const destinationsFor = (fromUserId: string) => activeTeamIds.filter((id) => id !== fromUserId);
+
+  const addPlayer = (fromUserId: string, playerId: string, toUserId: string) => {
+    const meta = playersData[playerId];
+    if (!meta) return;
+    const raw = valuesBySleeperId[playerId] ?? {};
+    const value = valueSettings ? computeAdjustedValue(raw, valueSettings) : 0;
+    const player: Player = { id: playerId, fn: meta.fn, ln: meta.ln, pos: meta.pos, t: meta.t, value };
+    setItems((prev) => [...prev, { playerId, player, fromUserId, toUserId }]);
+    setPicker(null);
   };
 
-  const removePlayer = (team: 1 | 2, playerId: string) => {
-    if (team === 1) {
-      setTeam1Trade((t) => t.filter((p) => p.id !== playerId));
-      setTeam1Roster((r) => [...r, playerId]);
-    } else {
-      setTeam2Trade((t) => t.filter((p) => p.id !== playerId));
-      setTeam2Roster((r) => [...r, playerId]);
-    }
+  const removeItem = (playerId: string, fromUserId: string) => {
+    setItems((prev) => prev.filter((it) => !(it.playerId === playerId && it.fromUserId === fromUserId)));
   };
-
-  const team1Total = team1Trade.reduce((s, p) => s + (p.value || 0), 0);
-  const team2Total = team2Trade.reduce((s, p) => s + (p.value || 0), 0);
-  const rawDiff = Math.abs(team1Total - team2Total);
-  const status = useMemo(() => tradeStatus(rawDiff, rawDiff), [rawDiff]);
-  const total = team1Total + team2Total || 1;
-  const pct1 = (team1Total / total) * 100;
-
-  const userOne = users.find((u) => u.id === selectedOne);
-  const userTwo = users.find((u) => u.id === selectedTwo);
-  const pickerRoster = pickerFor === 1 ? team1Roster : team2Roster;
 
   if (!leagueID) return null;
 
-  return (
-    <ScrollView className="flex-1" contentContainerClassName="p-4">
-      <Text className="text-xl font-bold text-center mb-4 text-black dark:text-white">
-        Trade Calculator
-      </Text>
+  if (loadingLeague) {
+    return (
+      <View className="flex-1 items-center justify-center bg-[#0c0c0e]">
+        <ActivityIndicator color="#af1222" />
+      </View>
+    );
+  }
 
-      <View className="flex-row justify-center items-center gap-3 mb-5">
-        <ManagerPicker label="Select Team" options={users} selectedId={selectedOne} onSelect={setSelectedOne} excludeId={selectedTwo} />
-        <Text className="font-bold text-black dark:text-white">vs.</Text>
-        <ManagerPicker label="Select Team" options={users} selectedId={selectedTwo} onSelect={setSelectedTwo} excludeId={selectedOne} />
+  const pickerRoster = picker
+    ? (allRosters[picker.forTeam]?.rosterPlayerIds ?? []).filter(
+        (id) => !items.some((it) => it.fromUserId === picker.forTeam && it.playerId === id)
+      )
+    : [];
+  const pickerDestinations = picker ? destinationsFor(picker.forTeam) : [];
+
+  const netValueByTeam: Record<string, number> = {};
+  activeTeamIds.forEach((id) => {
+    const out = items.filter((it) => it.fromUserId === id).reduce((s, it) => s + it.player.value, 0);
+    const inn = items.filter((it) => it.toUserId === id).reduce((s, it) => s + it.player.value, 0);
+    netValueByTeam[id] = inn - out;
+  });
+  const maxAbsNet = Math.max(0, ...activeTeamIds.map((id) => Math.abs(netValueByTeam[id] ?? 0)));
+  const verdict = fairnessVerdict(maxAbsNet);
+  const hasAnyItems = items.length > 0;
+
+  return (
+    <ScrollView className="flex-1 bg-[#0c0c0e]" contentContainerClassName="p-4 pb-10">
+      <View className="mb-1">
+        <Text className="text-[11px] font-bold tracking-widest text-brand">TRADE CALCULATOR</Text>
+        <Text className="text-white text-[21px] font-bold mt-0.5">Build a Trade</Text>
+        <Text className="text-gray-500 text-[12px] mt-1">
+          Real dynasty values, real projected lineup + win impact, and each team&apos;s real needs - up to 3 teams.
+        </Text>
       </View>
 
-      {selectedOne && selectedTwo && (
-        <>
-          <View className="flex-row gap-3 mb-4">
-            <Pressable
-              onPress={() => setPickerFor(1)}
-              className="flex-1 flex-row items-center justify-center gap-2 border-2 border-brand rounded-xl py-2.5"
-            >
-              <Feather name="plus" size={14} color="#af1222" />
-              <Text className="text-brand text-[12px] font-semibold">Add from {userOne?.name}</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setPickerFor(2)}
-              className="flex-1 flex-row items-center justify-center gap-2 border-2 border-brand rounded-xl py-2.5"
-            >
-              <Feather name="plus" size={14} color="#af1222" />
-              <Text className="text-brand text-[12px] font-semibold">Add from {userTwo?.name}</Text>
-            </Pressable>
-          </View>
+      <View className="flex-row flex-wrap gap-2.5 mt-4 mb-2">
+        {teamIds.map((id, slot) => (
+          <ManagerPicker
+            key={slot}
+            label={`Team ${slot + 1}`}
+            options={users.filter((u) => !teamIds.some((t, i) => t === u.id && i !== slot))}
+            selectedId={id}
+            onSelect={(newId) =>
+              setTeamIds((prev) => prev.map((t, i) => (i === slot ? newId : t)))
+            }
+          />
+        ))}
+        {teamIds.length === 2 ? (
+          <Pressable
+            onPress={() => setTeamIds((prev) => [...prev, null])}
+            className="flex-row items-center gap-1.5 border-2 border-dashed border-white/15 rounded-xl px-3 py-2.5"
+          >
+            <Feather name="plus" size={14} color="#9ca3af" />
+            <Text className="text-gray-400 text-[12px] font-semibold">3rd team</Text>
+          </Pressable>
+        ) : (
+          <Pressable
+            onPress={() => setTeamIds((prev) => prev.slice(0, 2))}
+            className="flex-row items-center gap-1.5 border-2 border-dashed border-white/15 rounded-xl px-3 py-2.5"
+          >
+            <Feather name="minus" size={14} color="#9ca3af" />
+            <Text className="text-gray-400 text-[12px] font-semibold">Remove</Text>
+          </Pressable>
+        )}
+      </View>
 
-          <View className="flex-row gap-3">
-            <TradeBasket
-              title={userOne?.name ?? ""}
-              avatar={userOne?.avatar}
-              players={team1Trade}
-              onRemove={(id) => removePlayer(1, id)}
-              onClear={() => {
-                setTeam1Roster((r) => [...r, ...team1Trade.map((p) => p.id)]);
-                setTeam1Trade([]);
-              }}
-            />
-            <TradeBasket
-              title={userTwo?.name ?? ""}
-              avatar={userTwo?.avatar}
-              players={team2Trade}
-              onRemove={(id) => removePlayer(2, id)}
-              onClear={() => {
-                setTeam2Roster((r) => [...r, ...team2Trade.map((p) => p.id)]);
-                setTeam2Trade([]);
-              }}
-            />
-          </View>
+      {activeTeamIds.length >= 2 && leagueAvgNeed && valueSettings && (
+        <View className="gap-3 mt-3">
+          {activeTeamIds.map((userId, i) => {
+            const user = users.find((u) => u.id === userId);
+            const accent = TEAM_ACCENTS[i % TEAM_ACCENTS.length];
+            const outgoing = items.filter((it) => it.fromUserId === userId);
+            const incoming = items.filter((it) => it.toUserId === userId);
+            const roster = allRosters[userId]?.rosterPlayerIds ?? [];
+            const needs: TeamNeedsResult = computeTeamNeeds(roster, playersData, valuesBySleeperId, valueSettings!, leagueAvgNeed);
+            const notableNeeds = needs.ranked.filter((n) => n.score > 0.15).slice(0, 2);
 
-          {(team1Trade.length > 0 || team2Trade.length > 0) && (
-            <View className="mt-5 bg-[#f0eeee] dark:bg-[#1a1414] rounded-2xl p-4">
-              <Text className="text-center text-[10px] font-bold tracking-widest text-gray-400 mb-3">
-                TRADE VALUE
+            const afterRoster = postTradeRoster(userId);
+            const beforePts = projectedLineupPoints(roster, projWeek, playersData, startingSlots);
+            const afterPts = projectedLineupPoints(afterRoster, projWeek, playersData, startingSlots);
+            const ptsDelta = afterPts - beforePts;
+            const winsDelta = winImpactByTeam[userId];
+            const netValue = netValueByTeam[userId] ?? 0;
+            const lineup = computeOptimalLineupAssignment(
+              afterRoster,
+              Object.fromEntries(
+                afterRoster.map((id) => [id, parseFloat(playersData[id]?.wi?.[projWeek.toString()]?.p ?? "0")])
+              ),
+              Object.fromEntries(afterRoster.map((id) => [id, playersData[id]?.pos])),
+              startingSlots
+            );
+
+            return (
+              <View key={userId} style={{ borderColor: `${accent}33` }} className="bg-[#141416] border rounded-2xl overflow-hidden">
+                <View className="flex-row items-center gap-3 px-4 pt-4 pb-3">
+                  <Image source={user?.avatar ? { uri: user.avatar } : helmet} className="w-[40px] h-[40px] rounded-full" />
+                  <View className="flex-1">
+                    <Text numberOfLines={1} className="text-white text-[15px] font-bold">
+                      {user?.name}
+                    </Text>
+                    <Text className="text-[11px] mt-0.5" style={{ color: netValue >= 0 ? "#22c55e" : "#ef4444" }}>
+                      {incoming.length > 0 || outgoing.length > 0
+                        ? `${incoming.length > 0 ? `+${incoming.length}` : "0"} players · Value ${netValue >= 0 ? "+" : ""}${formatValue(netValue)}`
+                        : "No changes yet"}
+                    </Text>
+                  </View>
+                </View>
+
+                {notableNeeds.length > 0 && (
+                  <View className="flex-row items-center gap-1.5 px-4 pb-3">
+                    <Feather name="alert-circle" size={11} color="#eab308" />
+                    <Text className="text-[10px] text-gray-500">
+                      Needs: <Text className="text-yellow-500 font-bold">{notableNeeds.map((n) => n.pos).join(", ")}</Text>
+                    </Text>
+                  </View>
+                )}
+
+                <View className="px-4 pb-3">
+                  <Pressable
+                    onPress={() => setPicker({ forTeam: userId })}
+                    className="flex-row items-center justify-center gap-1.5 border-2 border-brand rounded-xl py-2 mb-2.5"
+                  >
+                    <Feather name="plus" size={13} color="#af1222" />
+                    <Text className="text-brand text-[12px] font-semibold">Send a player from {user?.name}</Text>
+                  </Pressable>
+
+                  {outgoing.length > 0 && (
+                    <View className="gap-2 mb-2.5">
+                      <Text className="text-[10px] font-bold tracking-wider text-gray-500">SENDING</Text>
+                      {outgoing.map((it) => (
+                        <PlayerCard
+                          key={it.playerId}
+                          playerId={it.playerId}
+                          name={displayName(it.player)}
+                          position={it.player.pos}
+                          team={it.player.t}
+                          bottomSlot={
+                            <View className="flex-row items-center gap-2 mt-0.5">
+                              <Stars value={it.player.value} />
+                              {activeTeamIds.length === 3 && (
+                                <Text className="text-white/70 text-[9px]">→ {users.find((u) => u.id === it.toUserId)?.name}</Text>
+                              )}
+                            </View>
+                          }
+                          rightSlot={
+                            <Pressable onPress={() => removeItem(it.playerId, it.fromUserId)} hitSlop={8}>
+                              <Feather name="x-circle" size={18} color="#ffffff" />
+                            </Pressable>
+                          }
+                        />
+                      ))}
+                    </View>
+                  )}
+
+                  {incoming.length > 0 && (
+                    <View className="gap-2">
+                      <Text className="text-[10px] font-bold tracking-wider text-gray-500">RECEIVING</Text>
+                      {incoming.map((it) => (
+                        <PlayerCard
+                          key={it.playerId}
+                          playerId={it.playerId}
+                          name={displayName(it.player)}
+                          position={it.player.pos}
+                          team={it.player.t}
+                          bottomSlot={
+                            <View className="flex-row items-center gap-2 mt-0.5">
+                              <Stars value={it.player.value} />
+                              {activeTeamIds.length === 3 && (
+                                <Text className="text-white/70 text-[9px]">← {users.find((u) => u.id === it.fromUserId)?.name}</Text>
+                              )}
+                            </View>
+                          }
+                          rightSlot={
+                            <Pressable onPress={() => removeItem(it.playerId, it.fromUserId)} hitSlop={8}>
+                              <Feather name="x-circle" size={18} color="#ffffff" />
+                            </Pressable>
+                          }
+                        />
+                      ))}
+                    </View>
+                  )}
+                </View>
+
+                {hasAnyItems && (outgoing.length > 0 || incoming.length > 0) && (
+                  <>
+                    <View className="flex-row border-t border-white/10">
+                      <StatTile
+                        label="LINEUP PTS"
+                        value={`${ptsDelta >= 0 ? "+" : ""}${ptsDelta.toFixed(1)}`}
+                        color={ptsDelta >= 0 ? "#22c55e" : "#ef4444"}
+                        divider={false}
+                      />
+                      <StatTile
+                        label="PROJ. WINS"
+                        value={winsDelta === undefined || winsDelta === null ? (loadingSim ? "…" : "-") : `${winsDelta >= 0 ? "+" : ""}${winsDelta}`}
+                        color={!winsDelta ? "#6b7280" : winsDelta > 0 ? "#22c55e" : "#ef4444"}
+                      />
+                      <StatTile label="VALUE" value={`${netValue >= 0 ? "+" : ""}${formatValue(netValue)}`} color={netValue >= 0 ? "#22c55e" : "#ef4444"} />
+                    </View>
+
+                    <Pressable
+                      onPress={() => setExpandedLineup((p) => ({ ...p, [userId]: !p[userId] }))}
+                      className="flex-row items-center justify-center gap-1.5 py-2.5 border-t border-white/10"
+                    >
+                      <Feather name={expandedLineup[userId] ? "chevron-up" : "chevron-down"} size={13} color="#9ca3af" />
+                      <Text className="text-gray-400 text-[11px] font-semibold">
+                        {expandedLineup[userId] ? "Hide" : "Preview"} projected starting lineup
+                      </Text>
+                    </Pressable>
+
+                    {expandedLineup[userId] && (
+                      <View className="px-4 pb-4 gap-1.5">
+                        {lineup.map((slot, i) => {
+                          const meta = slot.playerId ? playersData[slot.playerId] : null;
+                          const isNew = slot.playerId && incoming.some((it) => it.playerId === slot.playerId);
+                          return (
+                            <View key={i} className="flex-row items-center justify-between py-1">
+                              <View className="flex-row items-center gap-2">
+                                <Text className="text-gray-500 text-[10px] font-bold w-[46px]">{slot.slot}</Text>
+                                <Text numberOfLines={1} className={`text-[12px] max-w-[150px] ${isNew ? "text-brand font-bold" : "text-white"}`}>
+                                  {meta ? `${meta.fn} ${meta.ln}` : "Empty"}
+                                </Text>
+                                {isNew && <Feather name="arrow-up-right" size={11} color="#af1222" />}
+                              </View>
+                              <Text style={{ fontVariant: ["tabular-nums"] }} className="text-gray-400 text-[11px]">
+                                {slot.points.toFixed(1)}
+                              </Text>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    )}
+                  </>
+                )}
+              </View>
+            );
+          })}
+
+          {hasAnyItems && (
+            <View
+              style={{ backgroundColor: `${verdict.color}18`, borderColor: verdict.color }}
+              className="self-center px-4 py-1.5 rounded-full border"
+            >
+              <Text style={{ color: verdict.color }} className="font-bold text-[13px]">
+                {verdict.text}
               </Text>
-
-              <View className="flex-row items-center">
-                <View className="flex-1 items-center">
-                  <Image source={userOne?.avatar ? { uri: userOne.avatar } : helmet} className="w-[38px] h-[38px] rounded-full mb-1.5" />
-                  <Text numberOfLines={1} className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 max-w-[100px]">
-                    {userOne?.name}
-                  </Text>
-                  <Text style={{ color: "#3b82f6" }} className="text-[20px] font-bold mt-0.5">
-                    {team1Total.toLocaleString()}
-                  </Text>
-                </View>
-
-                <Text className="text-[11px] font-bold text-gray-400 px-2">VS</Text>
-
-                <View className="flex-1 items-center">
-                  <Image source={userTwo?.avatar ? { uri: userTwo.avatar } : helmet} className="w-[38px] h-[38px] rounded-full mb-1.5" />
-                  <Text numberOfLines={1} className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 max-w-[100px]">
-                    {userTwo?.name}
-                  </Text>
-                  <Text className="text-brand text-[20px] font-bold mt-0.5">{team2Total.toLocaleString()}</Text>
-                </View>
-              </View>
-
-              <View className="mt-4">
-                <View className="h-2.5 rounded-full overflow-hidden flex-row bg-gray-300 dark:bg-white/10">
-                  <View style={{ width: `${pct1}%`, backgroundColor: "#3b82f6" }} />
-                  <View className="bg-brand" style={{ width: `${100 - pct1}%` }} />
-                </View>
-                <View className="flex-row justify-between mt-1.5">
-                  <Text style={{ color: "#3b82f6" }} className="text-[11px] font-bold">
-                    {pct1.toFixed(0)}%
-                  </Text>
-                  <Text className="text-brand text-[11px] font-bold">{(100 - pct1).toFixed(0)}%</Text>
-                </View>
-              </View>
-
-              <View
-                style={{ backgroundColor: `${status.color}22`, borderColor: status.color }}
-                className="self-center mt-3.5 px-4 py-1.5 rounded-full border"
-              >
-                <Text style={{ color: status.color }} className="font-bold text-[13px]">
-                  {status.text}
-                </Text>
-              </View>
             </View>
           )}
-        </>
+        </View>
       )}
 
       {leagueID && (
-        <TradeHistory
-          leagueID={leagueID}
-          userIds={selectedOne && selectedTwo ? [selectedOne, selectedTwo] : undefined}
-        />
+        <View className="mt-2">
+          <TradeHistory
+            leagueID={leagueID}
+            userIds={activeTeamIds.length === 2 ? [activeTeamIds[0], activeTeamIds[1]] : undefined}
+          />
+        </View>
       )}
 
-      <Modal visible={pickerFor !== null} transparent animationType="slide" onRequestClose={() => setPickerFor(null)}>
-        <Pressable className="flex-1 bg-black/50 justify-end" onPress={() => setPickerFor(null)}>
-          <Pressable className="bg-white dark:bg-[#150f0f] rounded-t-2xl max-h-[70%]" onPress={() => {}}>
-            <Text className="text-center font-bold py-3 border-b border-brand/10 text-black dark:text-white">
-              Add a player
-            </Text>
-            <FlatList
-              data={pickerRoster}
-              keyExtractor={(id) => id}
-              contentContainerClassName="p-3 gap-2"
-              renderItem={({ item: playerId }) => {
-                const player = playersData[playerId];
-                if (!player) return null;
-                return (
-                  <Pressable onPress={() => pickerFor && addPlayer(pickerFor, playerId)} className="mb-2">
-                    <PlayerCard
-                      playerId={playerId}
-                      name={displayName(player)}
-                      position={player.pos}
-                      team={player.t}
-                      rightSlot={<Feather name="plus-circle" size={20} color="#ffffff" />}
-                    />
-                  </Pressable>
-                );
-              }}
-            />
+      <Modal visible={picker !== null} transparent animationType="slide" onRequestClose={() => setPicker(null)}>
+        <Pressable className="flex-1 bg-black/50 justify-end" onPress={() => setPicker(null)}>
+          <Pressable className="bg-[#150f0f] rounded-t-2xl max-h-[75%]" onPress={() => {}}>
+            {picker && picker.chosenPlayerId ? (
+              <>
+                <Text className="text-center font-bold py-3 border-b border-white/10 text-white">Send to which team?</Text>
+                <View className="p-4 gap-2.5">
+                  {pickerDestinations.map((toId) => {
+                    const u = users.find((x) => x.id === toId);
+                    return (
+                      <Pressable
+                        key={toId}
+                        onPress={() => addPlayer(picker.forTeam, picker.chosenPlayerId!, toId)}
+                        className="flex-row items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2.5"
+                      >
+                        <Image source={u?.avatar ? { uri: u.avatar } : helmet} className="w-[30px] h-[30px] rounded-full" />
+                        <Text className="text-white font-semibold">{u?.name}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </>
+            ) : (
+              <>
+                <Text className="text-center font-bold py-3 border-b border-white/10 text-white">Add a player</Text>
+                <FlatList
+                  data={pickerRoster}
+                  keyExtractor={(id) => id}
+                  contentContainerClassName="p-3 gap-2"
+                  renderItem={({ item: playerId }) => {
+                    const player = playersData[playerId];
+                    if (!player || !picker) return null;
+                    const isNeed =
+                      leagueAvgNeed && pickerDestinations.length === 1
+                        ? computeTeamNeeds(
+                            allRosters[pickerDestinations[0]]?.rosterPlayerIds ?? [],
+                            playersData,
+                            valuesBySleeperId,
+                            valueSettings!,
+                            leagueAvgNeed
+                          ).scores[player.pos as PlayerPos] > 0.15
+                        : false;
+                    return (
+                      <Pressable
+                        onPress={() => {
+                          const dests = destinationsFor(picker.forTeam);
+                          if (dests.length === 1) addPlayer(picker.forTeam, playerId, dests[0]);
+                          else setPicker({ forTeam: picker.forTeam, chosenPlayerId: playerId });
+                        }}
+                        className="mb-2"
+                      >
+                        <PlayerCard
+                          playerId={playerId}
+                          name={displayName(player)}
+                          position={player.pos}
+                          team={player.t}
+                          bottomSlot={
+                            isNeed ? (
+                              <Text className="text-yellow-400 text-[9px] font-bold mt-0.5">FILLS A NEED</Text>
+                            ) : undefined
+                          }
+                          rightSlot={<Feather name="plus-circle" size={20} color="#ffffff" />}
+                        />
+                      </Pressable>
+                    );
+                  }}
+                />
+              </>
+            )}
           </Pressable>
         </Pressable>
       </Modal>
@@ -277,51 +573,23 @@ export default function TradeCalculator() {
   );
 }
 
-function TradeBasket({
-  title,
-  avatar,
-  players,
-  onRemove,
-  onClear,
+function StatTile({
+  label,
+  value,
+  color,
+  divider = true,
 }: {
-  title: string;
-  avatar?: string;
-  players: Player[];
-  onRemove: (id: string) => void;
-  onClear: () => void;
+  label: string;
+  value: string;
+  color: string;
+  divider?: boolean;
 }) {
   return (
-    <View className="flex-1 bg-[#f0eeee] dark:bg-[#1a1414] rounded-xl p-2">
-      <View className="flex-row items-center justify-between mb-2">
-        <View className="flex-row items-center gap-1 flex-1">
-          <Image source={avatar ? { uri: avatar } : helmet} className="w-[26px] h-[26px] rounded-full" />
-          <Text numberOfLines={1} className="font-bold text-[12px] text-black dark:text-white">
-            {title}
-          </Text>
-        </View>
-        {players.length > 0 && (
-          <Pressable onPress={onClear}>
-            <Text className="text-brand text-[11px]">Clear</Text>
-          </Pressable>
-        )}
-      </View>
-      <View className="gap-2">
-        {players.map((p) => (
-          <PlayerCard
-            key={p.id}
-            playerId={p.id}
-            name={displayName(p)}
-            position={p.pos}
-            team={p.t}
-            bottomSlot={<Stars value={p.value} />}
-            rightSlot={
-              <Pressable onPress={() => onRemove(p.id)} hitSlop={8} className="pl-1">
-                <Feather name="x-circle" size={18} color="#ffffff" />
-              </Pressable>
-            }
-          />
-        ))}
-      </View>
+    <View className={`flex-1 items-center py-2.5 ${divider ? "border-l border-white/10" : ""}`}>
+      <Text style={{ color, fontVariant: ["tabular-nums"] }} className="text-[15px] font-bold">
+        {value}
+      </Text>
+      <Text className="text-gray-500 text-[9px] font-bold tracking-wide mt-0.5">{label}</Text>
     </View>
   );
 }
