@@ -16,6 +16,11 @@ import {
   computeWinImpact,
   TeamNeedsResult,
 } from "../../../lib/tradeAnalysis";
+import {
+  buildSeasonToDatePPG,
+  computeRedraftTeamNeeds,
+  computeLeagueRedraftNeedBaseline,
+} from "../../../lib/redraftNeeds";
 import { buildLeagueSimData, projectedLineupPoints, LeagueSimData, SimTeamInfo } from "../../../lib/leagueSimData";
 import type { PlayerPos } from "../../../lib/draftProspects";
 
@@ -78,6 +83,10 @@ export default function TradeCalculator() {
   const [startingSlots, setStartingSlots] = useState<string[]>([]);
   const [projWeek, setProjWeek] = useState<number>(1);
   const [loadingLeague, setLoadingLeague] = useState(true);
+  // Redraft-only inputs for team needs (see lib/redraftNeeds.ts) - unused
+  // for a dynasty league, which reasons off KTC value instead.
+  const [seasonToDatePPG, setSeasonToDatePPG] = useState<Record<string, number>>({});
+  const [remainingWeeks, setRemainingWeeks] = useState<number[]>([]);
 
   // --- the trade itself ---
   const [teamIds, setTeamIds] = useState<(string | null)[]>([null, null]);
@@ -131,10 +140,34 @@ export default function TradeCalculator() {
             rosterPlayerIds: r.players ?? [],
           };
         });
-        setLeagueAvgNeed(computeLeagueNeedBaseline(managerInfoForNeeds, playersDataRes, values, settings));
 
+        const currentWeek: number = nflStateRes.data.display_week || 1;
         setStartingSlots((leagueRes.data.roster_positions || []).filter((p: string) => !NON_STARTER_SLOTS.has(p)));
-        setProjWeek(nflStateRes.data.display_week || 1);
+        setProjWeek(currentWeek);
+
+        // Team needs reasons completely differently depending on format -
+        // see lib/redraftNeeds.ts for why a dynasty roster's long-term KTC
+        // value says nothing useful about a redraft team's needs. Dynasty
+        // needs the values fetch above and nothing else; redraft needs
+        // real season-to-date box scores + rest-of-season projections,
+        // which means fetching the same league-wide schedule data the
+        // win-impact projection uses - fetched here eagerly for redraft
+        // (so Needs badges aren't waiting on someone picking 2 teams
+        // first) and reused as-is for win-impact later instead of being
+        // fetched a second time.
+        if (settings.isDynasty) {
+          setLeagueAvgNeed(computeLeagueNeedBaseline(managerInfoForNeeds, playersDataRes, values, settings));
+        } else {
+          const sim = await buildLeagueSimData(leagueID);
+          if (cancelled) return;
+          setSimData(sim);
+          const playedWeeks = sim.weekNumbers.filter((w) => w < currentWeek);
+          const remaining = sim.weekNumbers.filter((w) => w >= currentWeek);
+          const ppg = buildSeasonToDatePPG(sim.matchupData, playedWeeks);
+          setSeasonToDatePPG(ppg);
+          setRemainingWeeks(remaining);
+          setLeagueAvgNeed(computeLeagueRedraftNeedBaseline(managerInfoForNeeds, playersDataRes, ppg, remaining));
+        }
       } catch (error) {
         console.error("Error loading trade calculator data:", error);
       } finally {
@@ -252,6 +285,19 @@ export default function TradeCalculator() {
     : [];
   const pickerDestinations = picker ? destinationsFor(picker.forTeam) : [];
 
+  // Dynasty reasons off real KTC trade value (lib/tradeAnalysis.ts, the
+  // same "best real player at a position vs. the league's own bar" logic
+  // the Draft Lottery board uses); redraft has no long-term asset value to
+  // speak of, so it reasons off real season-to-date box scores blended
+  // with rest-of-season projections instead (lib/redraftNeeds.ts) - a
+  // genuinely different question, not the same formula relabeled.
+  const getTeamNeeds = (rosterPlayerIds: string[]): TeamNeedsResult => {
+    if (valueSettings?.isDynasty) {
+      return computeTeamNeeds(rosterPlayerIds, playersData, valuesBySleeperId, valueSettings, leagueAvgNeed!);
+    }
+    return computeRedraftTeamNeeds(rosterPlayerIds, playersData, seasonToDatePPG, remainingWeeks, leagueAvgNeed!);
+  };
+
   const netValueByTeam: Record<string, number> = {};
   activeTeamIds.forEach((id) => {
     const out = items.filter((it) => it.fromUserId === id).reduce((s, it) => s + it.player.value, 0);
@@ -268,8 +314,15 @@ export default function TradeCalculator() {
         <Text className="text-[11px] font-bold tracking-widest text-brand">TRADE CALCULATOR</Text>
         <Text className="text-white text-[21px] font-bold mt-0.5">Build a Trade</Text>
         <Text className="text-gray-500 text-[12px] mt-1">
-          Real dynasty values, real projected lineup + win impact, and each team&apos;s real needs - up to 3 teams.
+          Real trade values, real projected lineup + win impact, and each team&apos;s real needs - up to 3 teams.
         </Text>
+        {valueSettings && (
+          <Text className="text-gray-600 text-[11px] mt-1.5">
+            {valueSettings.isDynasty
+              ? "Needs are based on long-term dynasty value at each position vs. the league's own bar."
+              : "Needs are based on real season-to-date scoring blended with rest-of-season projections - no long-term value to lean on in redraft."}
+          </Text>
+        )}
       </View>
 
       <View className="flex-row flex-wrap gap-2.5 mt-4 mb-2">
@@ -311,7 +364,7 @@ export default function TradeCalculator() {
             const outgoing = items.filter((it) => it.fromUserId === userId);
             const incoming = items.filter((it) => it.toUserId === userId);
             const roster = allRosters[userId]?.rosterPlayerIds ?? [];
-            const needs: TeamNeedsResult = computeTeamNeeds(roster, playersData, valuesBySleeperId, valueSettings!, leagueAvgNeed);
+            const needs: TeamNeedsResult = getTeamNeeds(roster);
             const notableNeeds = needs.ranked.filter((n) => n.score > 0.15).slice(0, 2);
 
             const afterRoster = postTradeRoster(userId);
@@ -531,13 +584,9 @@ export default function TradeCalculator() {
                     if (!player || !picker) return null;
                     const isNeed =
                       leagueAvgNeed && pickerDestinations.length === 1
-                        ? computeTeamNeeds(
-                            allRosters[pickerDestinations[0]]?.rosterPlayerIds ?? [],
-                            playersData,
-                            valuesBySleeperId,
-                            valueSettings!,
-                            leagueAvgNeed
-                          ).scores[player.pos as PlayerPos] > 0.15
+                        ? getTeamNeeds(allRosters[pickerDestinations[0]]?.rosterPlayerIds ?? []).scores[
+                            player.pos as PlayerPos
+                          ] > 0.15
                         : false;
                     return (
                       <Pressable
