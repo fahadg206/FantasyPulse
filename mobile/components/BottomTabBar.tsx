@@ -23,22 +23,22 @@ export default function BottomTabBar({ leagueID }: { leagueID: string }) {
       match: (p) => p === `/league/${leagueID}`,
     },
     {
-      href: `/league/${leagueID}/schedule`,
-      label: "Schedule",
-      icon: (color) => <Feather name="calendar" size={22} color={color} />,
-      match: (p) => p.endsWith("/schedule"),
-    },
-    {
       href: `/league/${leagueID}/standings`,
       label: "Standings",
       icon: (color) => <Ionicons name="list" size={22} color={color} />,
       match: (p) => p.endsWith("/standings"),
     },
     {
-      href: `/league/${leagueID}/articles`,
-      label: "Articles",
-      icon: (color) => <Ionicons name="newspaper" size={22} color={color} />,
-      match: (p) => p.endsWith("/articles"),
+      href: `/feed?leagueID=${leagueID}`,
+      label: "Feed",
+      icon: (color) => <Feather name="activity" size={22} color={color} />,
+      match: (p) => p === "/feed",
+    },
+    {
+      href: `/league/${leagueID}/schedule`,
+      label: "Schedule",
+      icon: (color) => <Feather name="calendar" size={22} color={color} />,
+      match: (p) => p.endsWith("/schedule"),
     },
     {
       href: `/league/${leagueID}/more`,

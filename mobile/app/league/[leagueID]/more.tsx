@@ -19,11 +19,10 @@ export default function More() {
 
   const items: MenuItem[] = [
     {
-      label: "Feed",
-      description: "What's happening in this league - post, reply, like",
-      icon: <Feather name="message-circle" size={20} color="#af1222" />,
-      path: `/feed`,
-      params: { leagueID },
+      label: "Articles",
+      description: "News, previews, and recaps for this league",
+      icon: <Ionicons name="newspaper" size={20} color="#af1222" />,
+      path: `/league/${leagueID}/articles`,
     },
     {
       label: "Messages",
