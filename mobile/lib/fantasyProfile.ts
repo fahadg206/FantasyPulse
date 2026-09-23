@@ -5,8 +5,14 @@
 // user has no roster in yet (invited but not drafted, or a similar
 // in-between state) - handled by skipping any league where a roster lookup
 // comes back empty, rather than assuming membership always means a roster.
-
-const SLEEPER = "https://api.sleeper.app/v1";
+//
+// Routed through lib/api.ts's `sleeper` client (not raw fetch) so this
+// shares the same request cache every other screen uses - a league's
+// rosters fetched moments ago from Dashboard/Standings/Schedule is an
+// instant cache hit here instead of a second round trip, and this page
+// itself only re-hits the network for a given league once per its 2-minute
+// TTL rather than every visit.
+import { sleeper } from "./api";
 
 export interface LeagueSeasonStats {
   leagueId: string;
@@ -34,24 +40,16 @@ export interface FantasyProfileStats {
   };
 }
 
-async function fetchJson(url: string) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`${url} -> ${res.status}`);
-  return res.json();
-}
-
 export async function getFantasyProfileStats(
   sleeperUserId: string,
   season: string
 ): Promise<FantasyProfileStats> {
-  const leaguesData = await fetchJson(
-    `${SLEEPER}/user/${sleeperUserId}/leagues/nfl/${season}`
-  );
+  const { data: leaguesData } = await sleeper.getUserLeagues(sleeperUserId, season);
 
   const leagueResults = await Promise.all(
     (leaguesData || []).map(async (league: any): Promise<LeagueSeasonStats | null> => {
       try {
-        const rosters = await fetchJson(`${SLEEPER}/league/${league.league_id}/rosters`);
+        const { data: rosters } = await sleeper.getLeagueRosters(league.league_id);
         const myRoster = rosters.find((r: any) => r.owner_id === sleeperUserId);
         if (!myRoster) return null;
 

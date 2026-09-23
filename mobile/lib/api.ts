@@ -18,7 +18,9 @@ const ROSTERS_TTL_MS = 2 * 60 * 1000;
 export const sleeper = {
   getUser: (username: string) => axios.get(`${SLEEPER_BASE}/user/${username}`),
   getUserLeagues: (userId: string, season: string) =>
-    axios.get(`${SLEEPER_BASE}/user/${userId}/leagues/nfl/${season}`),
+    cachedFetch(`user-leagues:${userId}:${season}`, LEAGUE_META_TTL_MS, () =>
+      axios.get(`${SLEEPER_BASE}/user/${userId}/leagues/nfl/${season}`)
+    ),
   getLeague: (leagueId: string) =>
     cachedFetch(`league:${leagueId}`, LEAGUE_META_TTL_MS, () => axios.get(`${SLEEPER_BASE}/league/${leagueId}`)),
   getLeagueUsers: (leagueId: string) =>

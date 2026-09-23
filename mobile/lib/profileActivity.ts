@@ -1,4 +1,4 @@
-import { backend } from "./api";
+import { backend, sleeper } from "./api";
 import { buildLeagueTransactions, TradeEvent, AddDropEvent } from "./leagueTransactions";
 import { rankTeams, determinePlayoffTeams } from "./whatIfSimulation";
 import {
@@ -17,6 +17,13 @@ import type { LeagueSeasonStats } from "./fantasyProfile";
 // `leagues` list getFantasyProfileStats already fetched (leagueId +
 // leagueName), so nothing here re-derives "which leagues is this person
 // in" from scratch.
+//
+// League/roster/user lookups below go through lib/api.ts's `sleeper`
+// client (cached) rather than raw fetch, so a league already warmed by
+// another screen - or by getFantasyProfileStats's own crawl just before
+// this runs - is an instant hit instead of a second round trip. Matchups,
+// winners brackets, and NFL state stay on raw fetchJson - live-ish data
+// this app deliberately never caches, same as everywhere else.
 
 const SLEEPER = "https://api.sleeper.app/v1";
 
@@ -81,7 +88,10 @@ export async function getAllTimeStats(sleeperUserId: string, currentSeason: stri
 
   const seasonLeagueLists = await Promise.all(
     seasons.map((season) =>
-      fetchJson(`${SLEEPER}/user/${sleeperUserId}/leagues/nfl/${season}`).catch(() => [])
+      sleeper
+        .getUserLeagues(sleeperUserId, season)
+        .then((r) => r.data)
+        .catch(() => [])
     )
   );
   const leagueIds = Array.from(
@@ -123,8 +133,8 @@ export async function getAllTimeStats(sleeperUserId: string, currentSeason: stri
     leagueIds.map(async (leagueId) => {
       try {
         const [leagueInfo, rosters, bracket] = await Promise.all([
-          fetchJson(`${SLEEPER}/league/${leagueId}`),
-          fetchJson(`${SLEEPER}/league/${leagueId}/rosters`),
+          sleeper.getLeague(leagueId).then((r) => r.data),
+          sleeper.getLeagueRosters(leagueId).then((r) => r.data),
           fetch(`${SLEEPER}/league/${leagueId}/winners_bracket`)
             .then((r) => r.json())
             .catch(() => []),
@@ -263,7 +273,7 @@ export async function getTopRosteredPlayers(
   await Promise.all(
     leagues.map(async (league) => {
       try {
-        const rosters = await fetchJson(`${SLEEPER}/league/${league.leagueId}/rosters`);
+        const { data: rosters } = await sleeper.getLeagueRosters(league.leagueId);
         const myRoster = rosters.find((r: any) => r.owner_id === sleeperUserId);
         if (!myRoster) return;
         // The player id space is global (not per-league), so any one
@@ -480,7 +490,7 @@ export async function getWeeklyMatchups(
 ): Promise<WeeklyMatchup[]> {
   if (leagues.length === 0) return [];
 
-  const nflState = await fetchJson(`${SLEEPER}/state/nfl`);
+  const { data: nflState } = await sleeper.getNflState();
   const week: number = nflState.season_type === "post" ? 18 : nflState.display_week || 1;
 
   // Both shared across every league below (global, not per-league) - real
@@ -498,9 +508,9 @@ export async function getWeeklyMatchups(
     leagues.map(async (league): Promise<WeeklyMatchup | null> => {
       try {
         const [rosters, users, matchups] = await Promise.all([
-          fetchJson(`${SLEEPER}/league/${league.leagueId}/rosters`),
-          fetchJson(`${SLEEPER}/league/${league.leagueId}/users`),
-          fetchJson(`${SLEEPER}/league/${league.leagueId}/matchups/${week}`),
+          sleeper.getLeagueRosters(league.leagueId).then((r) => r.data),
+          sleeper.getLeagueUsers(league.leagueId).then((r) => r.data),
+          sleeper.getMatchups(league.leagueId, week).then((r) => r.data),
         ]);
 
         const myRoster = rosters.find((r: any) => r.owner_id === sleeperUserId);
