@@ -584,7 +584,7 @@ function ScheduleTeamRow({
                 {favoriteLine.name}:
               </Text>
             )}
-            <Text numberOfLines={1} className="text-center text-[13px] font-bold text-gray-400 mt-0.5">
+            <Text numberOfLines={1} className="text-center text-[13px] font-bold text-gray-400 mt-2">
               {favoriteLine.spread}
             </Text>
           </View>
