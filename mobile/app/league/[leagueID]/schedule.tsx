@@ -578,13 +578,13 @@ function ScheduleTeamRow({
       <View className="w-px bg-white/10 mr-3" />
       <View className="justify-center" style={{ width: 108 }}>
         {favoriteLine ? (
-          <View className="items-end">
+          <View>
             {favoriteLine.name && (
               <Text numberOfLines={1} className="text-right text-[12px] font-semibold text-gray-400">
                 {favoriteLine.name}
               </Text>
             )}
-            <Text numberOfLines={1} className="text-right text-[13px] font-bold text-gray-400 mt-0.5">
+            <Text numberOfLines={1} className="text-center text-[13px] font-bold text-gray-400 mt-0.5">
               {favoriteLine.spread}
             </Text>
           </View>
