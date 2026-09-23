@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { View, Text, Image, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Slot, useLocalSearchParams, useRouter } from "expo-router";
+import { Slot, useLocalSearchParams, useRouter, usePathname } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import type { User } from "firebase/auth";
 import { sleeper } from "../../../lib/api";
@@ -30,6 +30,7 @@ function IconBadge({ count }: { count: number }) {
 export default function LeagueLayout() {
   const { leagueID } = useLocalSearchParams<{ leagueID: string }>();
   const router = useRouter();
+  const pathname = usePathname();
   const [leagueName, setLeagueName] = useState("");
   const [avatar, setAvatar] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<User | null>(null);
@@ -74,6 +75,20 @@ export default function LeagueLayout() {
 
   if (!leagueID) return null;
 
+  // The bottom tab bar's own 5 destinations are "root" screens within a
+  // league - everything else (Draft Recap, Power Rankings, a matchup,
+  // Trades, anything opened from the More menu...) is a deeper page that
+  // has no other way back short of the OS's own swipe/back gesture, which
+  // isn't discoverable on every device. Rather than adding a header to
+  // every one of those screens individually, this masthead - the one
+  // thing that's actually present on all of them - grows a back arrow in
+  // its left slot whenever the current screen isn't one of the 5 roots.
+  const isRootTab =
+    pathname === `/league/${leagueID}` ||
+    pathname.endsWith("/standings") ||
+    pathname.endsWith("/schedule") ||
+    pathname.endsWith("/more");
+
   return (
     <SafeAreaView className="flex-1 bg-[#0c0c0e]" edges={["top"]}>
       {/* Dark masthead so it reads as one cohesive unit with the
@@ -82,7 +97,17 @@ export default function LeagueLayout() {
           icons sit here (not buried in a per-screen header) since this
           masthead is the one thing visible on every screen in a league. */}
       <View className="flex-row items-center justify-between px-3 py-2.5 bg-[#0c0c0e] border-b border-white/10">
-        <View className="w-[76px]" />
+        <View className="w-[76px]">
+          {!isRootTab && (
+            <Pressable
+              onPress={() => (router.canGoBack() ? router.back() : router.push(`/league/${leagueID}`))}
+              hitSlop={10}
+              className="p-2 -ml-2 self-start"
+            >
+              <Feather name="arrow-left" size={20} color="#e5e7eb" />
+            </Pressable>
+          )}
+        </View>
         <View className="items-center flex-1">
           <Image
             source={avatar ? { uri: `https://sleepercdn.com/avatars/thumbs/${avatar}` } : helmet}
