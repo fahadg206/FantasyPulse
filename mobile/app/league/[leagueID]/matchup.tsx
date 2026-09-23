@@ -269,8 +269,8 @@ export default function MatchupDetail() {
         week,
         season,
         matchupId: matchupID,
-        team1: { name: team1.name, starters: s1 },
-        team2: { name: team2.name, starters: s2 },
+        team1: { name: team1.name, starters: s1, record: { wins: parseInt(team1.wins || "0"), losses: parseInt(team1.losses || "0") } },
+        team2: { name: team2.name, starters: s2, record: { wins: parseInt(team2.wins || "0"), losses: parseInt(team2.losses || "0") } },
         playersData: playersDataForFeed,
         scoringSettings,
       }).catch((error) => console.error("Error posting injury updates to feed:", error));

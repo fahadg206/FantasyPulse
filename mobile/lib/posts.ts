@@ -74,6 +74,8 @@ export interface Post {
   targetType?: "matchup" | "trade" | "waiver";
   targetId?: string;
   targetLabel?: string;
+  /** set only on Boogie's injury posts - the fantasy manager's team name the injured player is rostered to, so getRecentInjuryPostsForTeam can query "has this team had injury trouble already" without parsing the post text itself */
+  injuryTeamName?: string;
   /** set when this post is a reply to another post - see getReplies/getPost */
   parentPostId?: string;
   likeCount: number;
@@ -269,7 +271,14 @@ export interface EnsureSystemPostInput {
   targetType: "matchup" | "trade" | "waiver";
   targetId: string;
   targetLabel?: string;
+  injuryTeamName?: string;
   createdAtMs?: number;
+}
+
+/** cheap existence check by post id - lets a caller skip doing extra work (building text, checking history) for a post that's already there, before calling ensureSystemPost itself */
+export async function postExists(id: string): Promise<boolean> {
+  const snap = await getDoc(doc(db, "posts", id));
+  return snap.exists();
 }
 
 export async function ensureSystemPost(input: EnsureSystemPostInput): Promise<void> {
@@ -292,10 +301,34 @@ export async function ensureSystemPost(input: EnsureSystemPostInput): Promise<vo
     targetType: input.targetType,
     targetId: input.targetId,
     targetLabel: input.targetLabel ?? null,
+    injuryTeamName: input.injuryTeamName ?? null,
     likeCount: 0,
     replyCount: 0,
     repostCount: 0,
   });
+}
+
+/**
+ * How many injury posts this fantasy team has already had this season in
+ * this league, before `beforeMs` - used to decide whether a new injury is
+ * "another one" worth a "caught the injury bug" style line, or their
+ * first. Capped at 5 lookback since anything past that stops changing the
+ * flavor (still "recurring", not more or less so).
+ */
+export async function getPriorInjuryPostCountForTeam(
+  leagueId: string,
+  teamName: string,
+  beforeMs: number
+): Promise<number> {
+  const q = query(
+    collection(db, "posts"),
+    where("leagueId", "==", leagueId),
+    where("injuryTeamName", "==", teamName),
+    orderBy("createdAtMs", "desc"),
+    fsLimit(5)
+  );
+  const snap = await getDocs(q);
+  return snap.docs.filter((d) => (d.data().createdAtMs as number) < beforeMs).length;
 }
 
 /** every post one user has liked, most-recently-liked first - for a profile page's Likes tab, same as Twitter's */

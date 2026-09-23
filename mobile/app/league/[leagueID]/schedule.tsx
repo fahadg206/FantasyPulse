@@ -246,15 +246,25 @@ export default function Schedule() {
       for (const [, teams] of matchups) {
         const [team1, team2] = teams;
         if (!team1 || !team2) continue;
-        const starters1Full = scheduleData[team1.user_id ?? ""]?.starters_full_data ?? [];
-        const starters2Full = scheduleData[team2.user_id ?? ""]?.starters_full_data ?? [];
+        const team1Full = scheduleData[team1.user_id ?? ""];
+        const team2Full = scheduleData[team2.user_id ?? ""];
+        const starters1Full = team1Full?.starters_full_data ?? [];
+        const starters2Full = team2Full?.starters_full_data ?? [];
         ensureInjuryPostsForMatchup({
           leagueId: leagueID,
           week: counter,
           season,
           matchupId: team1.matchup_id ?? "",
-          team1: { name: team1.name, starters: starters1Full },
-          team2: { name: team2.name, starters: starters2Full },
+          team1: {
+            name: team1.name,
+            starters: starters1Full,
+            record: { wins: parseInt(team1Full?.wins || "0"), losses: parseInt(team1Full?.losses || "0") },
+          },
+          team2: {
+            name: team2.name,
+            starters: starters2Full,
+            record: { wins: parseInt(team2Full?.wins || "0"), losses: parseInt(team2Full?.losses || "0") },
+          },
           playersData,
           scoringSettings,
         }).catch((error) => console.error("Error posting injury updates to feed:", error));
