@@ -35,10 +35,10 @@ export default function BottomTabBar({ leagueID }: { leagueID: string }) {
       match: (p) => p === "/feed",
     },
     {
-      href: `/league/${leagueID}/schedule`,
-      label: "Schedule",
-      icon: (color) => <Feather name="calendar" size={22} color={color} />,
-      match: (p) => p.endsWith("/schedule"),
+      href: `/league/${leagueID}/powerrankings`,
+      label: "Rankings",
+      icon: (color) => <Ionicons name="trophy" size={22} color={color} />,
+      match: (p) => p.endsWith("/powerrankings"),
     },
     {
       href: `/league/${leagueID}/more`,

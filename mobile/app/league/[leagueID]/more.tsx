@@ -19,6 +19,12 @@ export default function More() {
 
   const items: MenuItem[] = [
     {
+      label: "Schedule",
+      description: "Every matchup, week by week - live scores and spreads",
+      icon: <Feather name="calendar" size={20} color="#af1222" />,
+      path: `/league/${leagueID}/schedule`,
+    },
+    {
       label: "Articles",
       description: "News, previews, and recaps for this league",
       icon: <Ionicons name="newspaper" size={20} color="#af1222" />,
@@ -47,12 +53,6 @@ export default function More() {
       description: "Browse rosters and weekly results by manager",
       icon: <Ionicons name="people" size={20} color="#af1222" />,
       path: `/league/${leagueID}/leaguemanagers`,
-    },
-    {
-      label: "Power Rankings",
-      description: "Every team ranked and sorted into tiers",
-      icon: <Ionicons name="trophy" size={20} color="#af1222" />,
-      path: `/league/${leagueID}/powerrankings`,
     },
     {
       label: "Trades",

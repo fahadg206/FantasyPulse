@@ -76,17 +76,17 @@ export default function LeagueLayout() {
   if (!leagueID) return null;
 
   // The bottom tab bar's own 5 destinations are "root" screens within a
-  // league - everything else (Draft Recap, Power Rankings, a matchup,
-  // Trades, anything opened from the More menu...) is a deeper page that
-  // has no other way back short of the OS's own swipe/back gesture, which
-  // isn't discoverable on every device. Rather than adding a header to
-  // every one of those screens individually, this masthead - the one
-  // thing that's actually present on all of them - grows a back arrow in
-  // its left slot whenever the current screen isn't one of the 5 roots.
+  // league - everything else (Draft Recap, Schedule, a matchup, Trades,
+  // anything opened from the More menu...) is a deeper page that has no
+  // other way back short of the OS's own swipe/back gesture, which isn't
+  // discoverable on every device. Rather than adding a header to every one
+  // of those screens individually, this masthead - the one thing that's
+  // actually present on all of them - grows a back arrow in its left slot
+  // whenever the current screen isn't one of the 5 roots.
   const isRootTab =
     pathname === `/league/${leagueID}` ||
     pathname.endsWith("/standings") ||
-    pathname.endsWith("/schedule") ||
+    pathname.endsWith("/powerrankings") ||
     pathname.endsWith("/more");
 
   return (
