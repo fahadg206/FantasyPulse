@@ -521,10 +521,11 @@ function ScheduleTeamRow({
   live?: boolean;
   performers: TopPerformer[];
 }) {
-  // Bold+white still means "the confirmed winner" (final only). While the
-  // game's still going, neither side is declared a winner, but the score
-  // is live and worth reading clearly - white, just not bold - instead of
-  // the same muted gray a game that hasn't started yet gets.
+  // Bold+white still means "the confirmed winner" (final only) - now also
+  // marked with a red caret before the avatar, pointing at that team's row.
+  // While the game's still going, neither side is declared a winner, but
+  // the score is live and worth reading clearly - white, just not bold -
+  // instead of the same muted gray a game that hasn't started yet gets.
   const textColor = emphasize || live ? "text-white" : "text-gray-500";
   const weight = emphasize ? "font-bold" : live ? "font-semibold" : "font-medium";
 
@@ -549,6 +550,11 @@ function ScheduleTeamRow({
     <View className="flex-row items-stretch">
       <View className="flex-1 flex-row items-center justify-between mr-3">
         <View className="flex-row items-center flex-1 mr-3">
+          {/* Fixed-width slot so the caret's presence/absence never shifts
+              the avatar - only the winning team (final only) gets one. */}
+          <View className="w-[14px] items-center mr-1">
+            {emphasize && <Feather name="chevron-right" size={14} color="#e2465a" />}
+          </View>
           <Image
             source={typeof avatar === "string" ? { uri: avatar } : avatar}
             className="w-[44px] h-[44px] rounded-full mr-3 bg-white/10"
