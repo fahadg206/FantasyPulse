@@ -422,7 +422,12 @@ function PerformerLine({ performer }: { performer: TopPerformer }) {
     : `https://sleepercdn.com/content/nfl/players/thumb/${performer.playerId}.jpg`;
 
   // Picture, then name, then points - reads left-to-right like "who, then
-  // how much" instead of the score-first order it used to be in.
+  // how much" instead of the score-first order it used to be in. Name is
+  // flex-1 and points is a fixed-width right-aligned slot so every
+  // performer's number lands on the same right edge, both stacked within
+  // one team and lined up against the other team's below it - the column
+  // this sits in is itself a fixed width (see ScheduleTeamRow), so this
+  // isn't just centered within its own content.
   return (
     <View className="flex-row items-center gap-1.5">
       <Image
@@ -430,10 +435,13 @@ function PerformerLine({ performer }: { performer: TopPerformer }) {
         resizeMode={isDef ? "contain" : "cover"}
         className={isDef ? "w-[18px] h-[18px]" : "w-[18px] h-[18px] rounded-full bg-white/10"}
       />
-      <Text numberOfLines={1} className="text-[11px] text-gray-400 max-w-[76px]">
+      <Text numberOfLines={1} className="text-[11px] text-gray-400 flex-1">
         {performer.name}
       </Text>
-      <Text style={{ fontVariant: ["tabular-nums"] }} className="text-[11px] font-bold text-[#e2465a]">
+      <Text
+        style={{ fontVariant: ["tabular-nums"] }}
+        className="text-[11px] font-bold text-[#e2465a] w-[28px] text-right"
+      >
         {performer.ppg.toFixed(1)}
       </Text>
     </View>
@@ -470,6 +478,17 @@ function ScheduleTeamRow({
   // exactly the height of this one team's block and stops right at the
   // horizontal divider between the two teams - not a line that runs the
   // full card.
+  //
+  // The score and the divider/performers column both used to size
+  // themselves off their own content, so a team with a wider name or
+  // longer performer names pushed everything in ITS row over relative to
+  // the other team's row - nothing actually lined up vertically between
+  // the two teams. The performers column now has a fixed width and is
+  // always rendered (even with zero performers) so both rows in a card
+  // reserve identical space, which pins the score's right edge and the
+  // divider to the same x position on both rows; each performer line's
+  // points also sits in its own fixed-width right-aligned slot for the
+  // same reason.
   return (
     <View className="flex-row items-stretch">
       <View className="flex-1 flex-row items-center justify-between mr-3">
@@ -493,16 +512,12 @@ function ScheduleTeamRow({
           <Text className="text-[13px] text-gray-500">--</Text>
         )}
       </View>
-      {performers.length > 0 && (
-        <>
-          <View className="w-px bg-white/10 mr-3" />
-          <View className="justify-center gap-1.5">
-            {performers.map((p, i) => (
-              <PerformerLine key={i} performer={p} />
-            ))}
-          </View>
-        </>
-      )}
+      <View className="w-px bg-white/10 mr-3" />
+      <View className="justify-center gap-1.5" style={{ width: 108 }}>
+        {performers.map((p, i) => (
+          <PerformerLine key={i} performer={p} />
+        ))}
+      </View>
     </View>
   );
 }
