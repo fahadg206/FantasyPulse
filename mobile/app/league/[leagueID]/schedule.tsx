@@ -430,7 +430,7 @@ function PerformerLine({ performer }: { performer: TopPerformer }) {
         resizeMode={isDef ? "contain" : "cover"}
         className={isDef ? "w-[18px] h-[18px]" : "w-[18px] h-[18px] rounded-full bg-white/10"}
       />
-      <Text numberOfLines={1} className="text-[11px] text-gray-400 max-w-[90px]">
+      <Text numberOfLines={1} className="text-[11px] text-gray-400 max-w-[76px]">
         {performer.name}
       </Text>
       <Text style={{ fontVariant: ["tabular-nums"] }} className="text-[11px] font-bold text-[#e2465a]">
@@ -464,16 +464,15 @@ function ScheduleTeamRow({
   const textColor = emphasize || live ? "text-white" : "text-gray-500";
   const weight = emphasize ? "font-bold" : live ? "font-semibold" : "font-medium";
 
-  // Name and score used to live in two separately-stacked columns (score
-  // sharing a column with the performer lines below it), so the score's
-  // top edge lined up with the avatar's top edge instead of its center -
-  // the score always looked "too high" relative to the name next to it.
-  // Now it's one row, vertically centered, so the two line up properly;
-  // performers move to their own row underneath, indented to start under
-  // the name rather than sharing a column with the score.
+  // Two columns: team info + score on the left, a vertical rule, then that
+  // team's top performers stacked on the right. `items-stretch` on the row
+  // makes the rule's height track whichever column is taller, so it runs
+  // exactly the height of this one team's block and stops right at the
+  // horizontal divider between the two teams - not a line that runs the
+  // full card.
   return (
-    <View>
-      <View className="flex-row items-center justify-between">
+    <View className="flex-row items-stretch">
+      <View className="flex-1 flex-row items-center justify-between mr-3">
         <View className="flex-row items-center flex-1 mr-3">
           <Image
             source={typeof avatar === "string" ? { uri: avatar } : avatar}
@@ -495,11 +494,14 @@ function ScheduleTeamRow({
         )}
       </View>
       {performers.length > 0 && (
-        <View className="flex-row flex-wrap gap-x-3 gap-y-1 mt-1.5 ml-[56px]">
-          {performers.map((p, i) => (
-            <PerformerLine key={i} performer={p} />
-          ))}
-        </View>
+        <>
+          <View className="w-px bg-white/10 mr-3" />
+          <View className="justify-center gap-1.5">
+            {performers.map((p, i) => (
+              <PerformerLine key={i} performer={p} />
+            ))}
+          </View>
+        </>
       )}
     </View>
   );
