@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { View, Text, Image, ScrollView, ActivityIndicator, Pressable } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { Feather } from "@expo/vector-icons";
-import { sleeper, backend } from "../../../lib/api";
+import { sleeper } from "../../../lib/api";
 import getMatchupData, { ScheduleData, Starter } from "../../../lib/getMatchupData";
 import { getTopPerformers, TopPerformer, displayName } from "../../../lib/getTopPerformers";
 import {
@@ -23,9 +23,7 @@ import BigPlayToast from "../../../components/BigPlayToast";
 import MatchupFeed from "../../../components/MatchupFeed";
 import CommentsSection from "../../../components/CommentsSection";
 import useBigPlayFeed from "../../../lib/useBigPlayFeed";
-import { ensureSystemPost } from "../../../lib/posts";
-import { finalScoreText } from "../../../lib/announceTransactions";
-import { detectRunsAndComebacks, buildMatchupRecap } from "../../../lib/runsAndComebacks";
+import { ensureMatchupRecapPosted } from "../../../lib/ensureMatchupRecap";
 
 const POSITION_COLOR: Record<string, string> = {
   QB: "#ef4444",
@@ -202,56 +200,28 @@ export default function MatchupDetail() {
     if (!isFinal) return;
 
     let cancelled = false;
-    (async () => {
-      const pts1 = parseFloat(team1.team_points || "0");
-      const pts2 = parseFloat(team2.team_points || "0");
-
-      // The full game's scoring plays, for the run/comeback detection
-      // below - the same players[]/scoringSettings shape useBigPlayFeed
-      // builds, just resolved once here instead of polled.
-      const buildPlayers = (starters: Starter[], fantasyTeam: "team1" | "team2") =>
-        starters
-          .map((s) => {
-            if (!s.id) return null;
-            const meta = playersDataForFeed[s.id];
-            if (!meta || !meta.fn || !meta.ln || !meta.t) return null;
-            return { sleeperId: s.id, fn: meta.fn, ln: meta.ln, pos: meta.pos, team: meta.t, fantasyTeam };
-          })
-          .filter(Boolean);
-      const players = [...buildPlayers(s1, "team1"), ...buildPlayers(s2, "team2")];
-
-      let text = finalScoreText(team1.name, pts1, team2.name, pts2);
-      if (players.length > 0) {
-        try {
-          const feedData = await backend.fetchMatchupFeed(week, season, players, scoringSettings);
-          const runsAndComebacks = detectRunsAndComebacks(feedData.plays || []);
-          text = buildMatchupRecap(team1.name, pts1, team2.name, pts2, runsAndComebacks);
-        } catch (error) {
-          console.error("Error building matchup recap:", error);
-        }
-      }
-      if (cancelled) return;
-
-      ensureSystemPost({
-        id: `matchup_${leagueID}_${week}_${matchupID}`,
-        text,
-        matchupCard: {
-          leagueId: leagueID,
-          week,
-          team1Name: team1.name,
-          team1Score: pts1,
-          team1Avatar: typeof team1.avatar === "string" ? team1.avatar : undefined,
-          team2Name: team2.name,
-          team2Score: pts2,
-          team2Avatar: typeof team2.avatar === "string" ? team2.avatar : undefined,
-          isFinal: true,
-        },
-        leagueId: leagueID,
-        targetType: "matchup",
-        targetId: `${week}:${matchupID}`,
-        targetLabel: `${team1.name} vs ${team2.name} - Week ${week}`,
-      }).catch((error) => console.error("Error posting final score to feed:", error));
-    })();
+    ensureMatchupRecapPosted({
+      leagueId: leagueID,
+      week,
+      season,
+      matchupId: matchupID,
+      team1: {
+        name: team1.name,
+        points: parseFloat(team1.team_points || "0"),
+        avatar: typeof team1.avatar === "string" ? team1.avatar : undefined,
+        starters: s1,
+      },
+      team2: {
+        name: team2.name,
+        points: parseFloat(team2.team_points || "0"),
+        avatar: typeof team2.avatar === "string" ? team2.avatar : undefined,
+        starters: s2,
+      },
+      playersData: playersDataForFeed,
+      scoringSettings,
+    }).catch((error) => {
+      if (!cancelled) console.error("Error posting final score to feed:", error);
+    });
 
     return () => {
       cancelled = true;

@@ -7,6 +7,7 @@ import { sleeper, backend } from "../../../lib/api";
 import getMatchupData, { MatchupMapData, ScheduleData } from "../../../lib/getMatchupData";
 import { getSeasonTotals, getTopNForTeam, getTopNCurrentForTeam, SeasonTotals, TopPerformer } from "../../../lib/getTopPerformers";
 import { getTeamLogo } from "../../../lib/nflTeams";
+import { ensureMatchupRecapPosted } from "../../../lib/ensureMatchupRecap";
 import AnimatedNumber from "../../../components/AnimatedNumber";
 import {
   getNflGameStatusByTeam,
@@ -68,6 +69,15 @@ export default function Schedule() {
   const [seasonTotals, setSeasonTotals] = useState<SeasonTotals>({});
   const [season, setSeason] = useState<string>();
   const [nflGameStatusByTeam, setNflGameStatusByTeam] = useState<Record<string, NflTeamGameState>>({});
+  const [scoringSettings, setScoringSettings] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    if (!leagueID) return;
+    sleeper
+      .getLeague(leagueID)
+      .then(({ data }) => setScoringSettings(data.scoring_settings || {}))
+      .catch((error) => console.error("Error fetching league scoring settings:", error));
+  }, [leagueID]);
 
   useEffect(() => {
     if (!leagueID) return;
@@ -125,6 +135,70 @@ export default function Schedule() {
       cancelled = true;
     };
   }, [leagueID, counter]);
+
+  // Posts each final matchup's recap into the feed the first time this
+  // week's Schedule is actually looked at - not just whichever single
+  // matchup someone happens to click into (the Matchup detail screen's own
+  // version of this same check). Schedule shows the whole week at once and
+  // is what people actually open, so this is what makes recaps reliably
+  // show up without depending on someone drilling into every individual
+  // final game. ensureMatchupRecapPosted is a no-op for a matchup that
+  // already has one, so this is safe to re-run on every relevant state
+  // change without risking a duplicate post.
+  useEffect(() => {
+    if (!leagueID || !season || !playersData || matchups.length === 0) return;
+    let cancelled = false;
+
+    for (const [, teams] of matchups) {
+      const [team1, team2] = teams;
+      if (!team1 || !team2) continue;
+
+      const starters1Full = scheduleData[team1.user_id ?? ""]?.starters_full_data ?? [];
+      const starters2Full = scheduleData[team2.user_id ?? ""]?.starters_full_data ?? [];
+      const rosterFullySet = (slots: typeof starters1Full) =>
+        slots.length > 0 && slots.every((s) => s && Object.keys(s).length > 0);
+      const team1GameState = computeFantasyTeamGameState(
+        starters1Full.map((s) => s.team),
+        nflGameStatusByTeam,
+        rosterFullySet(starters1Full)
+      );
+      const team2GameState = computeFantasyTeamGameState(
+        starters2Full.map((s) => s.team),
+        nflGameStatusByTeam,
+        rosterFullySet(starters2Full)
+      );
+      const isFinal =
+        combineMatchupGameState(team1GameState, team2GameState, isPastMondayNightCutoff()) === "final";
+      if (!isFinal) continue;
+
+      ensureMatchupRecapPosted({
+        leagueId: leagueID,
+        week: counter,
+        season,
+        matchupId: team1.matchup_id ?? "",
+        team1: {
+          name: team1.name,
+          points: parseFloat(team1.team_points || "0"),
+          avatar: typeof team1.avatar === "string" ? team1.avatar : undefined,
+          starters: starters1Full,
+        },
+        team2: {
+          name: team2.name,
+          points: parseFloat(team2.team_points || "0"),
+          avatar: typeof team2.avatar === "string" ? team2.avatar : undefined,
+          starters: starters2Full,
+        },
+        playersData,
+        scoringSettings,
+      }).catch((error) => {
+        if (!cancelled) console.error("Error posting final score to feed:", error);
+      });
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [leagueID, counter, season, matchups, scheduleData, nflGameStatusByTeam, playersData, scoringSettings]);
 
   if (!leagueID) return null;
 
@@ -279,9 +353,9 @@ export default function Schedule() {
                     params: { leagueID, week: String(counter), matchupID },
                   } as any)
                 }
-                className="bg-[#141416] rounded-2xl border border-white/10 mb-3 overflow-hidden"
+                className="bg-[#141416] rounded-3xl border border-white/10 mb-3.5 overflow-hidden"
               >
-                <View className="flex-row items-center justify-between px-4 pt-3 pb-1">
+                <View className="flex-row items-center justify-between px-4 pt-3.5 pb-1.5">
                   <StatusBadge status={status} />
                   <View className="flex-row items-center gap-1">
                     <Text className="text-[10px] font-semibold text-brand">Matchup</Text>
@@ -289,7 +363,7 @@ export default function Schedule() {
                   </View>
                 </View>
 
-                <View className="px-4 pt-1 pb-3.5">
+                <View className="px-4 pt-1.5 pb-4">
                   <ScheduleTeamRow
                     name={team1.name}
                     avatar={team1.avatar}
@@ -299,7 +373,7 @@ export default function Schedule() {
                     live={status === "live"}
                     performers={team1Top2}
                   />
-                  <View className="h-px bg-white/10 my-2.5" />
+                  <View className="h-px bg-white/10 my-3.5" />
                   <ScheduleTeamRow
                     name={team2.name}
                     avatar={team2.avatar}
@@ -347,19 +421,21 @@ function PerformerLine({ performer }: { performer: TopPerformer }) {
     ? (getTeamLogo(performer.team) ?? undefined)
     : `https://sleepercdn.com/content/nfl/players/thumb/${performer.playerId}.jpg`;
 
+  // Picture, then name, then points - reads left-to-right like "who, then
+  // how much" instead of the score-first order it used to be in.
   return (
-    <View className="flex-row items-center justify-end gap-1 mt-1">
-      <Text numberOfLines={1} className="text-[10px] text-gray-500 max-w-[80px]">
-        {performer.name}
-      </Text>
-      <Text style={{ fontVariant: ["tabular-nums"] }} className="text-[10px] font-bold text-[#e2465a]">
-        {performer.ppg.toFixed(1)}
-      </Text>
+    <View className="flex-row items-center gap-1.5">
       <Image
         source={photoUri ? { uri: photoUri } : undefined}
         resizeMode={isDef ? "contain" : "cover"}
-        className={isDef ? "w-[16px] h-[16px]" : "w-[16px] h-[16px] rounded-full bg-white/10"}
+        className={isDef ? "w-[18px] h-[18px]" : "w-[18px] h-[18px] rounded-full bg-white/10"}
       />
+      <Text numberOfLines={1} className="text-[11px] text-gray-400 max-w-[90px]">
+        {performer.name}
+      </Text>
+      <Text style={{ fontVariant: ["tabular-nums"] }} className="text-[11px] font-bold text-[#e2465a]">
+        {performer.ppg.toFixed(1)}
+      </Text>
     </View>
   );
 }
@@ -388,32 +464,43 @@ function ScheduleTeamRow({
   const textColor = emphasize || live ? "text-white" : "text-gray-500";
   const weight = emphasize ? "font-bold" : live ? "font-semibold" : "font-medium";
 
+  // Name and score used to live in two separately-stacked columns (score
+  // sharing a column with the performer lines below it), so the score's
+  // top edge lined up with the avatar's top edge instead of its center -
+  // the score always looked "too high" relative to the name next to it.
+  // Now it's one row, vertically centered, so the two line up properly;
+  // performers move to their own row underneath, indented to start under
+  // the name rather than sharing a column with the score.
   return (
-    <View className="flex-row items-start justify-between">
-      <View className="flex-row items-center flex-1 mr-2 pt-0.5">
-        <Image
-          source={typeof avatar === "string" ? { uri: avatar } : avatar}
-          className="w-[36px] h-[36px] rounded-full mr-2.5 bg-white/10"
-        />
-        <Text numberOfLines={1} className={`text-[14px] flex-1 ${weight} ${textColor}`}>
-          {name}
-        </Text>
-      </View>
-      <View className="items-end">
+    <View>
+      <View className="flex-row items-center justify-between">
+        <View className="flex-row items-center flex-1 mr-3">
+          <Image
+            source={typeof avatar === "string" ? { uri: avatar } : avatar}
+            className="w-[44px] h-[44px] rounded-full mr-3 bg-white/10"
+          />
+          <Text numberOfLines={1} className={`text-[16px] flex-1 ${weight} ${textColor}`}>
+            {name}
+          </Text>
+        </View>
         {showScore ? (
           <AnimatedNumber
             value={parseFloat(points || "0")}
             decimals={1}
             style={{ fontVariant: ["tabular-nums"] }}
-            className={`text-[19px] ${emphasize ? "font-bold" : "font-semibold"} ${textColor}`}
+            className={`text-[23px] ${emphasize ? "font-bold" : "font-semibold"} ${textColor}`}
           />
         ) : (
-          <Text className="text-[12px] text-gray-500">--</Text>
+          <Text className="text-[13px] text-gray-500">--</Text>
         )}
-        {performers.map((p, i) => (
-          <PerformerLine key={i} performer={p} />
-        ))}
       </View>
+      {performers.length > 0 && (
+        <View className="flex-row flex-wrap gap-x-3 gap-y-1 mt-1.5 ml-[56px]">
+          {performers.map((p, i) => (
+            <PerformerLine key={i} performer={p} />
+          ))}
+        </View>
+      )}
     </View>
   );
 }
