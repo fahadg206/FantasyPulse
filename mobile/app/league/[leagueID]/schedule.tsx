@@ -19,8 +19,6 @@ import {
 
 type MatchupEntry = [string, MatchupMapData[]];
 type GameStatus = "live" | "upcoming" | "final";
-/** The matchup's projected favorite + spread (top line) and O/U (bottom line), shown identically on both rows in place of top performers before kickoff. */
-type SpreadLine = { favoriteText: string; overUnder: number };
 
 const STATUS_META: Record<GameStatus, { label: string; color: string }> = {
   live: { label: "LIVE NOW", color: "#dc2626" },
@@ -322,21 +320,16 @@ export default function Schedule() {
       }
 
       // The spread/O-U info each row shows in place of top performers while
-      // the game hasn't started - the same two lines on both rows (who's
-      // favored and by how much, then the O-U), not each team's own
-      // relative number, so it reads the same regardless of which row
-      // you're looking at. undefined (blank slot) when there's no
-      // projection data at all for this matchup yet.
+      // the game hasn't started - split one-per-row rather than repeated
+      // on both: the top row (team1) shows who's favored and by how much,
+      // the bottom row (team2) shows the O-U. undefined (blank slot) on
+      // both when there's no projection data at all for this matchup yet.
       const hasProjection = status === "upcoming" && (team1Proj > 0 || team2Proj > 0);
       const tied = Math.round(team1Proj) === Math.round(team2Proj);
       const favoriteName = team1Proj > team2Proj ? team1.name : team2.name;
       const spread = Math.round(Math.abs(team1Proj - team2Proj));
-      const line: SpreadLine | undefined = hasProjection
-        ? {
-            favoriteText: tied ? "PICK'EM" : `${abbrevName(favoriteName)} -${spread}`,
-            overUnder: Math.round(team1Proj + team2Proj),
-          }
-        : undefined;
+      const favoriteLine = hasProjection ? (tied ? "PICK'EM" : `${abbrevName(favoriteName)} -${spread}`) : undefined;
+      const overUnderLine = hasProjection ? `O/U ${Math.round(team1Proj + team2Proj)}` : undefined;
 
       return {
         matchupID,
@@ -348,7 +341,8 @@ export default function Schedule() {
         team2Leading,
         team1Top2,
         team2Top2,
-        line,
+        favoriteLine,
+        overUnderLine,
       };
     })
     .filter((g): g is NonNullable<typeof g> => g !== null);
@@ -392,7 +386,7 @@ export default function Schedule() {
               <View className="flex-1 h-px bg-white/10" />
             </View>
 
-            {section.games.map(({ matchupID, team1, team2, preGame, status, team1Leading, team2Leading, team1Top2, team2Top2, line }) => (
+            {section.games.map(({ matchupID, team1, team2, preGame, status, team1Leading, team2Leading, team1Top2, team2Top2, favoriteLine, overUnderLine }) => (
               <Pressable
                 key={matchupID}
                 onPress={() =>
@@ -420,7 +414,7 @@ export default function Schedule() {
                     emphasize={team1Leading}
                     live={status === "live"}
                     performers={team1Top2}
-                    line={line}
+                    favoriteText={favoriteLine}
                   />
                   <View className="h-px bg-white/10 my-3.5" />
                   <ScheduleTeamRow
@@ -431,7 +425,7 @@ export default function Schedule() {
                     emphasize={team2Leading}
                     live={status === "live"}
                     performers={team2Top2}
-                    line={line}
+                    overUnderText={overUnderLine}
                   />
                 </View>
               </Pressable>
@@ -488,7 +482,8 @@ function ScheduleTeamRow({
   emphasize,
   live,
   performers,
-  line,
+  favoriteText,
+  overUnderText,
 }: {
   name: string;
   avatar?: string | ImageSourcePropType;
@@ -497,7 +492,9 @@ function ScheduleTeamRow({
   emphasize: boolean;
   live?: boolean;
   performers: TopPerformer[];
-  line?: SpreadLine;
+  /** Pre-game only, and mutually exclusive with each other - one row gets the favorite+spread, the other gets the O-U, never both on the same row. */
+  favoriteText?: string;
+  overUnderText?: string;
 }) {
   // Team names are always white - only the score dims to gray for a
   // final's non-winning side (bold+white still means "the confirmed
@@ -571,13 +568,14 @@ function ScheduleTeamRow({
       </View>
       <View className="w-px bg-white/10 mr-3" />
       <View className="justify-center" style={{ width: 108 }}>
-        {line ? (
-          <View className="items-end">
-            <Text numberOfLines={1} className="text-[13px] font-bold text-[#e2465a]">
-              {line.favoriteText}
-            </Text>
-            <Text className="text-[10px] text-gray-500 mt-1">O/U {line.overUnder}</Text>
-          </View>
+        {favoriteText ? (
+          <Text numberOfLines={1} className="text-right text-[13px] font-bold text-[#e2465a]">
+            {favoriteText}
+          </Text>
+        ) : overUnderText ? (
+          <Text numberOfLines={1} className="text-right text-[12px] font-semibold text-gray-400">
+            {overUnderText}
+          </Text>
         ) : (
           <View className="gap-1.5">
             {performers.map((p, i) => (
