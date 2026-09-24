@@ -71,7 +71,8 @@ export interface Post {
   createdAt: string;
   createdAtMs: number;
   leagueId?: string;
-  targetType?: "matchup" | "trade" | "waiver";
+  /** "analysis" is Boogie's own beat-writer takes not tied to one matchup/trade/waiver - schedule storylines, playoff-picture updates - grouped under a synthetic targetId (e.g. "sos_wk7") rather than a real Sleeper entity */
+  targetType?: "matchup" | "trade" | "waiver" | "analysis";
   targetId?: string;
   targetLabel?: string;
   /** set only on Boogie's injury posts - the fantasy manager's team name the injured player is rostered to, so getRecentInjuryPostsForTeam can query "has this team had injury trouble already" without parsing the post text itself */
@@ -268,7 +269,7 @@ export interface EnsureSystemPostInput {
   imageUrl?: string;
   matchupCard?: MatchupCard;
   leagueId?: string;
-  targetType: "matchup" | "trade" | "waiver";
+  targetType: "matchup" | "trade" | "waiver" | "analysis";
   targetId: string;
   targetLabel?: string;
   injuryTeamName?: string;

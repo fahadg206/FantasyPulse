@@ -5,6 +5,7 @@ import { Feather, Ionicons } from "@expo/vector-icons";
 import { sleeper } from "../../../lib/api";
 import { buildLeagueSimData } from "../../../lib/leagueSimData";
 import { computeStrengthOfSchedule, TeamSOS, WeeklyOpponent, PlayerCard, SOSTier } from "../../../lib/strengthOfSchedule";
+import { ensureScheduleStorylinePost } from "../../../lib/boogieAnalyst";
 
 const helmet = require("../../../assets/images/helmet2.png");
 
@@ -12,8 +13,8 @@ const TIER_META: Record<SOSTier, { color: string; bg: string }> = {
   Brutal: { color: "#ef4444", bg: "bg-red-500/15" },
   Tough: { color: "#f97316", bg: "bg-orange-500/15" },
   Balanced: { color: "#eab308", bg: "bg-yellow-500/15" },
-  Favorable: { color: "#15803d", bg: "bg-green-800/20" },
-  Cakewalk: { color: "#4ade80", bg: "bg-green-400/15" },
+  Favorable: { color: "#4ade80", bg: "bg-green-400/15" },
+  Cakewalk: { color: "#15803d", bg: "bg-green-800/20" },
 };
 
 function tierForStrength(strength: number): SOSTier {
@@ -410,6 +411,12 @@ export default function StrengthOfSchedule() {
         const week = nflState.season_type === "post" ? 18 : nflState.display_week || 1;
         setCurrentWeek(week);
         setTeams(computeStrengthOfSchedule(sim, week));
+        // Reuses the sim just built above - no extra fetch - so visiting
+        // this screen gets Boogie's storyline post up immediately instead
+        // of waiting for a later Dashboard load to trigger it.
+        ensureScheduleStorylinePost(leagueID, sim, week).catch((error) =>
+          console.error("Error posting schedule storyline:", error)
+        );
       } catch (error) {
         console.error("Error computing strength of schedule:", error);
       } finally {

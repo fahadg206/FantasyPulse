@@ -221,7 +221,7 @@ export default function PostCard({
             className="flex-row items-center gap-1.5 mb-3 px-2.5 py-1.5 rounded-lg bg-white/5 self-start"
           >
             <Feather
-              name={post.targetType === "trade" ? "repeat" : post.targetType === "waiver" ? "trending-up" : "activity"}
+              name={post.targetType === "trade" ? "repeat" : post.targetType === "waiver" ? "trending-up" : post.targetType === "analysis" ? "bar-chart-2" : "activity"}
               size={11}
               color="#9ca3af"
             />
@@ -320,7 +320,7 @@ export default function PostCard({
             className="flex-row items-center gap-1.5 mt-2 px-2.5 py-1.5 rounded-lg bg-white/5 self-start"
           >
             <Feather
-              name={post.targetType === "trade" ? "repeat" : post.targetType === "waiver" ? "trending-up" : "activity"}
+              name={post.targetType === "trade" ? "repeat" : post.targetType === "waiver" ? "trending-up" : post.targetType === "analysis" ? "bar-chart-2" : "activity"}
               size={11}
               color="#9ca3af"
             />

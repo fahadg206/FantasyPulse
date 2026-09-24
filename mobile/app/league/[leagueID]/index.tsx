@@ -14,6 +14,7 @@ import HomePoll from "../../../components/HomePoll";
 import TransactionsTicker from "../../../components/TransactionsTicker";
 import TrendingPlayers from "../../../components/TrendingPlayers";
 import { announceLeagueTransactions } from "../../../lib/announceTransactions";
+import { ensureBoogieAnalystPosts } from "../../../lib/boogieAnalyst";
 
 const helmet = require("../../../assets/images/helmet2.png");
 
@@ -151,10 +152,13 @@ export default function Dashboard() {
     // Boogie's trade/waiver posts here (not just from the Trades tab)
     // means the whole season's transaction history gets announced the
     // moment anyone opens the league, not only once someone happens to
-    // tap into Trades specifically.
-    announceLeagueTransactions(leagueID).catch((error) =>
-      console.error("Error backfilling Boogie's transaction posts:", error)
-    );
+    // tap into Trades specifically. Once that's done, Boogie's analyst
+    // pass runs on the same trade events (no second transactions fetch):
+    // a schedule storyline, a value grade on each trade, and - in the
+    // stretch run - a playoff-picture post.
+    announceLeagueTransactions(leagueID)
+      .then((tradeEvents) => ensureBoogieAnalystPosts(leagueID, tradeEvents))
+      .catch((error) => console.error("Error backfilling Boogie's transaction posts:", error));
   }, [leagueID]);
 
   if (!leagueID) return null;
