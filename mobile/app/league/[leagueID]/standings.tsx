@@ -102,6 +102,7 @@ export default function Standings() {
         const managerInfo: ManagerInfo = {};
         for (const user of usersWithRoster) {
           managerInfo[user.user_id] = {
+            user_id: user.user_id,
             avatar: user.avatar ? `https://sleepercdn.com/avatars/thumbs/${user.avatar}` : helmet,
             name: user.display_name,
           };
