@@ -485,16 +485,25 @@ export default function ProfileActivity({
           <SectionLabel>RECENTLY ACQUIRED</SectionLabel>
           <View className="gap-2.5">
             {acquisitions.map((a, i) => (
-              <View key={`${a.playerId}_${a.leagueId}_${i}`} className="flex-row items-center justify-between">
+              <Pressable
+                key={`${a.playerId}_${a.leagueId}_${i}`}
+                onPress={() => router.push(`/league/${a.leagueId}` as any)}
+                className="flex-row items-center justify-between"
+              >
                 <View className="flex-row items-center gap-2 flex-1 mr-2">
                   <Feather name={a.via === "trade" ? "repeat" : "trending-up"} size={12} color="#af1222" />
-                  <Text numberOfLines={1} className="text-white text-[13px] font-semibold flex-1">
-                    {a.name}
-                    {a.pos ? <Text className="text-gray-500"> · {a.pos}</Text> : null}
-                  </Text>
+                  <View className="flex-1">
+                    <Text numberOfLines={1} className="text-white text-[13px] font-semibold">
+                      {a.name}
+                      {a.pos ? <Text className="text-gray-500"> · {a.pos}</Text> : null}
+                    </Text>
+                    <Text numberOfLines={1} className="text-gray-500 text-[10px] mt-0.5">
+                      {a.leagueName}
+                    </Text>
+                  </View>
                 </View>
                 <Text className="text-gray-500 text-[11px]">{formatTwitterTimestamp(a.timestamp)}</Text>
-              </View>
+              </Pressable>
             ))}
           </View>
         </Card>
