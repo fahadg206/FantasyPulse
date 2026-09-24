@@ -66,9 +66,21 @@ const EARLIEST_SLEEPER_SEASON = 2017;
 // never could. Counts every championship a manager has actually won
 // (getManagerHistory only tracks the single best finish ever, not how
 // many times).
+export interface AllTimeNemesis {
+  playerId: string;
+  name: string;
+  pos?: string;
+  team?: string;
+  /** average real points this player has scored against this manager per game actually faced - the ranking metric, not the total */
+  avgPoints: number;
+  games: number;
+}
+
 export interface AllTimeStats {
   career: CareerStats;
   startSit: StartSitAccuracy;
+  /** the single opposing player who's hurt this manager the worst on average whenever they've lined up against them - null if there's no tracked history at all */
+  nemesis: AllTimeNemesis | null;
 }
 
 // Career totals AND all-time start/sit accuracy, computed together in one
@@ -110,7 +122,7 @@ export async function getAllTimeStats(sleeperUserId: string, currentSeason: stri
   };
   const emptyStartSit: StartSitAccuracy = { actualPoints: 0, optimalPoints: 0, accuracy: 0, weeksAnalyzed: 0 };
   if (leagueIds.length === 0) {
-    return { career: emptyCareer, startSit: emptyStartSit };
+    return { career: emptyCareer, startSit: emptyStartSit, nemesis: null };
   }
 
   let wins = 0;
@@ -128,6 +140,19 @@ export async function getAllTimeStats(sleeperUserId: string, currentSeason: stri
   // shared across every league processed below, same as
   // getTopRosteredPlayers/getStartSitAccuracy did independently before.
   let posById: Record<string, string | undefined> | null = null;
+  // Kept alongside posById (same one-time fetch, just not discarding the
+  // fn/ln/t fields) so the nemesis result below can resolve a real
+  // name/position/team instead of just a bare Sleeper id.
+  let playersDataGlobal: Record<string, any> | null = null;
+
+  // Every opposing starter's total + game count against this manager,
+  // across every week of every league they've ever played - "all-time
+  // nemesis" is whichever one comes out with the highest AVERAGE (not
+  // total), computed once the whole crawl below finishes. Shared across
+  // the per-league Promise.all the same safe way wins/losses/etc. already
+  // are (plain synchronous increments, no lost updates across await
+  // boundaries).
+  const nemesisTotals: Record<string, { total: number; games: number }> = {};
 
   await Promise.all(
     leagueIds.map(async (leagueId) => {
@@ -195,6 +220,7 @@ export async function getAllTimeStats(sleeperUserId: string, currentSeason: stri
           const map: Record<string, string | undefined> = {};
           for (const pid in playersData) map[pid] = (playersData as any)[pid]?.pos;
           posById = map;
+          playersDataGlobal = playersData as Record<string, any>;
         }
 
         const weeksCount = Math.max(1, (leagueInfo.settings?.playoff_week_start ?? 15) - 1);
@@ -221,6 +247,25 @@ export async function getAllTimeStats(sleeperUserId: string, currentSeason: stri
           actualPoints += actual;
           optimalPoints += Math.max(optimal, actual);
           weeksAnalyzed += 1;
+
+          // Whoever this manager actually faced that week - tally their
+          // starters' real points toward the nemesis tally regardless of
+          // which league or opponent it was.
+          if (mine.matchup_id !== undefined && mine.matchup_id !== null) {
+            const opponent = (matchups as any[]).find(
+              (m) => m.matchup_id === mine.matchup_id && m.roster_id !== myRoster.roster_id
+            );
+            const oppStarters: string[] = opponent?.starters ?? [];
+            const oppPointsById: Record<string, number> = opponent?.players_points ?? {};
+            for (const pid of oppStarters) {
+              if (!pid || pid === "0") continue;
+              const pts = oppPointsById[pid];
+              if (typeof pts !== "number") continue;
+              if (!nemesisTotals[pid]) nemesisTotals[pid] = { total: 0, games: 0 };
+              nemesisTotals[pid].total += pts;
+              nemesisTotals[pid].games += 1;
+            }
+          }
         }
       } catch (error) {
         console.error(`Error loading all-time stats for league ${leagueId}:`, error);
@@ -229,6 +274,25 @@ export async function getAllTimeStats(sleeperUserId: string, currentSeason: stri
   );
 
   titles.sort((a, b) => Number(b.season) - Number(a.season));
+
+  let nemesis: AllTimeNemesis | null = null;
+  let bestNemesisAvg = -Infinity;
+  for (const playerId in nemesisTotals) {
+    const { total, games: g } = nemesisTotals[playerId];
+    const avgPoints = total / g;
+    if (avgPoints > bestNemesisAvg) {
+      bestNemesisAvg = avgPoints;
+      const meta: any = playersDataGlobal ? playersDataGlobal[playerId] : undefined;
+      nemesis = {
+        playerId,
+        name: meta?.fn && meta?.ln ? `${meta.fn} ${meta.ln}` : meta?.t ? `${meta.t} D/ST` : "Unknown Player",
+        pos: meta?.pos,
+        team: meta?.t,
+        avgPoints,
+        games: g,
+      };
+    }
+  }
 
   const games = wins + losses + ties || 1;
   return {
@@ -248,6 +312,7 @@ export async function getAllTimeStats(sleeperUserId: string, currentSeason: stri
       accuracy: optimalPoints > 0 ? actualPoints / optimalPoints : 0,
       weeksAnalyzed,
     },
+    nemesis,
   };
 }
 

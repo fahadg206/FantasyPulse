@@ -14,6 +14,7 @@ import {
   WeeklyMatchup,
   CareerStats,
   Title,
+  AllTimeNemesis,
 } from "../lib/profileActivity";
 import { formatTwitterTimestamp } from "../lib/formatTime";
 import { getTeamLogo } from "../lib/nflTeams";
@@ -58,6 +59,7 @@ export default function ProfileActivity({
   const [acquisitions, setAcquisitions] = useState<RecentAcquisition[] | null>(null);
   const [career, setCareer] = useState<CareerStats | null>(null);
   const [startSit, setStartSit] = useState<StartSitAccuracy | null>(null);
+  const [nemesis, setNemesis] = useState<AllTimeNemesis | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -84,6 +86,7 @@ export default function ProfileActivity({
         if (cancelled) return;
         setCareer(r.career);
         setStartSit(r.startSit);
+        setNemesis(r.nemesis);
       })
       .catch(console.error);
 
@@ -152,6 +155,45 @@ export default function ProfileActivity({
           >
             {(startSit.accuracy * 100).toFixed(1)}%
           </Text>
+        </View>
+      )}
+
+      {/* All-Time Nemesis - the single opposing player who's put up the
+          highest AVERAGE points against this manager whenever they've
+          actually lined up against them, across every league/season ever
+          tracked - not the most total damage (a name they've simply faced
+          the most), the one who hurts worst per encounter. */}
+      {nemesis && (
+        <View className="flex-row items-center bg-[#141416] rounded-2xl border border-[#ef444433] px-4 py-3.5 mb-4">
+          <View className="w-9 h-9 rounded-full bg-[#ef444422] items-center justify-center mr-3">
+            <Feather name="alert-octagon" size={16} color="#ef4444" />
+          </View>
+          <Image
+            source={{
+              uri:
+                nemesis.pos === "DEF"
+                  ? getTeamLogo(nemesis.team) ?? undefined
+                  : `https://sleepercdn.com/content/nfl/players/thumb/${nemesis.playerId}.jpg`,
+            }}
+            resizeMode={nemesis.pos === "DEF" ? "contain" : "cover"}
+            className={nemesis.pos === "DEF" ? "w-[30px] h-[30px] mr-2.5" : "w-[30px] h-[30px] rounded-full bg-white/10 mr-2.5"}
+          />
+          <View className="flex-1 mr-2">
+            <Text className="text-gray-500 text-[10px] font-bold tracking-widest">ALL-TIME NEMESIS</Text>
+            <Text numberOfLines={1} className="text-white font-bold text-[14px] mt-0.5">
+              {nemesis.name}
+              {nemesis.pos ? <Text className="text-gray-500 font-semibold"> · {nemesis.pos}</Text> : null}
+            </Text>
+            <Text className="text-gray-500 text-[11px] mt-0.5">
+              Faced {nemesis.games} {nemesis.games === 1 ? "time" : "times"}
+            </Text>
+          </View>
+          <View className="items-end">
+            <Text style={{ fontVariant: ["tabular-nums"] }} className="text-[#ef4444] font-extrabold text-[18px]">
+              {nemesis.avgPoints.toFixed(1)}
+            </Text>
+            <Text className="text-gray-500 text-[10px]">pts/gm</Text>
+          </View>
         </View>
       )}
 
