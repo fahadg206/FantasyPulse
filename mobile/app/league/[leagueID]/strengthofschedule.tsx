@@ -39,9 +39,9 @@ function ordinalSuffix(n: number): string {
 }
 
 function scheduleRankLabel(rank: number, total: number): string {
-  if (rank * 2 <= total) return `${rank}${ordinalSuffix(rank)} Hardest`;
+  if (rank * 2 <= total) return rank === 1 ? "Hardest" : `${rank}${ordinalSuffix(rank)} Hardest`;
   const fromEasy = total - rank + 1;
-  return `${fromEasy}${ordinalSuffix(fromEasy)} Easiest`;
+  return fromEasy === 1 ? "Easiest" : `${fromEasy}${ordinalSuffix(fromEasy)} Easiest`;
 }
 
 function tierForStrength(strength: number): SOSTier {

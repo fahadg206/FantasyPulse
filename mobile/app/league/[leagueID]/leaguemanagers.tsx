@@ -8,6 +8,7 @@ import PlayerCard from "../../../components/PlayerCard";
 import { displayName } from "../../../lib/getTopPerformers";
 import { getManagerHistory, ManagerAllTimeStats } from "../../../lib/getManagerHistory";
 import { getCurrentSeasonExtras, CurrentSeasonExtras } from "../../../lib/getCurrentSeasonExtras";
+import { getLeagueValueSettings } from "../../../lib/playerValue";
 import { PowerRankingTier } from "../../../lib/powerRankings";
 import {
   getNflGameStatusByTeam,
@@ -55,6 +56,24 @@ export default function LeagueManagers() {
   const [allTimeStats, setAllTimeStats] = useState<Record<string, ManagerAllTimeStats>>({});
   const [currentExtras, setCurrentExtras] = useState<CurrentSeasonExtras | null>(null);
   const [currentExtrasLoading, setCurrentExtrasLoading] = useState(false);
+  // Pick flow, roster age, rookie-on-roster, and recently-acquired are all
+  // dynasty concepts - in redraft every roster resets each offseason, so
+  // "picks traded away" and "average roster age" mean nothing there. One
+  // cheap league-settings check gates all four, independent of whichever
+  // of the two heavier effects below (all-time stats, GM scout extras)
+  // happens to finish loading first.
+  const [isDynasty, setIsDynasty] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (!leagueID) return;
+    let cancelled = false;
+    getLeagueValueSettings(leagueID)
+      .then((settings) => !cancelled && setIsDynasty(settings.isDynasty))
+      .catch((error) => console.error("Error checking league format:", error));
+    return () => {
+      cancelled = true;
+    };
+  }, [leagueID]);
 
   useEffect(() => {
     if (!leagueID) return;
@@ -349,14 +368,17 @@ export default function LeagueManagers() {
                     label="TRADES"
                     value={String(allStats.totalTrades)}
                   />
-                  <AllTimeTile
-                    label="PICK FLOW"
-                    value={`+${allStats.picksGained} / -${allStats.picksLost}`}
-                  />
+                  {isDynasty && (
+                    <AllTimeTile
+                      label="PICK FLOW"
+                      value={`+${allStats.picksGained} / -${allStats.picksLost}`}
+                    />
+                  )}
                 </View>
               </View>
             )}
 
+            {isDynasty && (
             <View className="px-4 pt-5">
               <Text className="font-bold mb-2.5 text-black dark:text-white text-[15px]">
                 GM Scout <Text className="text-gray-400 font-normal text-[12px]">this season</Text>
@@ -410,6 +432,7 @@ export default function LeagueManagers() {
                 </View>
               )}
             </View>
+            )}
 
             <View className="px-4 pt-5">
               <Text className="font-bold mb-2.5 text-black dark:text-white text-[15px]">Starting Lineup</Text>

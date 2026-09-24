@@ -52,11 +52,11 @@ function ordinalSuffix(n: number): string {
   }
 }
 
-/** "2nd Hardest" / "5th Easiest" - real ordinal-rank framing instead of a bare tier label. `rank` is 1-indexed from hardest. */
+/** "2nd hardest" / "5th easiest" - real ordinal-rank framing instead of a bare tier label. `rank` is 1-indexed from hardest. The #1 in either direction just reads "hardest"/"easiest" - nobody says "the 1st hardest." */
 function scheduleRankLabel(rank: number, total: number): string {
-  if (rank * 2 <= total) return `${rank}${ordinalSuffix(rank)} hardest`;
+  if (rank * 2 <= total) return rank === 1 ? "hardest" : `${rank}${ordinalSuffix(rank)} hardest`;
   const fromEasy = total - rank + 1;
-  return `${fromEasy}${ordinalSuffix(fromEasy)} easiest`;
+  return fromEasy === 1 ? "easiest" : `${fromEasy}${ordinalSuffix(fromEasy)} easiest`;
 }
 
 // ---------------------------------------------------------------------

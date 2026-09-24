@@ -4,6 +4,11 @@ import { computePowerRankings, PowerRankingResult } from "./powerRankings";
 
 export interface CurrentSeasonExtras {
   tier: PowerRankingResult | null;
+  /** picks-traded-flow, roster age, rookie-on-roster, and recently-acquired
+   * only mean anything in a dynasty league - a redraft roster resets every
+   * offseason, so none of that is real signal there. Callers gate their
+   * whole GM Scout section on this instead of checking each field. */
+  isDynasty: boolean;
   avgRosterAge: number | null;
   rookieOnRoster: { sleeperId: string; fn: string; ln: string; pos: string } | null;
   recentlyAcquired: {
@@ -20,19 +25,25 @@ export interface CurrentSeasonExtras {
 // player data includes real age/years_exp), a rookie on the roster, and the
 // most recent add. Kept separate from getManagerHistory.ts because none of
 // this needs the multi-season previous_league_id chain - just this
-// season's league.
+// season's league. The roster-age/rookie/recently-acquired fields are
+// dynasty-only concepts (see isDynasty above) - for a redraft league this
+// skips the ~5MB full Sleeper player blob and the recently-acquired
+// transaction crawl entirely, not just hiding them in the UI.
 export async function getCurrentSeasonExtras(
   leagueId: string,
   managerUserId: string
 ): Promise<CurrentSeasonExtras> {
-  const [usersRes, rostersRes, nflStateRes, settings, playersData, allPlayers] = await Promise.all([
+  const [usersRes, rostersRes, nflStateRes, settings, playersData] = await Promise.all([
     sleeper.getLeagueUsers(leagueId),
     sleeper.getLeagueRosters(leagueId),
     sleeper.getNflState(),
     getLeagueValueSettings(leagueId),
     backend.fetchPlayers(leagueId),
-    fetch("https://api.sleeper.app/v1/players/nfl").then((r) => r.json()),
   ]);
+
+  const allPlayers: Record<string, any> = settings.isDynasty
+    ? await fetch("https://api.sleeper.app/v1/players/nfl").then((r) => r.json())
+    : {};
 
   const myRoster = rostersRes.data.find((r: any) => r.owner_id === managerUserId);
 
@@ -71,7 +82,7 @@ export async function getCurrentSeasonExtras(
 
   let avgRosterAge: number | null = null;
   let rookieOnRoster: CurrentSeasonExtras["rookieOnRoster"] = null;
-  if (myRoster) {
+  if (myRoster && settings.isDynasty) {
     const rosterPlayers = (myRoster.players || [])
       .map((id: string) => allPlayers[id])
       .filter(Boolean);
@@ -88,7 +99,7 @@ export async function getCurrentSeasonExtras(
   }
 
   let recentlyAcquired: CurrentSeasonExtras["recentlyAcquired"] = null;
-  if (myRoster) {
+  if (myRoster && settings.isDynasty) {
     try {
       const lastWeek = Math.max(1, (nflStateRes.data.display_week || 1));
       const weeks = Array.from({ length: lastWeek }, (_, i) => i + 1);
@@ -131,5 +142,5 @@ export async function getCurrentSeasonExtras(
     }
   }
 
-  return { tier, avgRosterAge, rookieOnRoster, recentlyAcquired };
+  return { tier, isDynasty: settings.isDynasty, avgRosterAge, rookieOnRoster, recentlyAcquired };
 }
