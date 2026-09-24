@@ -78,7 +78,7 @@ export interface ComputePowerRankingsInput {
 }
 
 /** what fraction of the league this value is at least as good as, 0-100 */
-function percentileRank(values: number[], value: number): number {
+export function percentileRank(values: number[], value: number): number {
   if (values.length <= 1) return 100;
   const atOrBelow = values.filter((v) => v <= value).length - 1; // exclude self once
   return Math.round((atOrBelow / (values.length - 1)) * 100);

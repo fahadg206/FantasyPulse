@@ -67,6 +67,12 @@ export default function More() {
       path: `/league/${leagueID}/rivalry`,
     },
     {
+      label: "Strength of Schedule",
+      description: "Who's got it easy the rest of the way, and who's facing a gauntlet",
+      icon: <Ionicons name="flame" size={20} color="#af1222" />,
+      path: `/league/${leagueID}/strengthofschedule`,
+    },
+    {
       label: "Trade Calculator",
       description: "Check if a trade is fair before you make it",
       icon: <Feather name="repeat" size={20} color="#af1222" />,
