@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { View, Text, Pressable, Image } from "react-native";
+import { View, Text, Pressable, Image, Modal, FlatList } from "react-native";
 import { useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import { MotiView } from "moti";
@@ -77,6 +77,7 @@ export default function ProfileActivity({
   const [career, setCareer] = useState<CareerStats | null>(null);
   const [startSit, setStartSit] = useState<StartSitAccuracy | null>(null);
   const [nemesis, setNemesis] = useState<AllTimeNemesis | null>(null);
+  const [nemesisLogOpen, setNemesisLogOpen] = useState(false);
 
   // The heavy all-time crawl - starts as soon as sleeperUserId is known,
   // not gated behind stats. Career record and start/sit accuracy used to
@@ -191,7 +192,10 @@ export default function ProfileActivity({
           tracked - not the most total damage (a name they've simply faced
           the most), the one who hurts worst per encounter. */}
       {nemesis && (
-        <View className="flex-row items-center bg-[#141416] rounded-2xl border border-[#ef444433] px-4 py-3.5 mb-4">
+        <Pressable
+          onPress={() => setNemesisLogOpen(true)}
+          className="flex-row items-center bg-[#141416] rounded-2xl border border-[#ef444433] px-4 py-3.5 mb-4"
+        >
           <View className="w-9 h-9 rounded-full bg-[#ef444422] items-center justify-center mr-3">
             <Feather name="alert-octagon" size={16} color="#ef4444" />
           </View>
@@ -212,7 +216,7 @@ export default function ProfileActivity({
               {nemesis.pos ? <Text className="text-gray-500 font-semibold"> · {nemesis.pos}</Text> : null}
             </Text>
             <Text className="text-gray-500 text-[11px] mt-0.5">
-              Faced {nemesis.games} {nemesis.games === 1 ? "time" : "times"}
+              Faced {nemesis.games} {nemesis.games === 1 ? "time" : "times"} · tap for the games
             </Text>
           </View>
           <View className="items-end">
@@ -221,8 +225,65 @@ export default function ProfileActivity({
             </Text>
             <Text className="text-gray-500 text-[10px]">pts/gm</Text>
           </View>
-        </View>
+        </Pressable>
       )}
+
+      <Modal
+        visible={nemesisLogOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setNemesisLogOpen(false)}
+      >
+        <Pressable className="flex-1 bg-black/50 justify-end" onPress={() => setNemesisLogOpen(false)}>
+          <Pressable className="bg-[#141416] rounded-t-2xl max-h-[75%] overflow-hidden" onPress={() => {}}>
+            <View className="items-center pt-3 pb-2">
+              <View className="w-9 h-1 rounded-full bg-white/15" />
+            </View>
+            {nemesis && (
+              <>
+                <View className="flex-row items-center px-5 pb-3 border-b border-white/10">
+                  <Image
+                    source={{
+                      uri:
+                        nemesis.pos === "DEF"
+                          ? getTeamLogo(nemesis.team) ?? undefined
+                          : `https://sleepercdn.com/content/nfl/players/thumb/${nemesis.playerId}.jpg`,
+                    }}
+                    resizeMode={nemesis.pos === "DEF" ? "contain" : "cover"}
+                    className={nemesis.pos === "DEF" ? "w-9 h-9 mr-3" : "w-9 h-9 rounded-full bg-white/10 mr-3"}
+                  />
+                  <View className="flex-1">
+                    <Text className="text-white font-bold text-[14px]">{nemesis.name}</Text>
+                    <Text className="text-gray-500 text-[11px]">
+                      {nemesis.avgPoints.toFixed(1)} pts/gm across {nemesis.games} {nemesis.games === 1 ? "game" : "games"}
+                    </Text>
+                  </View>
+                </View>
+                <FlatList
+                  data={nemesis.log}
+                  keyExtractor={(g, i) => `${g.leagueId}_${g.season}_${g.week}_${i}`}
+                  contentContainerClassName="px-5 py-2 pb-8"
+                  renderItem={({ item: g }) => (
+                    <View className="flex-row items-center justify-between py-2.5 border-b border-white/5">
+                      <View className="flex-1 mr-2">
+                        <Text className="text-white text-[13px] font-semibold">
+                          {g.season} · Week {g.week}
+                        </Text>
+                        <Text numberOfLines={1} className="text-gray-500 text-[11px] mt-0.5">
+                          {g.leagueName}
+                        </Text>
+                      </View>
+                      <Text style={{ fontVariant: ["tabular-nums"] }} className="text-[#ef4444] font-extrabold text-[15px]">
+                        {g.points.toFixed(1)}
+                      </Text>
+                    </View>
+                  )}
+                />
+              </>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* Leagues */}
       <SectionLabel>{season} SEASON</SectionLabel>

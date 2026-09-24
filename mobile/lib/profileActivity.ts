@@ -103,6 +103,14 @@ const EARLIEST_SLEEPER_SEASON = 2017;
 // never could. Counts every championship a manager has actually won
 // (getManagerHistory only tracks the single best finish ever, not how
 // many times).
+export interface NemesisGame {
+  points: number;
+  week: number;
+  season: string;
+  leagueId: string;
+  leagueName: string;
+}
+
 export interface AllTimeNemesis {
   playerId: string;
   name: string;
@@ -111,6 +119,8 @@ export interface AllTimeNemesis {
   /** average real points this player has scored against this manager per game actually faced - the ranking metric, not the total */
   avgPoints: number;
   games: number;
+  /** every individual game this player actually put those points up in against this manager, most recent first - what tapping the nemesis card drills into */
+  log: NemesisGame[];
 }
 
 export interface AllTimeStats {
@@ -189,7 +199,7 @@ export async function getAllTimeStats(sleeperUserId: string, currentSeason: stri
   // the per-league Promise.all the same safe way wins/losses/etc. already
   // are (plain synchronous increments, no lost updates across await
   // boundaries).
-  const nemesisTotals: Record<string, { total: number; games: number }> = {};
+  const nemesisTotals: Record<string, { total: number; games: number; log: NemesisGame[] }> = {};
 
   await Promise.all(
     leagueIds.map(async (leagueId) => {
@@ -270,17 +280,18 @@ export async function getAllTimeStats(sleeperUserId: string, currentSeason: stri
           )
         );
 
-        for (const matchups of weekResults) {
+        weekResults.forEach((matchups, weekIdx) => {
+          const week = weeks[weekIdx];
           const mine = (matchups as any[]).find((m) => m.roster_id === myRoster.roster_id);
-          if (!mine?.starters || !mine?.players_points || !mine?.players) continue;
+          if (!mine?.starters || !mine?.players_points || !mine?.players) return;
 
           const starters: string[] = mine.starters.filter((id: string) => id && id !== "0");
           const rosterPlayerIds: string[] = mine.players;
-          if (starters.length === 0 || rosterPlayerIds.length === 0) continue;
+          if (starters.length === 0 || rosterPlayerIds.length === 0) return;
 
           const pointsById: Record<string, number> = mine.players_points;
           const weekHasRealScoring = Object.values(pointsById).some((p) => (p as number) !== 0);
-          if (!weekHasRealScoring) continue;
+          if (!weekHasRealScoring) return;
 
           const actual = starters.reduce((sum, id) => sum + (pointsById[id] ?? 0), 0);
           const optimal = optimalLineupPoints(rosterPlayerIds, pointsById, posById!, slots);
@@ -302,12 +313,19 @@ export async function getAllTimeStats(sleeperUserId: string, currentSeason: stri
               if (!pid || pid === "0") continue;
               const pts = oppPointsById[pid];
               if (typeof pts !== "number") continue;
-              if (!nemesisTotals[pid]) nemesisTotals[pid] = { total: 0, games: 0 };
+              if (!nemesisTotals[pid]) nemesisTotals[pid] = { total: 0, games: 0, log: [] };
               nemesisTotals[pid].total += pts;
               nemesisTotals[pid].games += 1;
+              nemesisTotals[pid].log.push({
+                points: pts,
+                week,
+                season: leagueInfo.season ?? "",
+                leagueId,
+                leagueName: leagueInfo.name ?? "Unknown League",
+              });
             }
           }
-        }
+        });
       } catch (error) {
         console.error(`Error loading all-time stats for league ${leagueId}:`, error);
       }
@@ -339,7 +357,7 @@ export async function getAllTimeStats(sleeperUserId: string, currentSeason: stri
 
   let nemesis: AllTimeNemesis | null = null;
   if (nemesisPlayerId) {
-    const { total, games: g } = nemesisTotals[nemesisPlayerId];
+    const { total, games: g, log } = nemesisTotals[nemesisPlayerId];
     const avgPoints = total / g;
     let meta: any = playersDataGlobal ? playersDataGlobal[nemesisPlayerId] : undefined;
     // Not in this crawl's current-roster-scoped player data - most likely
@@ -353,6 +371,7 @@ export async function getAllTimeStats(sleeperUserId: string, currentSeason: stri
       team: meta?.t,
       avgPoints,
       games: g,
+      log: [...log].sort((a, b) => Number(b.season) - Number(a.season) || b.week - a.week),
     };
   }
 
