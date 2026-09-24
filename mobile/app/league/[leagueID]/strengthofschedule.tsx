@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { View, Text, Image, Pressable, ScrollView, ActivityIndicator, Modal } from "react-native";
+import { View, Text, Image, Pressable, ScrollView, ActivityIndicator, Modal, RefreshControl } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { sleeper } from "../../../lib/api";
@@ -437,10 +437,13 @@ export default function StrengthOfSchedule() {
   const [currentWeek, setCurrentWeek] = useState(1);
   const [selectedTeam, setSelectedTeam] = useState<TeamSOS | null>(null);
   const [selectedWeek, setSelectedWeek] = useState<WeeklyOpponent | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     if (!leagueID) return;
     let cancelled = false;
+    const isInitial = refreshKey === 0;
     (async () => {
       try {
         const [{ data: nflState }, sim] = await Promise.all([sleeper.getNflState(), buildLeagueSimData(leagueID)]);
@@ -457,13 +460,16 @@ export default function StrengthOfSchedule() {
       } catch (error) {
         console.error("Error computing strength of schedule:", error);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          if (isInitial) setLoading(false);
+          else setRefreshing(false);
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [leagueID]);
+  }, [leagueID, refreshKey]);
 
   if (!leagueID) return null;
 
@@ -489,7 +495,20 @@ export default function StrengthOfSchedule() {
 
   return (
     <>
-      <ScrollView className="flex-1 bg-[#0c0c0e]" contentContainerClassName="p-4 pb-10">
+      <ScrollView
+        className="flex-1 bg-[#0c0c0e]"
+        contentContainerClassName="p-4 pb-10"
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              setRefreshKey((k) => k + 1);
+            }}
+            tintColor="#af1222"
+          />
+        }
+      >
         <Text className="text-[11px] font-bold tracking-widest text-brand mb-1">STRENGTH OF SCHEDULE</Text>
         <Text className="text-white text-[21px] font-bold">Who's Got It Easy?</Text>
         <Text className="text-gray-500 text-[12px] mt-1.5">

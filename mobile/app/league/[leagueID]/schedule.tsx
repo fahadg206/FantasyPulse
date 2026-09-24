@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { View, Text, Image, Pressable, ScrollView, ActivityIndicator, ImageSourcePropType } from "react-native";
+import { View, Text, Image, Pressable, ScrollView, ActivityIndicator, ImageSourcePropType, RefreshControl } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import { MotiView } from "moti";
@@ -63,6 +63,7 @@ export default function Schedule() {
   const { leagueID } = useLocalSearchParams<{ leagueID: string }>();
   const router = useRouter();
   const [counter, setCounter] = useState(1);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [matchups, setMatchups] = useState<MatchupEntry[]>([]);
   const [scheduleData, setScheduleData] = useState<ScheduleData>({});
   const [loading, setLoading] = useState(true);
@@ -124,7 +125,7 @@ export default function Schedule() {
     return () => {
       cancelled = true;
     };
-  }, [leagueID, counter]);
+  }, [leagueID, counter, refreshKey]);
 
   // Posts each final matchup's recap into the feed the first time this
   // week's Schedule is actually looked at - not just whichever single
@@ -418,7 +419,12 @@ export default function Schedule() {
         </View>
       </View>
 
-      <ScrollView contentContainerClassName="px-4 py-4">
+      <ScrollView
+        contentContainerClassName="px-4 py-4"
+        refreshControl={
+          <RefreshControl refreshing={false} onRefresh={() => setRefreshKey((k) => k + 1)} tintColor="#af1222" />
+        }
+      >
         {sections.map((section) => (
           <View key={section.status} className="mb-2">
             <View className="flex-row items-center gap-2 mb-2.5">

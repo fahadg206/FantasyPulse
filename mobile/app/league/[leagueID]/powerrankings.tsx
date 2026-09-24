@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { View, Text, Image, Pressable, ScrollView, ActivityIndicator } from "react-native";
+import { View, Text, Image, Pressable, ScrollView, ActivityIndicator, RefreshControl } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import { sleeper, backend } from "../../../lib/api";
@@ -158,10 +158,13 @@ export default function PowerRankings() {
   const [teamsById, setTeamsById] = useState<Record<string, TeamDisplay>>({});
   const [recordById, setRecordById] = useState<Record<string, { wins: number; losses: number }>>({});
   const [leagueSettings, setLeagueSettings] = useState<LeagueValueSettings | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     if (!leagueID) return;
     let cancelled = false;
+    const isInitial = refreshKey === 0;
 
     (async () => {
       try {
@@ -223,17 +226,21 @@ export default function PowerRankings() {
         setRecordById(records);
         setLeagueSettings(settings);
         setRankings(result);
-        setLoading(false);
+        if (isInitial) setLoading(false);
+        else setRefreshing(false);
       } catch (error) {
         console.error("Error computing power rankings:", error);
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          if (isInitial) setLoading(false);
+          else setRefreshing(false);
+        }
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [leagueID]);
+  }, [leagueID, refreshKey]);
 
   if (!leagueID) return null;
 
@@ -272,7 +279,20 @@ export default function PowerRankings() {
         </Text>
       </View>
 
-      <ScrollView contentContainerClassName="px-4 pb-8" showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerClassName="px-4 pb-8"
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              setRefreshKey((k) => k + 1);
+            }}
+            tintColor="#af1222"
+          />
+        }
+      >
         {sections.map(({ tier, teams }) => {
           const meta = TIER_META[tier];
           return (

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, Image, ScrollView, ActivityIndicator, Pressable } from "react-native";
+import { View, Text, Image, ScrollView, ActivityIndicator, Pressable, RefreshControl } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { getLeagueHistory, SeasonHistory } from "../../../lib/getLeagueHistory";
@@ -61,6 +61,8 @@ export default function LeagueHistoryScreen() {
   const { leagueID } = useLocalSearchParams<{ leagueID: string }>();
   const [history, setHistory] = useState<SeasonHistory[] | null>(null);
   const [selectedLeagueId, setSelectedLeagueId] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -83,12 +85,15 @@ export default function LeagueHistoryScreen() {
           setHistory([]);
           setSelectedLeagueId((prev) => prev ?? leagueID);
         }
+      })
+      .finally(() => {
+        if (!cancelled) setRefreshing(false);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [leagueID]);
+  }, [leagueID, refreshKey]);
 
   const seasonOptions = useMemo(() => {
     const options = (history ?? []).map((s) => ({ label: s.season, leagueId: s.leagueId }));
@@ -104,7 +109,21 @@ export default function LeagueHistoryScreen() {
   if (!leagueID) return null;
 
   return (
-    <ScrollView ref={scrollRef} className="flex-1 bg-[#0c0c0e]" contentContainerClassName="p-4">
+    <ScrollView
+      ref={scrollRef}
+      className="flex-1 bg-[#0c0c0e]"
+      contentContainerClassName="p-4"
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={() => {
+            setRefreshing(true);
+            setRefreshKey((k) => k + 1);
+          }}
+          tintColor="#af1222"
+        />
+      }
+    >
       <Text className="text-[11px] font-bold tracking-widest text-brand mb-1">LEAGUE HISTORY</Text>
       <Text className="text-white text-[20px] font-bold mb-5">Champions &amp; Records</Text>
 

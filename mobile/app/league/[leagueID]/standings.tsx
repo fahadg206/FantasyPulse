@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { View, Text, Image, FlatList, ScrollView, ActivityIndicator, Pressable, Modal } from "react-native";
+import { View, Text, Image, FlatList, ScrollView, ActivityIndicator, Pressable, Modal, RefreshControl } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons, Feather } from "@expo/vector-icons";
 import { sleeper, backend } from "../../../lib/api";
@@ -50,6 +50,12 @@ export default function Standings() {
   const [loading, setLoading] = useState(true);
   const [loadingMessage, setLoadingMessage] = useState("Loading Standings");
   const [divisionNames, setDivisionNames] = useState<Record<number, string>>({});
+  // Bumping this re-runs the full load effect below - pull-to-refresh's
+  // only job. refreshKey === 0 means "this run is the initial mount," so
+  // the full-screen loading state stays reserved for that one; every
+  // later run (a refresh) only ever touches the small pull spinner.
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
   const [viewMode, setViewMode] = useState<"overall" | "division">("overall");
   const [whatIfOpen, setWhatIfOpen] = useState(false);
   // Which team's action sheet ("View Team" / "View Profile") is open, if
@@ -80,6 +86,7 @@ export default function Standings() {
   useEffect(() => {
     if (!leagueID) return;
     let cancelled = false;
+    const isInitial = refreshKey === 0;
 
     (async () => {
       try {
@@ -213,18 +220,22 @@ export default function Standings() {
         if (!cancelled) {
           setPreseason(allZeroRecord);
           setSortedTeamData(teamArray.map(([id]) => [id, managerInfo[id]]));
-          setLoading(false);
+          if (isInitial) setLoading(false);
+          else setRefreshing(false);
         }
       } catch (error) {
         console.error("Error fetching standings data:", error);
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          if (isInitial) setLoading(false);
+          else setRefreshing(false);
+        }
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [leagueID]);
+  }, [leagueID, refreshKey]);
 
   if (loading) {
     return (
@@ -311,6 +322,16 @@ export default function Standings() {
         <FlatList
           data={sortedTeamData}
           keyExtractor={([userId]) => userId}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => {
+                setRefreshing(true);
+                setRefreshKey((k) => k + 1);
+              }}
+              tintColor="#af1222"
+            />
+          }
           renderItem={({ item: [userId, user], index }) => {
             const rank = index + 1;
             return (
@@ -327,7 +348,18 @@ export default function Standings() {
           }}
         />
       ) : (
-        <ScrollView>
+        <ScrollView
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => {
+                setRefreshing(true);
+                setRefreshKey((k) => k + 1);
+              }}
+              tintColor="#af1222"
+            />
+          }
+        >
           {Array.from({ length: Object.keys(divisionNames).length }, (_, i) => i + 1).map((div) => {
             const teams = sortedTeamData.filter(([, u]) => u.division === div);
             if (teams.length === 0) return null;
