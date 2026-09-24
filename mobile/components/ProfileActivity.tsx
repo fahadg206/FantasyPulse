@@ -295,17 +295,44 @@ export default function ProfileActivity({
                   )}
                 </View>
               ) : (
-                <View className="flex-row items-center justify-between">
-                  <MatchupSide name={m.myTeamName} score={m.myScore} leading={m.myScore >= m.oppScore} avatar={m.myAvatar} />
-                  <Text className="text-gray-600 text-[11px] mx-2">vs</Text>
-                  <MatchupSide
-                    name={m.oppTeamName}
-                    score={m.oppScore}
-                    leading={m.oppScore > m.myScore}
-                    avatar={m.oppAvatar}
-                    align="right"
-                  />
-                </View>
+                <>
+                  <View className="flex-row items-center justify-between">
+                    <MatchupSide
+                      name={m.myTeamName}
+                      score={m.myScore}
+                      leading={m.status !== "pre" && m.myScore >= m.oppScore}
+                      avatar={m.myAvatar}
+                      showScore={m.status !== "pre"}
+                    />
+                    <Text className="text-gray-600 text-[11px] mx-2">vs</Text>
+                    <MatchupSide
+                      name={m.oppTeamName}
+                      score={m.oppScore}
+                      leading={m.status !== "pre" && m.oppScore > m.myScore}
+                      avatar={m.oppAvatar}
+                      align="right"
+                      showScore={m.status !== "pre"}
+                    />
+                  </View>
+
+                  {/* Pre-game only - same favorite+spread / O-U read
+                      Schedule and the Dashboard scoreboard already show,
+                      off the same real weekly projections. */}
+                  {m.status === "pre" && (m.myProj > 0 || m.oppProj > 0) && (
+                    <View className="flex-row items-center justify-center gap-1.5 mt-2.5 pt-2.5 border-t border-white/5">
+                      <Feather name="bar-chart-2" size={10} color="#6b7280" />
+                      <Text className="text-gray-400 text-[11px] font-bold">
+                        {Math.round(m.myProj) === Math.round(m.oppProj)
+                          ? "PICK'EM"
+                          : m.myProj > m.oppProj
+                            ? `${abbrevTeamName(m.myTeamName)} -${Math.round(m.myProj - m.oppProj)}`
+                            : `${abbrevTeamName(m.oppTeamName)} -${Math.round(m.oppProj - m.myProj)}`}
+                      </Text>
+                      <Text className="text-gray-700 text-[11px]">·</Text>
+                      <Text className="text-gray-500 text-[11px]">O/U {Math.round(m.myProj + m.oppProj)}</Text>
+                    </View>
+                  )}
+                </>
               )}
             </Pressable>
           ))}
@@ -411,12 +438,15 @@ function MatchupSide({
   leading,
   avatar,
   align = "left",
+  showScore = true,
 }: {
   name: string;
   score: number;
   leading: boolean;
   avatar?: string;
   align?: "left" | "right";
+  /** false pre-game - a real score has nothing to show yet, so this renders "-" instead of a misleading "0.0" */
+  showScore?: boolean;
 }) {
   return (
     <View className={`flex-1 items-${align === "right" ? "end" : "start"}`}>
@@ -429,12 +459,20 @@ function MatchupSide({
           {name}
         </Text>
       </View>
-      <Text
-        style={{ fontVariant: ["tabular-nums"] }}
-        className={`text-[17px] mt-0.5 ${leading ? "text-white font-extrabold" : "text-gray-500 font-bold"}`}
-      >
-        {score.toFixed(1)}
-      </Text>
+      {showScore ? (
+        <Text
+          style={{ fontVariant: ["tabular-nums"] }}
+          className={`text-[17px] mt-0.5 ${leading ? "text-white font-extrabold" : "text-gray-500 font-bold"}`}
+        >
+          {score.toFixed(1)}
+        </Text>
+      ) : (
+        <Text className="text-gray-600 text-[13px] mt-0.5">--</Text>
+      )}
     </View>
   );
+}
+
+function abbrevTeamName(name: string) {
+  return name.length > 12 ? `${name.slice(0, 11)}…` : name;
 }

@@ -489,6 +489,11 @@ export interface WeeklyMatchup {
   hasOpponent: boolean;
   /** true only while real NFL games are actually underway for this matchup - not "final" and not "hasn't started" */
   isLive: boolean;
+  /** same 3-state read isLive is derived from - lets the UI tell "hasn't started" apart from "final" (both isLive: false) */
+  status: "pre" | "live" | "final";
+  /** each side's projected points for the week (real weekly projections, summed across real starters) - only meaningful pre-game, but always computed */
+  myProj: number;
+  oppProj: number;
   /**
    * Sleeper's public API has no documented field for "this is a Chopped
    * (weekly-elimination) league" or "this roster was eliminated in week
@@ -644,7 +649,18 @@ export async function getWeeklyMatchups(
         const oppState = opponent
           ? computeFantasyTeamGameState(startersTeams(opponent.starters), statusByTeam, rosterFullySet(opponent.starters))
           : "pre";
-        const isLive = combineMatchupGameState(myState, oppState, pastMondayCutoff) === "live";
+        const status = combineMatchupGameState(myState, oppState, pastMondayCutoff);
+        const isLive = status === "live";
+
+        // Same weekly-projection sum Schedule/the Dashboard scoreboard use
+        // for their pre-game favorite+O-U line - real per-player
+        // projections off the real starters on each side.
+        const projFor = (starters: string[] | undefined) =>
+          (starters ?? []).reduce((sum, id) => {
+            if (!id || id === "0") return sum;
+            const p = (playersData as any)[id]?.wi?.[week.toString()]?.p;
+            return p !== undefined ? sum + parseFloat(p) : sum;
+          }, 0);
 
         return {
           leagueId: league.leagueId,
@@ -659,6 +675,9 @@ export async function getWeeklyMatchups(
           oppAvatar: opponent ? teamAvatar(opponent.roster_id) : undefined,
           hasOpponent: !!opponent,
           isLive,
+          status,
+          myProj: projFor(myMatchup.starters),
+          oppProj: opponent ? projFor(opponent.starters) : 0,
           isChoppedFormat,
           rank,
           totalActiveTeams,
