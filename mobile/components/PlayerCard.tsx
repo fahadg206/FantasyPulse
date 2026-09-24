@@ -1,4 +1,5 @@
-import { View, Text, Image } from "react-native";
+import { View, Text, Image, Pressable } from "react-native";
+import { Feather } from "@expo/vector-icons";
 import { getTeamColor, getTeamLogo } from "../lib/nflTeams";
 
 type Props = {
@@ -10,6 +11,8 @@ type Props = {
   variant?: "row" | "tile";
   rightSlot?: React.ReactNode;
   bottomSlot?: React.ReactNode;
+  /** shows a small tappable info affordance that opens the full player detail (game log, season trend) - its own nested Pressable with stopPropagation, so it's safe to add even where the whole card already has its own tap behavior (add/remove from a trade, etc.) */
+  onExpand?: () => void;
 };
 
 // Mirrors the web app's player-card treatment: the team's primary color fills
@@ -24,6 +27,7 @@ export default function PlayerCard({
   variant = "row",
   rightSlot,
   bottomSlot,
+  onExpand,
 }: Props) {
   const color = getTeamColor(team);
   const logo = getTeamLogo(team);
@@ -31,9 +35,24 @@ export default function PlayerCard({
     photoUriOverride ??
     (position === "DEF" ? logo ?? undefined : `https://sleepercdn.com/content/nfl/players/thumb/${playerId}.jpg`);
 
+  const expandButton = (positionClass: string) =>
+    onExpand && (
+      <Pressable
+        onPress={(e) => {
+          e.stopPropagation();
+          onExpand();
+        }}
+        hitSlop={8}
+        className={`absolute ${positionClass} w-5 h-5 rounded-full bg-black/30 items-center justify-center z-10`}
+      >
+        <Feather name="bar-chart-2" size={10} color="#fff" />
+      </Pressable>
+    );
+
   if (variant === "tile") {
     return (
       <View style={{ backgroundColor: color }} className="rounded-xl overflow-hidden">
+        {expandButton("top-1.5 right-1.5")}
         {logo && (
           <Image
             source={{ uri: logo }}
@@ -62,6 +81,7 @@ export default function PlayerCard({
 
   return (
     <View style={{ backgroundColor: color }} className="rounded-xl overflow-hidden">
+      {expandButton("top-1.5 left-1.5")}
       {logo && (
         <Image
           source={{ uri: logo }}

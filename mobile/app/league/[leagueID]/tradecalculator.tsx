@@ -5,6 +5,7 @@ import { Feather, FontAwesome } from "@expo/vector-icons";
 import { sleeper, backend } from "../../../lib/api";
 import ManagerPicker, { PickableManager } from "../../../components/ManagerPicker";
 import PlayerCard from "../../../components/PlayerCard";
+import PlayerDetailModal from "../../../components/PlayerDetailModal";
 import TradeHistory from "../../../components/TradeHistory";
 import { displayName } from "../../../lib/getTopPerformers";
 import { getLeagueValueSettings, LeagueValueSettings, RawPlayerValue, computeAdjustedValue } from "../../../lib/playerValue";
@@ -93,6 +94,7 @@ export default function TradeCalculator() {
   const [teamIds, setTeamIds] = useState<(string | null)[]>([null, null]);
   const [items, setItems] = useState<TradeItem[]>([]);
   const [picker, setPicker] = useState<{ forTeam: string; chosenPlayerId?: string } | null>(null);
+  const [detailPlayer, setDetailPlayer] = useState<{ playerId?: string; name: string; position: string; team?: string } | null>(null);
   const [expandedLineup, setExpandedLineup] = useState<Record<string, boolean>>({});
 
   // --- win-impact, fetched lazily + recomputed on trade edits ---
@@ -310,6 +312,7 @@ export default function TradeCalculator() {
   const hasAnyItems = items.length > 0;
 
   return (
+    <>
     <ScrollView className="flex-1 bg-[#0c0c0e]" contentContainerClassName="p-4 pb-10">
       <View className="mb-1">
         <Text className="text-[11px] font-bold tracking-widest text-brand">TRADE CALCULATOR</Text>
@@ -443,6 +446,7 @@ export default function TradeCalculator() {
                               <Feather name="x-circle" size={18} color="#ffffff" />
                             </Pressable>
                           }
+                          onExpand={() => setDetailPlayer({ playerId: it.playerId, name: displayName(it.player), position: it.player.pos, team: it.player.t })}
                         />
                       ))}
                     </View>
@@ -471,6 +475,7 @@ export default function TradeCalculator() {
                               <Feather name="x-circle" size={18} color="#ffffff" />
                             </Pressable>
                           }
+                          onExpand={() => setDetailPlayer({ playerId: it.playerId, name: displayName(it.player), position: it.player.pos, team: it.player.t })}
                         />
                       ))}
                     </View>
@@ -612,6 +617,7 @@ export default function TradeCalculator() {
                             ) : undefined
                           }
                           rightSlot={<Feather name="plus-circle" size={20} color="#ffffff" />}
+                          onExpand={() => setDetailPlayer({ playerId, name: displayName(player), position: player.pos, team: player.t })}
                         />
                       </Pressable>
                     );
@@ -623,6 +629,16 @@ export default function TradeCalculator() {
         </Pressable>
       </Modal>
     </ScrollView>
+    <PlayerDetailModal
+      visible={!!detailPlayer}
+      onClose={() => setDetailPlayer(null)}
+      leagueID={leagueID}
+      playerId={detailPlayer?.playerId}
+      name={detailPlayer?.name ?? ""}
+      position={detailPlayer?.position ?? ""}
+      team={detailPlayer?.team}
+    />
+    </>
   );
 }
 

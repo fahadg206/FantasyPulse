@@ -4,6 +4,7 @@ import { useLocalSearchParams } from "expo-router";
 import { sleeper, backend } from "../../../lib/api";
 import { getTeamLogo } from "../../../lib/nflTeams";
 import PlayerCard from "../../../components/PlayerCard";
+import PlayerDetailModal from "../../../components/PlayerDetailModal";
 
 const defaultPfp = require("../../../assets/images/rookie_pfp.png");
 
@@ -81,12 +82,14 @@ function DraftBoard({
   grid,
   failedImages,
   onImageError,
+  onExpandPlayer,
 }: {
   slots: DraftSlotInfo[];
   rounds: number[];
   grid: Record<string, DraftPlayer>;
   failedImages: Set<string>;
   onImageError: (uri: string) => void;
+  onExpandPlayer: (p: { playerId?: string; name: string; position: string; team?: string }) => void;
 }) {
   return (
     <View className="flex-row mb-8">
@@ -141,6 +144,9 @@ function DraftBoard({
                           position={pick.position}
                           team={pick.team}
                           bottomSlot={<Text className="text-white/70 text-[8px] mt-0.5">Pick {pick.pick}</Text>}
+                          onExpand={() =>
+                            onExpandPlayer({ playerId: pick.player_id, name: pick.player, position: pick.position, team: pick.team })
+                          }
                         />
                       </View>
                     ) : (
@@ -311,6 +317,7 @@ export default function Draft() {
   const [failedImages, setFailedImages] = useState<Set<string>>(new Set());
   const [reloadKey, setReloadKey] = useState(0);
   const [viewMode, setViewMode] = useState<"manager" | "board">("manager");
+  const [detailPlayer, setDetailPlayer] = useState<{ playerId?: string; name: string; position: string; team?: string } | null>(null);
 
   useEffect(() => {
     if (!leagueID) return;
@@ -591,6 +598,7 @@ export default function Draft() {
   }
 
   return (
+    <>
     <ScrollView className="flex-1 bg-[#0c0c0e]" contentContainerClassName="p-4">
       <View className="flex-row bg-[#1c1c1e] rounded-full p-1 mb-5 self-center">
         {(["manager", "board"] as const).map((mode) => (
@@ -613,6 +621,7 @@ export default function Draft() {
           grid={boardData.grid}
           failedImages={failedImages}
           onImageError={(uri) => setFailedImages((s) => new Set(s).add(uri))}
+          onExpandPlayer={setDetailPlayer}
         />
       ) : (
         draftData.map((user) => {
@@ -664,5 +673,15 @@ export default function Draft() {
         })
       )}
     </ScrollView>
+    <PlayerDetailModal
+      visible={!!detailPlayer}
+      onClose={() => setDetailPlayer(null)}
+      leagueID={leagueID}
+      playerId={detailPlayer?.playerId}
+      name={detailPlayer?.name ?? ""}
+      position={detailPlayer?.position ?? ""}
+      team={detailPlayer?.team}
+    />
+    </>
   );
 }

@@ -5,6 +5,7 @@ import { Feather } from "@expo/vector-icons";
 import { sleeper, backend } from "../../../lib/api";
 import getMatchupData, { ScheduleData, Starter } from "../../../lib/getMatchupData";
 import PlayerCard from "../../../components/PlayerCard";
+import PlayerDetailModal from "../../../components/PlayerDetailModal";
 import { displayName } from "../../../lib/getTopPerformers";
 import { getManagerHistory, ManagerAllTimeStats } from "../../../lib/getManagerHistory";
 import { getCurrentSeasonExtras, CurrentSeasonExtras } from "../../../lib/getCurrentSeasonExtras";
@@ -63,6 +64,7 @@ export default function LeagueManagers() {
   // of the two heavier effects below (all-time stats, GM scout extras)
   // happens to finish loading first.
   const [isDynasty, setIsDynasty] = useState<boolean | null>(null);
+  const [detailPlayer, setDetailPlayer] = useState<{ playerId?: string; name: string; position: string; team?: string } | null>(null);
 
   useEffect(() => {
     if (!leagueID) return;
@@ -446,6 +448,7 @@ export default function LeagueManagers() {
                       position={s.pos ?? ""}
                       team={s.team}
                       bottomSlot={<Text className="text-white/80 text-[9px] mt-0.5">{s.points ?? 0} pts</Text>}
+                      onExpand={() => setDetailPlayer({ playerId: s.id, name: displayName(s), position: s.pos ?? "", team: s.team })}
                     />
                   </View>
                 ))}
@@ -496,6 +499,16 @@ export default function LeagueManagers() {
           </>
         )}
       </ScrollView>
+
+      <PlayerDetailModal
+        visible={!!detailPlayer}
+        onClose={() => setDetailPlayer(null)}
+        leagueID={leagueID}
+        playerId={detailPlayer?.playerId}
+        name={detailPlayer?.name ?? ""}
+        position={detailPlayer?.position ?? ""}
+        team={detailPlayer?.team}
+      />
     </View>
   );
 }
