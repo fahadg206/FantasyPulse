@@ -176,7 +176,7 @@ export default function ProfileHome() {
               <ProfileActivity
                 sleeperUserId={profile.sleeperUserId}
                 stats={stats}
-                extraTitles={getManualTitles(profile.username)}
+                extraTitles={getManualTitles(profile.sleeperUserId)}
               />
             ) : null}
 

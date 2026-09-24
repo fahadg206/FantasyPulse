@@ -7,6 +7,7 @@ import { sleeper } from "../../../lib/api";
 import { getUserProfileBySleeperId } from "../../../lib/socialAuth";
 import { getFantasyProfileStats, FantasyProfileStats } from "../../../lib/fantasyProfile";
 import ProfileActivity from "../../../components/ProfileActivity";
+import { getManualTitles } from "../../../lib/manualTitles";
 
 const helmet = require("../../../assets/images/helmet2.png");
 const CURRENT_SEASON = "2026";
@@ -108,7 +109,7 @@ export default function ManagerProfileBySleeperId() {
         {!sleeperUserId ? null : statsLoading ? (
           <ActivityIndicator color="#af1222" className="mt-4" />
         ) : stats ? (
-          <ProfileActivity sleeperUserId={sleeperUserId} stats={stats} />
+          <ProfileActivity sleeperUserId={sleeperUserId} stats={stats} extraTitles={getManualTitles(sleeperUserId)} />
         ) : (
           <Text className="text-gray-500 text-[13px] text-center mt-4">
             Couldn&apos;t load this manager&apos;s stats right now.

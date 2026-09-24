@@ -103,7 +103,7 @@ function BoogieProfile() {
           <ProfileActivity
             sleeperUserId={BOOGIE_SLEEPER_USER_ID}
             stats={stats}
-            extraTitles={getManualTitles(BOOGIE_USERNAME)}
+            extraTitles={getManualTitles(BOOGIE_SLEEPER_USER_ID)}
           />
         ) : null}
 
@@ -333,7 +333,7 @@ export default function PublicProfile() {
             <ProfileActivity
               sleeperUserId={profile.sleeperUserId}
               stats={stats}
-              extraTitles={getManualTitles(profile.username)}
+              extraTitles={getManualTitles(profile.sleeperUserId)}
             />
           ) : null}
         </View>
