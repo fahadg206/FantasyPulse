@@ -17,6 +17,33 @@ const TIER_META: Record<SOSTier, { color: string; bg: string }> = {
   Cakewalk: { color: "#15803d", bg: "bg-green-800/20" },
 };
 
+// "2nd Hardest" / "5th Easiest" - the real ordinal-rank framing an actual
+// analyst uses ("the league's 3rd toughest schedule"), not just a tier
+// label. `rank` is 1-indexed from hardest (position in the already
+// hardest-to-easiest sorted list); the top half of the league is framed
+// from the hard end, the bottom half from the easy end, so nobody's stuck
+// reading "8th hardest" when "5th easiest" is the more natural way to hear it.
+function ordinalSuffix(n: number): string {
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 13) return "th";
+  switch (n % 10) {
+    case 1:
+      return "st";
+    case 2:
+      return "nd";
+    case 3:
+      return "rd";
+    default:
+      return "th";
+  }
+}
+
+function scheduleRankLabel(rank: number, total: number): string {
+  if (rank * 2 <= total) return `${rank}${ordinalSuffix(rank)} Hardest`;
+  const fromEasy = total - rank + 1;
+  return `${fromEasy}${ordinalSuffix(fromEasy)} Easiest`;
+}
+
 function tierForStrength(strength: number): SOSTier {
   if (strength >= 80) return "Brutal";
   if (strength >= 60) return "Tough";
@@ -141,11 +168,15 @@ function WeekOpponentModal({ opp, onClose, onViewProfile }: { opp: WeeklyOpponen
 /** the deep-dive a team's card opens: their own record/streak/avg, best players, and the full remaining slate with each opponent's record/streak/avg. */
 function TeamAnalyticsModal({
   team,
+  rank,
+  total,
   onClose,
   onViewProfile,
   onSelectWeek,
 }: {
   team: TeamSOS | null;
+  rank: number;
+  total: number;
   onClose: () => void;
   onViewProfile: (userId: string) => void;
   onSelectWeek: (opp: WeeklyOpponent) => void;
@@ -177,6 +208,9 @@ function TeamAnalyticsModal({
                     </Text>
                   </View>
                 </View>
+                {total > 0 && (
+                  <Text className="text-gray-500 text-[11px] font-semibold mt-1">{scheduleRankLabel(rank, total)} schedule</Text>
+                )}
               </View>
 
               <View className="flex-row bg-[#0c0c0e] rounded-xl p-3 mb-4">
@@ -305,12 +339,14 @@ function TeamAnalyticsModal({
 function TeamSOSCard({
   team,
   rank,
+  total,
   isGauntlet,
   onPress,
   onSelectWeek,
 }: {
   team: TeamSOS;
   rank: number;
+  total: number;
   isGauntlet: boolean;
   onPress: () => void;
   onSelectWeek: (opp: WeeklyOpponent) => void;
@@ -344,6 +380,7 @@ function TeamSOSCard({
           <Text style={{ fontVariant: ["tabular-nums"] }} className="text-white font-extrabold text-[16px] mt-1">
             {team.sosScore}
           </Text>
+          <Text className="text-gray-500 text-[10px] font-semibold mt-0.5">{scheduleRankLabel(rank, total)}</Text>
         </View>
       </View>
 
@@ -487,6 +524,7 @@ export default function StrengthOfSchedule() {
             key={team.userId}
             team={team}
             rank={i + 1}
+            total={teams.length}
             isGauntlet={team.userId === gauntletTeam?.userId}
             onPress={() => setSelectedTeam(team)}
             onSelectWeek={(opp) => setSelectedWeek(opp)}
@@ -496,6 +534,8 @@ export default function StrengthOfSchedule() {
 
       <TeamAnalyticsModal
         team={selectedTeam}
+        rank={selectedTeam ? teams.findIndex((t) => t.userId === selectedTeam.userId) + 1 : 0}
+        total={teams.length}
         onClose={() => setSelectedTeam(null)}
         onViewProfile={goToProfile}
         onSelectWeek={(opp) => setSelectedWeek(opp)}

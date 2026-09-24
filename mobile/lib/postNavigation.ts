@@ -56,6 +56,12 @@ export function getPostTargetRoute(post: Pick<Post, "targetType" | "targetId" | 
         if (!week || !matchupID) return null;
         return { pathname: "/league/[leagueID]/matchup", params: { leagueID: leagueId, week, matchupID } };
       }
+      case "teamneeds":
+        return { pathname: "/league/[leagueID]/tradecalculator", params: { leagueID: leagueId } };
+      case "keymatchups":
+        return { pathname: "/league/[leagueID]/schedule", params: { leagueID: leagueId } };
+      case "hotseat":
+        return { pathname: "/league/[leagueID]/history", params: { leagueID: leagueId } };
       default:
         return null;
     }

@@ -16,6 +16,10 @@ import { getLeagueValueSettings, computeAdjustedValue, LeagueValueSettings, RawP
 import { rankTeams, determinePlayoffTeams, runMonteCarlo, basePointsFor } from "./whatIfSimulation";
 import { computePowerRankings, PowerRankingResult } from "./powerRankings";
 import { optimalLineupPoints } from "./startSitAccuracy";
+import { computeTeamNeeds, computeLeagueNeedBaseline } from "./tradeAnalysis";
+import { buildSeasonToDatePPG, computeRedraftTeamNeeds, computeLeagueRedraftNeedBaseline } from "./redraftNeeds";
+import type { PlayerPos } from "./draftProspects";
+import { getManagerHistory } from "./getManagerHistory";
 import { ensureSystemPost, postExists } from "./posts";
 import type { AnalystCard } from "./posts";
 import { tradeLabel } from "./announceTransactions";
@@ -31,6 +35,28 @@ function nameOf(sim: LeagueSimData, userId: string): string {
 
 function formatValue(v: number): string {
   return Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v));
+}
+
+function ordinalSuffix(n: number): string {
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 13) return "th";
+  switch (n % 10) {
+    case 1:
+      return "st";
+    case 2:
+      return "nd";
+    case 3:
+      return "rd";
+    default:
+      return "th";
+  }
+}
+
+/** "2nd Hardest" / "5th Easiest" - real ordinal-rank framing instead of a bare tier label. `rank` is 1-indexed from hardest. */
+function scheduleRankLabel(rank: number, total: number): string {
+  if (rank * 2 <= total) return `${rank}${ordinalSuffix(rank)} hardest`;
+  const fromEasy = total - rank + 1;
+  return `${fromEasy}${ordinalSuffix(fromEasy)} easiest`;
 }
 
 // ---------------------------------------------------------------------
@@ -100,8 +126,8 @@ export async function ensureScheduleStorylinePost(leagueId: string, sim: LeagueS
     const analystCard: AnalystCard = {
       eyebrow: "STRENGTH OF SCHEDULE",
       rows: [
-        { name: easiest.name, avatar: easiest.avatar, stat: String(easiest.sosScore), statLabel: "EASIEST", highlight: true },
-        { name: hardest.name, avatar: hardest.avatar, stat: String(hardest.sosScore), statLabel: "HARDEST" },
+        { name: easiest.name, avatar: easiest.avatar, stat: String(easiest.sosScore), statLabel: "#1 EASIEST", highlight: true },
+        { name: hardest.name, avatar: hardest.avatar, stat: String(hardest.sosScore), statLabel: "#1 HARDEST" },
       ],
       footer: `${gamesLeft} weeks left`,
     };
@@ -243,10 +269,12 @@ function playoffPictureText(input: {
   bubbleInOdds: number;
   bubbleOut: string;
   bubbleOutOdds: number;
-  bubbleInSOS?: TeamSOS["tier"];
-  bubbleOutSOS?: TeamSOS["tier"];
+  /** bubbleIn/bubbleOut's real SOS rank (1-indexed from hardest) and the league size, for real "Nth toughest" framing instead of a vague tier label */
+  bubbleInSOSRank?: number;
+  bubbleOutSOSRank?: number;
+  sosTotal: number;
 }): string {
-  const { week, topSeed, topSeedOdds, bubbleIn, bubbleInOdds, bubbleOut, bubbleOutOdds, bubbleInSOS, bubbleOutSOS } = input;
+  const { week, topSeed, topSeedOdds, bubbleIn, bubbleInOdds, bubbleOut, bubbleOutOdds, bubbleInSOSRank, bubbleOutSOSRank, sosTotal } = input;
 
   const header = pick([
     `🏆 Playoff picture, Week ${week}:`,
@@ -267,11 +295,13 @@ function playoffPictureText(input: {
     ` Down at the cut line, ${bubbleIn} is clinging to the final spot over ${bubbleOut}, ${Math.round(bubbleInOdds)}% to ${Math.round(bubbleOutOdds)}%.`,
   ]);
 
+  // Real ordinal rank, not a vague tier ("one of the toughest") - the top
+  // half of the league's remaining schedules counts as genuinely tough.
   let sosLine = "";
-  if (bubbleInSOS === "Brutal" || bubbleInSOS === "Tough") {
-    sosLine = ` Bad timing for ${bubbleIn}, too — one of the toughest closing schedules left in the league.`;
-  } else if (bubbleOutSOS === "Favorable" || bubbleOutSOS === "Cakewalk") {
-    sosLine = ` ${bubbleOut} does have a soft closing schedule working in their favor.`;
+  if (bubbleInSOSRank !== undefined && bubbleInSOSRank * 2 <= sosTotal) {
+    sosLine = ` Bad timing for ${bubbleIn}, too — the league's ${scheduleRankLabel(bubbleInSOSRank, sosTotal)} closing schedule.`;
+  } else if (bubbleOutSOSRank !== undefined && bubbleOutSOSRank * 2 > sosTotal) {
+    sosLine = ` ${bubbleOut} does have the ${scheduleRankLabel(bubbleOutSOSRank, sosTotal)} schedule working in their favor.`;
   }
 
   return header + topLine + bubbleLine + sosLine;
@@ -311,8 +341,10 @@ export async function ensurePlayoffPicturePost(leagueId: string, sim: LeagueSimD
     );
 
     const topSeedId = ranked[0];
+    // computeStrengthOfSchedule's own output is already sorted hardest-to-
+    // easiest, so a team's index in it IS its real 1-indexed SOS rank.
     const sos = computeStrengthOfSchedule(sim, currentWeek);
-    const sosById = new Map(sos.map((t) => [t.userId, t]));
+    const sosRankById = new Map(sos.map((t, i) => [t.userId, i + 1]));
 
     const text = playoffPictureText({
       week: currentWeek,
@@ -322,8 +354,9 @@ export async function ensurePlayoffPicturePost(leagueId: string, sim: LeagueSimD
       bubbleInOdds: playoffOdds[bubbleInId] ?? 0,
       bubbleOut: nameOf(sim, bubbleOutId),
       bubbleOutOdds: playoffOdds[bubbleOutId] ?? 0,
-      bubbleInSOS: sosById.get(bubbleInId)?.tier,
-      bubbleOutSOS: sosById.get(bubbleOutId)?.tier,
+      bubbleInSOSRank: sosRankById.get(bubbleInId),
+      bubbleOutSOSRank: sosRankById.get(bubbleOutId),
+      sosTotal: sos.length,
     });
 
     const analystCard: AnalystCard = {
@@ -409,7 +442,8 @@ function powerRankMovementText(
   currentWeek: number,
   ranked: PowerRankingResult[],
   nameById: Record<string, string>,
-  movers: { riser?: RankMover; faller?: RankMover }
+  movers: { riser?: RankMover; faller?: RankMover },
+  isDynasty: boolean
 ): string {
   const topName = nameById[ranked[0]?.userId] ?? "Unknown Team";
   const { riser, faller } = movers;
@@ -433,7 +467,21 @@ function powerRankMovementText(
       ])
     : "";
 
-  return header + riserLine + fallerLine;
+  // Dynasty-only: the long view actually exists here (real future assets
+  // to build around), so a bottom-tier team is a rebuild story, not just
+  // a bad week - a distinction that means nothing in a redraft league.
+  let trajectoryLine = "";
+  if (isDynasty) {
+    const bottom = ranked[ranked.length - 1];
+    if (bottom && bottom.tier === "Rebuild" && bottom.userId !== ranked[0]?.userId) {
+      trajectoryLine = pick([
+        ` On the other end, ${nameById[bottom.userId] ?? "Unknown Team"} profiles as a true rebuild right now - the long view (youth, picks) matters more than this year's record.`,
+        ` Meanwhile ${nameById[bottom.userId] ?? "Unknown Team"} is in rebuild mode - this season's record is secondary to the assets being stockpiled.`,
+      ]);
+    }
+  }
+
+  return header + riserLine + fallerLine + trajectoryLine;
 }
 
 /** posts once per week - real movement flavor when last week's ranks are on hand, a plain check-in otherwise. Checks postExists FIRST since the ranking itself (fetchPlayers +, for dynasty, fetchAllPlayerValues) is real work worth skipping once this week's post is already up. */
@@ -481,7 +529,7 @@ export async function ensurePowerRankingsMovementPost(leagueId: string, sim: Lea
 
     const lastWeekRanks = await loadLastWeekRanks(leagueId, currentWeek);
     const movers = findMovers(ranked, nameById, lastWeekRanks);
-    const text = powerRankMovementText(currentWeek, ranked, nameById, movers);
+    const text = powerRankMovementText(currentWeek, ranked, nameById, movers, settings.isDynasty);
 
     const topId = ranked[0]?.userId;
     const analystCard: AnalystCard = {
@@ -775,6 +823,234 @@ export async function ensureWaiverHeadlinerPost(leagueId: string, events: Ticker
 }
 
 // ---------------------------------------------------------------------
+// Roster Watch (Team Needs) - the league's single most glaring positional
+// hole this week, using the exact same value-based need engine the Trade
+// Calculator already trusts: dynasty leagues reason off real KTC asset
+// value (a real long-term hole, not just a thin bench), redraft leagues
+// off season-to-date-blended-with-rest-of-season PPG (what actually
+// matters when there's no next season to build for).
+// ---------------------------------------------------------------------
+
+function teamNeedsText(teamName: string, pos: PlayerPos, pct: number, isDynasty: boolean): string {
+  const magnitude = pct >= 0.6 ? "a gaping hole" : pct >= 0.35 ? "a real hole" : "a soft spot";
+  const horizon = isDynasty ? "long-term" : "the rest of this season";
+  return pick([
+    `🔍 Roster Watch: ${teamName} has ${magnitude} at ${pos} - ${Math.round(pct * 100)}% below the league's own bar there, ${horizon}.`,
+    `🔍 Digging into the numbers: ${teamName}'s ${pos} spot is ${magnitude}, sitting ${Math.round(pct * 100)}% below where the rest of the league is.`,
+    `🔍 Biggest need in the league right now: ${teamName} at ${pos}. ${Math.round(pct * 100)}% below the league bar there - worth watching on the wire.`,
+  ]);
+}
+
+/** posts once per week - the single most extreme value-based need leaguewide, dynasty or redraft aware (same branch the Trade Calculator itself uses). Checks postExists first since pricing every roster (KTC values for dynasty, season PPG for redraft) is real work. */
+export async function ensureTeamNeedsPost(leagueId: string, sim: LeagueSimData, currentWeek: number): Promise<void> {
+  const postId = `teamneeds_${leagueId}_wk${currentWeek}`;
+  try {
+    if (await postExists(postId)) return;
+
+    const settings = await getLeagueValueSettings(leagueId);
+    const playersData = await backend.fetchPlayers(leagueId);
+
+    let worst: { userId: string; pos: PlayerPos; score: number } | null = null;
+
+    if (settings.isDynasty) {
+      const valuesBySleeperId = await backend.fetchAllPlayerValues();
+      const leagueAvg = computeLeagueNeedBaseline(sim.managerInfo, playersData, valuesBySleeperId, settings);
+      for (const userId of sim.teamIds) {
+        const needs = computeTeamNeeds(sim.managerInfo[userId].rosterPlayerIds, playersData, valuesBySleeperId, settings, leagueAvg);
+        if (!worst || needs.biggest.score > worst.score) worst = { userId, pos: needs.biggest.pos, score: needs.biggest.score };
+      }
+    } else {
+      const playedWeeks = sim.weekNumbers.filter((w) => w < currentWeek);
+      const remainingWeeks = sim.weekNumbers.filter((w) => w >= currentWeek);
+      const seasonToDatePPG = buildSeasonToDatePPG(sim.matchupData, playedWeeks);
+      const leagueAvg = computeLeagueRedraftNeedBaseline(sim.managerInfo, playersData, seasonToDatePPG, remainingWeeks);
+      for (const userId of sim.teamIds) {
+        const needs = computeRedraftTeamNeeds(sim.managerInfo[userId].rosterPlayerIds, playersData, seasonToDatePPG, remainingWeeks, leagueAvg);
+        if (!worst || needs.biggest.score > worst.score) worst = { userId, pos: needs.biggest.pos, score: needs.biggest.score };
+      }
+    }
+
+    // A near-zero score means every team's roughly balanced - not a real story.
+    if (!worst || worst.score < 0.2) return;
+
+    const analystCard: AnalystCard = {
+      eyebrow: "ROSTER WATCH",
+      rows: [
+        {
+          name: nameOf(sim, worst.userId),
+          avatar: sim.managerInfo[worst.userId]?.avatar,
+          stat: worst.pos,
+          statLabel: "BIGGEST NEED",
+          highlight: true,
+        },
+      ],
+      footer: `${Math.round(worst.score * 100)}% below league average`,
+    };
+
+    await ensureSystemPost({
+      id: postId,
+      text: teamNeedsText(nameOf(sim, worst.userId), worst.pos, worst.score, settings.isDynasty),
+      analystCard,
+      leagueId,
+      targetType: "analysis",
+      targetId: `teamneeds:wk${currentWeek}`,
+      targetLabel: "Roster Watch",
+    });
+  } catch (error) {
+    console.error("Error posting team needs:", error);
+  }
+}
+
+// ---------------------------------------------------------------------
+// Key Matchups - a real Week X preview, off the same projected-lineup
+// numbers Schedule's own favorite/spread and O/U callouts use: the
+// closest projected game (a real pick'em) and the highest-scoring
+// projected shootout, picked out of every real pairing this week.
+// ---------------------------------------------------------------------
+
+function keyMatchupsText(week: number, closestA: string, closestB: string, spread: number, shootoutA: string, shootoutB: string, total: number): string {
+  const spreadBit = spread < 1 ? "a true pick'em" : `a razor-thin ${spread.toFixed(1)}-point projected spread`;
+  return pick([
+    `📋 Key matchups, Week ${week}: keep an eye on ${closestA} vs. ${closestB} - ${spreadBit}. Elsewhere, ${shootoutA} vs. ${shootoutB} projects as the week's shootout, combined O/U of ${Math.round(total)}.`,
+    `📋 Setting the table for Week ${week}: ${closestA}-${closestB} is this week's coin flip (${spreadBit}), while ${shootoutA}-${shootoutB} has shootout written all over it - O/U ${Math.round(total)}.`,
+  ]);
+}
+
+/** posts once per week - purely off sim.projectionCache, already built for the week, so no new fetch. */
+export async function ensureKeyMatchupsPost(leagueId: string, sim: LeagueSimData, currentWeek: number): Promise<void> {
+  try {
+    const seen = new Set<string>();
+    const games: { aId: string; bId: string; spread: number; total: number }[] = [];
+
+    for (const userId of sim.teamIds) {
+      if (seen.has(userId)) continue;
+      const oppId = findOpponent(sim, currentWeek, userId);
+      if (!oppId || seen.has(oppId)) continue;
+      seen.add(userId);
+      seen.add(oppId);
+
+      const aProj = sim.projectionCache[currentWeek]?.[userId] ?? 0;
+      const bProj = sim.projectionCache[currentWeek]?.[oppId] ?? 0;
+      games.push({ aId: userId, bId: oppId, spread: Math.abs(aProj - bProj), total: aProj + bProj });
+    }
+
+    if (games.length === 0) return;
+
+    const closest = games.reduce((a, b) => (b.spread < a.spread ? b : a));
+    const shootout = games.reduce((a, b) => (b.total > a.total ? b : a));
+
+    const analystCard: AnalystCard = {
+      eyebrow: `KEY MATCHUPS · WEEK ${currentWeek}`,
+      rows: [
+        {
+          name: `${nameOf(sim, closest.aId)} vs ${nameOf(sim, closest.bId)}`,
+          avatar: sim.managerInfo[closest.aId]?.avatar,
+          stat: closest.spread < 1 ? "PICK'EM" : `-${closest.spread.toFixed(1)}`,
+          statLabel: "CLOSEST",
+          highlight: true,
+        },
+        {
+          name: `${nameOf(sim, shootout.aId)} vs ${nameOf(sim, shootout.bId)}`,
+          avatar: sim.managerInfo[shootout.aId]?.avatar,
+          stat: Math.round(shootout.total).toString(),
+          statLabel: "O/U SHOOTOUT",
+        },
+      ],
+    };
+
+    await ensureSystemPost({
+      id: `keymatchups_${leagueId}_wk${currentWeek}`,
+      text: keyMatchupsText(
+        currentWeek,
+        nameOf(sim, closest.aId),
+        nameOf(sim, closest.bId),
+        closest.spread,
+        nameOf(sim, shootout.aId),
+        nameOf(sim, shootout.bId),
+        shootout.total
+      ),
+      analystCard,
+      leagueId,
+      targetType: "analysis",
+      targetId: `keymatchups:wk${currentWeek}`,
+      targetLabel: "Key Matchups",
+    });
+  } catch (error) {
+    console.error("Error posting key matchups:", error);
+  }
+}
+
+// ---------------------------------------------------------------------
+// Hot Seat Watch - a genuinely rare, real storyline: a manager with a
+// bad career win rate in this league (2+ seasons of real history, off
+// getManagerHistory's own multi-season crawl - the same one the League
+// History page runs) who's ALSO off to a losing start again this year.
+// Posts once per season, only when someone actually qualifies - most
+// seasons, for most leagues, this never fires, which is exactly right
+// for a story this pointed.
+// ---------------------------------------------------------------------
+
+function hotSeatText(name: string, careerWinPct: number, wins: number, losses: number, seasonsPlayed: number): string {
+  const pct = Math.round(careerWinPct * 100);
+  return pick([
+    `🔥 Hot seat watch: ${name} is off to a rough ${wins}-${losses} start, and it's not exactly new territory - a career ${pct}% win rate across ${seasonsPlayed} seasons in this league. The questions are starting.`,
+    `🔥 The seat's warming up for ${name} - ${wins}-${losses} this year extends a rough stretch, a ${pct}% career win rate over ${seasonsPlayed} seasons.`,
+    `🔥 ${name} has some explaining to do: ${wins}-${losses} so far, on top of a ${pct}% career win rate across ${seasonsPlayed} seasons here. The patience is wearing thin.`,
+  ]);
+}
+
+/** posts once per SEASON per league (not weekly - re-litigating this every week would be mean, not analysis), only if a real manager qualifies: 2+ seasons in this league, a losing career win rate, AND a losing record again this year. Checks postExists first since getManagerHistory is a full multi-season crawl (the same cost the League History page pays). */
+export async function ensureHotSeatPost(leagueId: string, sim: LeagueSimData, season: string): Promise<void> {
+  const postId = `hotseat_${leagueId}_${season}`;
+  try {
+    if (await postExists(postId)) return;
+
+    const history = await getManagerHistory(leagueId);
+
+    let worst: { userId: string; winPct: number; seasonsPlayed: number } | null = null;
+    for (const userId of sim.teamIds) {
+      const stats = history[userId];
+      if (!stats || stats.seasonsPlayed < 2 || stats.winPct >= 0.45) continue;
+      const wins = parseInt((sim.managerInfo[userId]?.wins as any) || "0", 10);
+      const losses = parseInt((sim.managerInfo[userId]?.losses as any) || "0", 10);
+      if (losses <= wins) continue; // not currently struggling too - no real "hot seat" story without a bad start to go with the bad history
+      if (!worst || stats.winPct < worst.winPct) worst = { userId, winPct: stats.winPct, seasonsPlayed: stats.seasonsPlayed };
+    }
+
+    if (!worst) return;
+
+    const wins = parseInt((sim.managerInfo[worst.userId]?.wins as any) || "0", 10);
+    const losses = parseInt((sim.managerInfo[worst.userId]?.losses as any) || "0", 10);
+
+    const analystCard: AnalystCard = {
+      eyebrow: "HOT SEAT WATCH",
+      rows: [
+        {
+          name: nameOf(sim, worst.userId),
+          avatar: sim.managerInfo[worst.userId]?.avatar,
+          stat: `${Math.round(worst.winPct * 100)}%`,
+          statLabel: "CAREER WIN%",
+          highlight: true,
+        },
+      ],
+      footer: `${wins}-${losses} this season · ${worst.seasonsPlayed} seasons in the league`,
+    };
+
+    await ensureSystemPost({
+      id: postId,
+      text: hotSeatText(nameOf(sim, worst.userId), worst.winPct, wins, losses, worst.seasonsPlayed),
+      analystCard,
+      leagueId,
+      targetType: "analysis",
+      targetId: `hotseat:${season}`,
+      targetLabel: "Hot Seat Watch",
+    });
+  } catch (error) {
+    console.error("Error posting hot seat watch:", error);
+  }
+}
+
+// ---------------------------------------------------------------------
 // Orchestrator - builds one shared LeagueSimData for the whole analyst
 // pass instead of each post type fetching its own copy.
 // ---------------------------------------------------------------------
@@ -784,6 +1060,7 @@ export async function ensureBoogieAnalystPosts(leagueId: string, events: TickerE
   try {
     const [{ data: nflState }, sim] = await Promise.all([sleeper.getNflState(), buildLeagueSimData(leagueId)]);
     const week = nflState.display_week || 1;
+    const season = nflState.season || nflState.league_season;
     const tradeEvents = events.filter((e): e is TradeEvent => e.kind === "trade2" || e.kind === "tradeMulti");
 
     await Promise.all([
@@ -794,6 +1071,9 @@ export async function ensureBoogieAnalystPosts(leagueId: string, events: TickerE
       ensureRematchAlertPost(leagueId, sim, week),
       ensureBenchRegretPost(leagueId, sim, week),
       ensureWaiverHeadlinerPost(leagueId, events, week),
+      ensureTeamNeedsPost(leagueId, sim, week),
+      ensureKeyMatchupsPost(leagueId, sim, week),
+      ...(season ? [ensureHotSeatPost(leagueId, sim, String(season))] : []),
     ]);
   } catch (error) {
     console.error("Error running Boogie's analyst pass:", error);
