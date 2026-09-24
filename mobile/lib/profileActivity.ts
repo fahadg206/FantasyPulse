@@ -43,6 +43,33 @@ async function fetchJson(url: string) {
   return res.json();
 }
 
+// playersDataGlobal (below) comes from this app's own /api/fetchPlayers,
+// which only ever returns players who currently have a real NFL team -
+// exactly the wrong scope for an all-time crawl reaching back to 2017:
+// someone who's since retired or is between teams drops out of every
+// current league's player payload, even though the real points they
+// once put up are still sitting right there in nemesisTotals. Sleeper's
+// own full, unfiltered /players/nfl covers every player who's ever had
+// an id, active or not - a large (~5MB) payload, so this is only ever
+// reached as a fallback for the one specific player nemesis couldn't
+// already resolve, not fetched as a matter of course, and cached for a
+// day once it is (this list itself barely changes day to day).
+async function resolveRetiredOrInactivePlayer(
+  playerId: string
+): Promise<{ fn?: string; ln?: string; pos?: string; t?: string } | null> {
+  try {
+    const allPlayers = await cachedFetch("sleeper-all-players-nfl", 24 * 60 * 60 * 1000, () =>
+      fetchJson(`${SLEEPER}/players/nfl`)
+    );
+    const p = allPlayers?.[playerId];
+    if (!p) return null;
+    return { fn: p.first_name, ln: p.last_name, pos: p.position, t: p.team };
+  } catch (error) {
+    console.error(`Error resolving inactive player ${playerId}:`, error);
+    return null;
+  }
+}
+
 export interface Title {
   leagueName: string;
   season: string;
@@ -289,23 +316,44 @@ export async function getAllTimeStats(sleeperUserId: string, currentSeason: stri
 
   titles.sort((a, b) => Number(b.season) - Number(a.season));
 
-  let nemesis: AllTimeNemesis | null = null;
-  let bestNemesisAvg = -Infinity;
+  // Prefer a real recurring nemesis (2+ meetings) over a one-game fluke
+  // with a freak high average - only fall back to a single-game candidate
+  // when that's genuinely the only history there is.
+  let bestMultiGameId: string | null = null;
+  let bestMultiGameAvg = -Infinity;
+  let bestAnyId: string | null = null;
+  let bestAnyAvg = -Infinity;
   for (const playerId in nemesisTotals) {
     const { total, games: g } = nemesisTotals[playerId];
     const avgPoints = total / g;
-    if (avgPoints > bestNemesisAvg) {
-      bestNemesisAvg = avgPoints;
-      const meta: any = playersDataGlobal ? playersDataGlobal[playerId] : undefined;
-      nemesis = {
-        playerId,
-        name: meta?.fn && meta?.ln ? `${meta.fn} ${meta.ln}` : meta?.t ? `${meta.t} D/ST` : "Unknown Player",
-        pos: meta?.pos,
-        team: meta?.t,
-        avgPoints,
-        games: g,
-      };
+    if (avgPoints > bestAnyAvg) {
+      bestAnyAvg = avgPoints;
+      bestAnyId = playerId;
     }
+    if (g >= 2 && avgPoints > bestMultiGameAvg) {
+      bestMultiGameAvg = avgPoints;
+      bestMultiGameId = playerId;
+    }
+  }
+  const nemesisPlayerId = bestMultiGameId ?? bestAnyId;
+
+  let nemesis: AllTimeNemesis | null = null;
+  if (nemesisPlayerId) {
+    const { total, games: g } = nemesisTotals[nemesisPlayerId];
+    const avgPoints = total / g;
+    let meta: any = playersDataGlobal ? playersDataGlobal[nemesisPlayerId] : undefined;
+    // Not in this crawl's current-roster-scoped player data - most likely
+    // someone who's since retired or is between teams. One extra lookup
+    // against Sleeper's full player list before giving up on a real name.
+    if (!meta) meta = await resolveRetiredOrInactivePlayer(nemesisPlayerId);
+    nemesis = {
+      playerId: nemesisPlayerId,
+      name: meta?.fn && meta?.ln ? `${meta.fn} ${meta.ln}` : meta?.t ? `${meta.t} D/ST` : "Unknown Player",
+      pos: meta?.pos,
+      team: meta?.t,
+      avgPoints,
+      games: g,
+    };
   }
 
   const games = wins + losses + ties || 1;
