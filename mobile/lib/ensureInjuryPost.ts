@@ -2,6 +2,7 @@ import { backend } from "./api";
 import type { Starter } from "./getMatchupData";
 import { ensureSystemPost, getPriorInjuryPostCountForTeam, postExists } from "./posts";
 import { buildMatchupFeedPlayers } from "./matchupFeedPlayers";
+import { notifyLeagueBreakingNews } from "./pushTriggers";
 
 function pick<T>(options: T[]): T {
   return options[Math.floor(Math.random() * options.length)];
@@ -171,7 +172,7 @@ export async function ensureInjuryPostsForMatchup(params: {
 
       const text = textFor(play.playType, name, play.player.team, play.player.pos, team.name, flavor);
 
-      return ensureSystemPost({
+      await ensureSystemPost({
         id: postId,
         text,
         leagueId,
@@ -181,6 +182,15 @@ export async function ensureInjuryPostsForMatchup(params: {
         injuryTeamName: team.name,
         createdAtMs: play.wallclockMs ?? undefined,
       }).catch((error) => console.error("Error posting injury update to feed:", error));
+
+      // Real breaking news only - a fresh injury or a confirmed "out" is
+      // worth buzzing someone's phone for; "questionable"/"doubtful"/
+      // "returned" updates stay in the feed without a push.
+      if (play.playType === "Injury" || play.playType === "Injury Out") {
+        notifyLeagueBreakingNews(leagueId, "🚑 Injury Update", text).catch((error) =>
+          console.error("Error sending injury push notification:", error)
+        );
+      }
     })
   );
 }

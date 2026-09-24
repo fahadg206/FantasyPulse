@@ -8,6 +8,8 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Switch,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -30,6 +32,7 @@ import {
   UserProfile,
 } from "../../lib/socialAuth";
 import { getFantasyProfileStats, FantasyProfileStats } from "../../lib/fantasyProfile";
+import { enablePushNotifications, disablePushNotifications } from "../../lib/pushNotifications";
 import { getFollowingUids, getFollowerUids } from "../../lib/follows";
 import ProfileActivity from "../../components/ProfileActivity";
 import ProfileTabbedPosts from "../../components/ProfileTabbedPosts";
@@ -184,6 +187,8 @@ export default function ProfileHome() {
             )}
 
             <FindManagerCard />
+
+            <PushNotificationToggle profile={profile} />
 
             <Pressable
               onPress={() => signOutUser()}
@@ -541,6 +546,53 @@ function SignInUpScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
+  );
+}
+
+function PushNotificationToggle({ profile }: { profile: UserProfile }) {
+  const [enabled, setEnabled] = useState(!!profile.pushNotificationsEnabled);
+  const [busy, setBusy] = useState(false);
+
+  const toggle = async (next: boolean) => {
+    setBusy(true);
+    try {
+      if (next) {
+        const ok = await enablePushNotifications(profile.uid);
+        if (!ok) {
+          Alert.alert(
+            "Notifications unavailable",
+            "Couldn't enable push notifications on this device right now - check that notifications are allowed for Fantasy Pulse in your device settings, then try again."
+          );
+          setEnabled(false);
+          return;
+        }
+      } else {
+        await disablePushNotifications(profile.uid);
+      }
+      setEnabled(next);
+    } catch (error) {
+      console.error("Error toggling push notifications:", error);
+      Alert.alert("Something went wrong", "Couldn't update your notification setting - try again in a moment.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <View className="flex-row items-center justify-between px-4 py-3.5 rounded-2xl border border-white/10 bg-[#141416] mt-3">
+      <View className="flex-row items-center gap-2.5 flex-1 mr-3">
+        <Feather name="bell" size={16} color="#af1222" />
+        <View className="flex-1">
+          <Text className="text-white font-semibold text-[13px]">Push Notifications</Text>
+          <Text className="text-gray-500 text-[11px] mt-0.5">Breaking trades and injuries, the moment they happen</Text>
+        </View>
+      </View>
+      {busy ? (
+        <ActivityIndicator color="#af1222" />
+      ) : (
+        <Switch value={enabled} onValueChange={toggle} trackColor={{ true: "#af1222" }} />
+      )}
+    </View>
   );
 }
 

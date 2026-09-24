@@ -46,6 +46,10 @@ export interface UserProfile {
   // photo sets this and it's never overwritten automatically again.
   avatarIsCustom?: boolean;
   createdAt: string;
+  /** this device's Expo push token, if the user has ever enabled push notifications - see lib/pushNotifications.ts */
+  pushToken?: string;
+  /** the user's own on/off choice, independent of whether pushToken is actually set - lets "on but no token yet" (denied permission, no EAS project configured) read differently from "off" if this ever needs to be surfaced */
+  pushNotificationsEnabled?: boolean;
 }
 
 const USERNAME_PATTERN = /^[a-z0-9_]{3,20}$/;

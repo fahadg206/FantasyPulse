@@ -49,6 +49,12 @@
         {
           "photosPermission": "Fantasy Pulse needs access to your photos so you can attach an image to a post or set your profile picture."
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#af1222"
+        }
       ]
     ],
     "experiments": {

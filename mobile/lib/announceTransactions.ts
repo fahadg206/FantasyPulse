@@ -1,5 +1,6 @@
 import { buildLeagueTransactions, TickerEvent, TradeEvent, TxAsset } from "./leagueTransactions";
-import { ensureSystemPost } from "./posts";
+import { ensureSystemPost, postExists } from "./posts";
+import { notifyLeagueBreakingNews } from "./pushTriggers";
 
 // Boogie The Writer's breaking-news voice for the league's actual trade
 // wire - written to read like a real NFL insider's timeline (Schefter,
@@ -97,17 +98,32 @@ export async function announceLeagueTransactions(leagueId: string): Promise<Tick
   const tradeEvents = events.filter((e): e is TradeEvent => e.kind === "trade2" || e.kind === "tradeMulti");
 
   await Promise.all(
-    tradeEvents.map((event) =>
-      ensureSystemPost({
-        id: `trade_${leagueId}_${event.id}`,
-        text: tradeSystemText(event),
+    tradeEvents.map(async (event) => {
+      const id = `trade_${leagueId}_${event.id}`;
+      // Checked before writing so the real breaking-news push only fires
+      // the first time this trade is ever seen, not on every later
+      // screen load that re-runs this same backfill - a flaky read here
+      // is treated as "already posted" (skip the push) rather than risk
+      // a duplicate alert on a transient error.
+      const alreadyPosted = await postExists(id).catch(() => true);
+      const text = tradeSystemText(event);
+
+      await ensureSystemPost({
+        id,
+        text,
         leagueId,
         targetType: "trade",
         targetId: event.id,
         targetLabel: tradeLabel(event),
         createdAtMs: event.timestamp,
-      }).catch((error) => console.error("Error posting trade to feed:", error))
-    )
+      }).catch((error) => console.error("Error posting trade to feed:", error));
+
+      if (!alreadyPosted) {
+        notifyLeagueBreakingNews(leagueId, "🚨 Trade Alert", text).catch((error) =>
+          console.error("Error sending trade push notification:", error)
+        );
+      }
+    })
   );
 
   return events;

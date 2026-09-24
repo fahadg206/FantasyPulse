@@ -140,6 +140,22 @@ export const backend = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ week, season, players, scoringSettings }),
     }).then((r) => r.json()),
+
+  // Real push notifications, sent server-side (see lib/pushNotifications.ts
+  // for why sending can't happen straight from the client). Never throws -
+  // a push failure shouldn't ever block whatever real action (posting a
+  // trade, announcing an injury) triggered it.
+  sendPush: (tokens: string[], title: string, body: string, data?: Record<string, unknown>) =>
+    fetch(`${APP_ORIGIN}/api/sendPush`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tokens, title, body, data }),
+    })
+      .then((r) => r.json())
+      .catch((error) => {
+        console.error("Error sending push notifications:", error);
+        return null;
+      }),
 };
 
 // Firestore collection names + shapes, mirrored from the web app.
