@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { View, Text, Image } from "react-native";
+import { View, Text, Image, Pressable } from "react-native";
 import { MotiView } from "moti";
 import { Easing } from "react-native-reanimated";
 import { getTeamLogo } from "../lib/nflTeams";
 import { buildLeagueTransactions, TxAsset, AddDropEvent, TradeEvent } from "../lib/leagueTransactions";
+import { usePlayerDetail } from "./PlayerDetailProvider";
 
 const POSITION_COLOR: Record<string, string> = {
   QB: "#ef4444",
@@ -15,6 +16,8 @@ const POSITION_COLOR: Record<string, string> = {
 };
 
 export function AssetChip({ asset }: { asset: TxAsset }) {
+  const playerDetail = usePlayerDetail();
+
   if (asset.isPick) {
     return <Text className="text-white text-[12px] font-semibold">{asset.label}</Text>;
   }
@@ -25,7 +28,10 @@ export function AssetChip({ asset }: { asset: TxAsset }) {
   const teamLogo = !isDef ? getTeamLogo(asset.team) : null;
 
   return (
-    <View className="flex-row items-center gap-1">
+    <Pressable
+      className="flex-row items-center gap-1"
+      onPress={() => asset.id && playerDetail?.openPlayer({ playerId: asset.id, name: asset.label, position: asset.pos ?? "", team: asset.team })}
+    >
       <Image
         source={photoUri ? { uri: photoUri } : undefined}
         resizeMode={isDef ? "contain" : "cover"}
@@ -38,7 +44,7 @@ export function AssetChip({ asset }: { asset: TxAsset }) {
         </Text>
       )}
       {teamLogo && <Image source={{ uri: teamLogo }} className="w-[14px] h-[14px]" resizeMode="contain" />}
-    </View>
+    </Pressable>
   );
 }
 

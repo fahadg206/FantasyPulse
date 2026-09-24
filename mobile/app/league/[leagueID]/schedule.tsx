@@ -7,6 +7,7 @@ import { sleeper, backend } from "../../../lib/api";
 import getMatchupData, { MatchupMapData, ScheduleData } from "../../../lib/getMatchupData";
 import { getTopNCurrentForTeam, TopPerformer } from "../../../lib/getTopPerformers";
 import { getTeamLogo } from "../../../lib/nflTeams";
+import { usePlayerDetail } from "../../../components/PlayerDetailProvider";
 import { ensureMatchupRecapPosted } from "../../../lib/ensureMatchupRecap";
 import { ensureInjuryPostsForMatchup } from "../../../lib/ensureInjuryPost";
 import AnimatedNumber from "../../../components/AnimatedNumber";
@@ -492,6 +493,7 @@ function abbrevName(name: string) {
 }
 
 function PerformerLine({ performer }: { performer: TopPerformer }) {
+  const playerDetail = usePlayerDetail();
   const isDef = performer.pos === "DEF";
   const photoUri = isDef
     ? (getTeamLogo(performer.team) ?? undefined)
@@ -503,9 +505,17 @@ function PerformerLine({ performer }: { performer: TopPerformer }) {
   // performer's number lands on the same right edge, both stacked within
   // one team and lined up against the other team's below it - the column
   // this sits in is itself a fixed width (see ScheduleTeamRow), so this
-  // isn't just centered within its own content.
+  // isn't just centered within its own content. Its own nested Pressable
+  // (stopPropagation) since ScheduleTeamRow, its parent, is already
+  // tappable on its own (navigates to that manager).
   return (
-    <View className="flex-row items-center gap-1.5">
+    <Pressable
+      className="flex-row items-center gap-1.5"
+      onPress={(e) => {
+        e.stopPropagation();
+        playerDetail?.openPlayer({ playerId: performer.playerId, name: performer.name, position: performer.pos ?? "", team: performer.team });
+      }}
+    >
       <Image
         source={photoUri ? { uri: photoUri } : undefined}
         resizeMode={isDef ? "contain" : "cover"}
@@ -520,7 +530,7 @@ function PerformerLine({ performer }: { performer: TopPerformer }) {
       >
         {performer.ppg.toFixed(1)}
       </Text>
-    </View>
+    </Pressable>
   );
 }
 

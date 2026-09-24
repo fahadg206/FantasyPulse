@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { View, Text, Image, ScrollView } from "react-native";
+import { View, Text, Image, ScrollView, Pressable } from "react-native";
 import { backend } from "../lib/api";
 import { getTeamLogo } from "../lib/nflTeams";
+import { usePlayerDetail } from "./PlayerDetailProvider";
 
 // Only ever stepped a count down to "K" - a genuinely large count (into
 // the millions) just kept dividing by 1,000 with no further tier, so
@@ -26,6 +27,7 @@ interface TrendingItem {
 // distinct from the local "League Buzz" headlines.
 export default function TrendingPlayers({ leagueID }: { leagueID: string }) {
   const [items, setItems] = useState<TrendingItem[]>([]);
+  const playerDetail = usePlayerDetail();
 
   useEffect(() => {
     if (!leagueID) return;
@@ -69,8 +71,9 @@ export default function TrendingPlayers({ leagueID }: { leagueID: string }) {
             ? getTeamLogo(item.team) ?? undefined
             : `https://sleepercdn.com/content/nfl/players/thumb/${item.playerId}.jpg`;
           return (
-            <View
+            <Pressable
               key={item.playerId}
+              onPress={() => playerDetail?.openPlayer({ playerId: item.playerId, name: item.name, position: item.pos ?? "", team: item.team })}
               style={{ width: 92 }}
               className="items-center bg-[#141416] border border-white/10 rounded-2xl p-3"
             >
@@ -86,7 +89,7 @@ export default function TrendingPlayers({ leagueID }: { leagueID: string }) {
               <Text className="text-gray-500 text-[9px] mt-0.5">
                 {formatAddCount(item.count)} adds
               </Text>
-            </View>
+            </Pressable>
           );
         })}
       </ScrollView>

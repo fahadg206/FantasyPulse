@@ -11,6 +11,7 @@ import { getUnreadNotificationCount } from "../../../lib/notifications";
 import { getUnreadConversationCount } from "../../../lib/messages";
 import Scoreboard from "../../../components/Scoreboard";
 import BottomTabBar from "../../../components/BottomTabBar";
+import { PlayerDetailProvider } from "../../../components/PlayerDetailProvider";
 
 const helmet = require("../../../assets/images/helmet2.png");
 // Persists across navigation within a league (this masthead never
@@ -90,6 +91,7 @@ export default function LeagueLayout() {
     pathname.endsWith("/more");
 
   return (
+    <PlayerDetailProvider leagueID={leagueID}>
     <SafeAreaView className="flex-1 bg-[#0c0c0e]" edges={["top"]}>
       {/* Dark masthead so it reads as one cohesive unit with the
           scoreboard strip directly beneath it, instead of a mismatched
@@ -132,5 +134,6 @@ export default function LeagueLayout() {
       </View>
       <BottomTabBar leagueID={leagueID} />
     </SafeAreaView>
+    </PlayerDetailProvider>
   );
 }

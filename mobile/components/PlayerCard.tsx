@@ -1,6 +1,7 @@
 import { View, Text, Image, Pressable } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { getTeamColor, getTeamLogo } from "../lib/nflTeams";
+import { usePlayerDetail } from "./PlayerDetailProvider";
 
 type Props = {
   playerId?: string;
@@ -35,12 +36,20 @@ export default function PlayerCard({
     photoUriOverride ??
     (position === "DEF" ? logo ?? undefined : `https://sleepercdn.com/content/nfl/players/thumb/${playerId}.jpg`);
 
+  // Falls back to the app-wide player detail modal (see
+  // PlayerDetailProvider, mounted once per league) whenever a caller
+  // doesn't wire its own onExpand - every PlayerCard is tappable to a real
+  // player page by default, the same way every player row in Sleeper's
+  // own app is, without each screen having to opt in individually.
+  const playerDetail = usePlayerDetail();
+  const handleExpand = onExpand ?? (playerId ? () => playerDetail?.openPlayer({ playerId, name, position, team }) : undefined);
+
   const expandButton = (positionClass: string) =>
-    onExpand && (
+    handleExpand && (
       <Pressable
         onPress={(e) => {
           e.stopPropagation();
-          onExpand();
+          handleExpand();
         }}
         hitSlop={8}
         className={`absolute ${positionClass} w-5 h-5 rounded-full bg-black/30 items-center justify-center z-10`}

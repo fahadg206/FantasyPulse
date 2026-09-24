@@ -18,6 +18,7 @@ import { formatGameKickoff } from "../../../lib/formatTime";
 import SchedulePoll from "../../../components/SchedulePoll";
 import MatchupPredictorRing from "../../../components/MatchupPredictorRing";
 import { getTeamColor, getTeamLogo } from "../../../lib/nflTeams";
+import { usePlayerDetail } from "../../../components/PlayerDetailProvider";
 import AnimatedNumber from "../../../components/AnimatedNumber";
 import BigPlayToast from "../../../components/BigPlayToast";
 import MatchupFeed from "../../../components/MatchupFeed";
@@ -724,6 +725,7 @@ function PlayerDetail({ content, align }: { content: PlayerDetailContent | null;
 }
 
 function PlayerHalf({ player, align }: { player?: Starter; align: "left" | "right" }) {
+  const playerDetail = usePlayerDetail();
   if (!player || Object.keys(player).length === 0) {
     return (
       <View className={`flex-1 flex-row items-center ${align === "right" ? "justify-end" : ""}`}>
@@ -777,11 +779,15 @@ function PlayerHalf({ player, align }: { player?: Starter; align: "left" | "righ
     </View>
   );
 
+  const openDetail = () => playerDetail?.openPlayer({ playerId: player.id, name: displayName(player), position: player.pos ?? "", team: player.team });
+
   if (align === "left") {
     return (
       <View className="flex-1 flex-row items-center gap-2">
-        {photo}
-        {info}
+        <Pressable className="flex-row items-center gap-2 flex-1" onPress={openDetail}>
+          {photo}
+          {info}
+        </Pressable>
         <View style={{ marginLeft: "auto" }}>{scoreBlock}</View>
       </View>
     );
@@ -789,8 +795,10 @@ function PlayerHalf({ player, align }: { player?: Starter; align: "left" | "righ
   return (
     <View className="flex-1 flex-row items-center justify-end gap-2">
       <View style={{ marginRight: "auto" }}>{scoreBlock}</View>
-      {info}
-      {photo}
+      <Pressable className="flex-row items-center justify-end gap-2 flex-1" onPress={openDetail}>
+        {info}
+        {photo}
+      </Pressable>
     </View>
   );
 }

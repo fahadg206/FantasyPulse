@@ -223,3 +223,110 @@ export async function buildAllSeasonsTradesBetween(leagueId: string, userIds: [s
   events.sort((a, b) => b.timestamp - a.timestamp);
   return events;
 }
+
+/** every trade and add/drop involving one specific player, across every season this league (and its previous_league_id chain) has real transaction data for - the player detail card's real History tab, same all-seasons crawl pattern as buildAllSeasonsTradesBetween above but keyed off a player id instead of a pair of managers. */
+export async function buildPlayerTransactionHistory(leagueId: string, playerId: string): Promise<TickerEvent[]> {
+  const playersData = await backend.fetchPlayers(leagueId);
+  const events: TickerEvent[] = [];
+  let currentLeagueId: string | null = leagueId;
+
+  while (currentLeagueId && currentLeagueId !== "0") {
+    const leagueIdForRequest: string = currentLeagueId;
+    let leagueRes, usersRes, rostersRes;
+    try {
+      [leagueRes, usersRes, rostersRes] = await Promise.all([
+        sleeper.getLeague(leagueIdForRequest),
+        sleeper.getLeagueUsers(leagueIdForRequest),
+        sleeper.getLeagueRosters(leagueIdForRequest),
+      ]);
+    } catch {
+      break;
+    }
+
+    const rosterToTeam: Record<number, TxTeam> = {};
+    for (const roster of rostersRes.data) {
+      const owner = usersRes.data.find((u: any) => u.user_id === roster.owner_id);
+      rosterToTeam[roster.roster_id] = {
+        userId: roster.owner_id,
+        name: owner?.display_name ?? "A team",
+        avatar: owner?.avatar ? `https://sleepercdn.com/avatars/thumbs/${owner.avatar}` : undefined,
+      };
+    }
+
+    const week: number = Math.max(1, (leagueRes.data.settings?.playoff_week_start ?? 15) - 1);
+    const weeks = Array.from({ length: week }, (_, i) => i + 1);
+    const weekResults = await Promise.all(
+      weeks.map((w) =>
+        fetch(`https://api.sleeper.app/v1/league/${leagueIdForRequest}/transactions/${w}`)
+          .then((r) => r.json())
+          .catch(() => [])
+      )
+    );
+    const transactions = weekResults.flat().filter((t: any) => t?.status === "complete");
+    const team = (rid: number): TxTeam => rosterToTeam[rid] ?? { name: "A team" };
+
+    for (const t of transactions) {
+      const timestamp: number = t.status_updated ?? t.created ?? 0;
+
+      if (t.type === "trade") {
+        const involvesPlayer = Object.keys(t.adds || {}).includes(playerId);
+        if (!involvesPlayer) continue;
+
+        const receivedByRoster: Record<number, TxAsset[]> = {};
+        for (const pid in t.adds || {}) {
+          const rid = t.adds[pid];
+          (receivedByRoster[rid] ??= []).push(assetFromPlayer(pid, playersData));
+        }
+        for (const pick of t.draft_picks || []) {
+          (receivedByRoster[pick.owner_id] ??= []).push({ isPick: true, label: `${pick.season} Rd ${pick.round} Pick` });
+        }
+        const involvedRosterIds = Object.keys(receivedByRoster).map(Number);
+
+        if (involvedRosterIds.length === 2) {
+          const [ridA, ridB] = involvedRosterIds;
+          events.push({
+            kind: "trade2",
+            teamA: team(ridA),
+            teamB: team(ridB),
+            aGives: receivedByRoster[ridB] ?? [],
+            aGets: receivedByRoster[ridA] ?? [],
+            timestamp,
+            id: t.transaction_id,
+          });
+        } else if (involvedRosterIds.length > 0) {
+          events.push({
+            kind: "tradeMulti",
+            id: t.transaction_id,
+            parts: involvedRosterIds.map((rid) => ({ team: team(rid), receives: receivedByRoster[rid] })),
+            timestamp,
+          });
+        }
+        continue;
+      }
+
+      if (t.adds?.[playerId] !== undefined) {
+        events.push({
+          kind: "add",
+          team: team(t.adds[playerId]),
+          asset: assetFromPlayer(playerId, playersData),
+          timestamp,
+          id: `${t.transaction_id}_${playerId}`,
+        });
+      }
+      if (t.drops?.[playerId] !== undefined) {
+        events.push({
+          kind: "drop",
+          team: team(t.drops[playerId]),
+          asset: assetFromPlayer(playerId, playersData),
+          timestamp,
+          id: `${t.transaction_id}_${playerId}`,
+        });
+      }
+    }
+
+    currentLeagueId = leagueRes.data.previous_league_id;
+  }
+
+  events.sort((a, b) => b.timestamp - a.timestamp);
+  return events;
+}
