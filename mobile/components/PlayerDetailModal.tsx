@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { View, Text, Image, Pressable, Modal, ScrollView, ActivityIndicator } from "react-native";
+import { View, Text, Image, Pressable, Modal, ScrollView, ActivityIndicator, Platform } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { getTeamColor, getTeamLogo } from "../lib/nflTeams";
 import { sleeper, backend } from "../lib/api";
@@ -220,14 +221,14 @@ export default function PlayerDetailModal({ visible, onClose, leagueID, playerId
   const statGroups = STAT_GROUPS[position] ?? [];
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable className="flex-1 bg-black/60 justify-end" onPress={onClose}>
-        <Pressable className="bg-[#0c0c0e] rounded-t-3xl overflow-hidden" style={{ maxHeight: "90%" }} onPress={() => {}}>
-          <View className="items-center pt-3 pb-1">
-            <View className="w-9 h-1 rounded-full bg-white/15" />
-          </View>
-
-          <View style={{ backgroundColor: color }} className="overflow-hidden">
+    <Modal
+      visible={visible}
+      animationType="slide"
+      onRequestClose={onClose}
+      presentationStyle={Platform.OS === "ios" ? "pageSheet" : undefined}
+    >
+      <SafeAreaView className="flex-1 bg-[#0c0c0e]" edges={["top", "bottom"]}>
+          <View style={{ backgroundColor: color }} className="overflow-hidden pt-3">
             {logo && (
               <Image
                 source={{ uri: logo }}
@@ -459,8 +460,7 @@ export default function PlayerDetailModal({ visible, onClose, leagueID, playerId
           <Pressable onPress={onClose} className="absolute top-4 right-4 w-8 h-8 rounded-full bg-black/30 items-center justify-center">
             <Feather name="x" size={16} color="#fff" />
           </Pressable>
-        </Pressable>
-      </Pressable>
+      </SafeAreaView>
     </Modal>
   );
 }
