@@ -222,3 +222,111 @@ export async function fetchRivalry(
   rivalry.matchups.sort((a, b) => parseInt(a.year) - parseInt(b.year) || b.week - a.week);
   return rivalry;
 }
+
+export interface RivalryMoment {
+  matchup: RivalryMatchup;
+  margin: number;
+  totalOne: number;
+  totalTwo: number;
+}
+
+export interface NemesisPlayer {
+  playerId: string;
+  /** total points this player has put up in games against the OTHER side, across every tracked meeting */
+  totalPoints: number;
+  games: number;
+}
+
+export interface RivalryHighlights {
+  /** most recent result(s) in a row, chronologically - null if there's no real history */
+  streak: { side: "one" | "two" | "tie"; count: number } | null;
+  closestGame: RivalryMoment | null;
+  biggestBlowout: (RivalryMoment & { winner: "one" | "two" }) | null;
+  highestCombined: RivalryMoment | null;
+  /** the single player who has personally torched the OTHER side the hardest, across every meeting - real cumulative production, not a one-game fluke */
+  nemesisOne: NemesisPlayer | null;
+  nemesisTwo: NemesisPlayer | null;
+}
+
+/**
+ * Derived storylines off the same matchup history fetchRivalry already
+ * pulls - no extra fetches, just real arithmetic over real box scores.
+ * Works off a chronologically-sorted copy (year asc, week asc) rather than
+ * rivalry.matchups' own display order (year asc, week desc - tuned for
+ * that array's own nav UI, not for "what happened most recently").
+ */
+export function computeRivalryHighlights(rivalry: Rivalry): RivalryHighlights {
+  const chronological = [...rivalry.matchups].sort(
+    (a, b) => parseInt(a.year) - parseInt(b.year) || a.week - b.week
+  );
+
+  let streak: RivalryHighlights["streak"] = null;
+  for (let i = chronological.length - 1; i >= 0; i--) {
+    const m = chronological[i];
+    const totalOne = m.matchup[0].points.reduce((t, v) => t + parseFloat(String(v)), 0);
+    const totalTwo = m.matchup[1].points.reduce((t, v) => t + parseFloat(String(v)), 0);
+    const side: "one" | "two" | "tie" = totalOne > totalTwo ? "one" : totalOne < totalTwo ? "two" : "tie";
+    if (!streak) {
+      streak = { side, count: 1 };
+    } else if (streak.side === side) {
+      streak.count += 1;
+    } else {
+      break;
+    }
+  }
+
+  let closestGame: RivalryMoment | null = null;
+  let biggestBlowout: (RivalryMoment & { winner: "one" | "two" }) | null = null;
+  let highestCombined: RivalryMoment | null = null;
+  const pointsForOne: Record<string, { total: number; games: number }> = {};
+  const pointsForTwo: Record<string, { total: number; games: number }> = {};
+
+  for (const m of rivalry.matchups) {
+    const totalOne = m.matchup[0].points.reduce((t, v) => t + parseFloat(String(v)), 0);
+    const totalTwo = m.matchup[1].points.reduce((t, v) => t + parseFloat(String(v)), 0);
+    const margin = Math.abs(totalOne - totalTwo);
+    const moment: RivalryMoment = { matchup: m, margin, totalOne, totalTwo };
+
+    if (!closestGame || margin < closestGame.margin) closestGame = moment;
+    if (totalOne !== totalTwo && (!biggestBlowout || margin > biggestBlowout.margin)) {
+      biggestBlowout = { ...moment, winner: totalOne > totalTwo ? "one" : "two" };
+    }
+    if (!highestCombined || totalOne + totalTwo > highestCombined.totalOne + highestCombined.totalTwo) {
+      highestCombined = moment;
+    }
+
+    m.matchup[0].starters.forEach((playerId, i) => {
+      if (!playerId || playerId === "0") return;
+      const pts = m.matchup[0].points[i] ?? 0;
+      if (!pointsForOne[playerId]) pointsForOne[playerId] = { total: 0, games: 0 };
+      pointsForOne[playerId].total += pts;
+      pointsForOne[playerId].games += 1;
+    });
+    m.matchup[1].starters.forEach((playerId, i) => {
+      if (!playerId || playerId === "0") return;
+      const pts = m.matchup[1].points[i] ?? 0;
+      if (!pointsForTwo[playerId]) pointsForTwo[playerId] = { total: 0, games: 0 };
+      pointsForTwo[playerId].total += pts;
+      pointsForTwo[playerId].games += 1;
+    });
+  }
+
+  const topOf = (map: Record<string, { total: number; games: number }>): NemesisPlayer | null => {
+    let best: NemesisPlayer | null = null;
+    for (const playerId in map) {
+      if (!best || map[playerId].total > best.totalPoints) {
+        best = { playerId, totalPoints: map[playerId].total, games: map[playerId].games };
+      }
+    }
+    return best;
+  };
+
+  return {
+    streak,
+    closestGame,
+    biggestBlowout,
+    highestCombined,
+    nemesisOne: topOf(pointsForOne),
+    nemesisTwo: topOf(pointsForTwo),
+  };
+}
