@@ -45,7 +45,7 @@ const TIER_STYLE: Record<PowerRankingTier, { bg: string; text: string }> = {
 };
 
 export default function LeagueManagers() {
-  const { leagueID } = useLocalSearchParams<{ leagueID: string }>();
+  const { leagueID, userId: requestedUserId } = useLocalSearchParams<{ leagueID: string; userId?: string }>();
   const router = useRouter();
   const [scheduleData, setScheduleData] = useState<ScheduleData>({});
   const [managerIds, setManagerIds] = useState<string[]>([]);
@@ -78,7 +78,10 @@ export default function LeagueManagers() {
         setScheduleData(updatedScheduleData);
         const ids = Object.keys(updatedScheduleData);
         setManagerIds(ids);
-        setSelectedId((prev) => prev ?? ids[0] ?? null);
+        // Arriving from Standings' "View Team" action pre-selects that
+        // exact manager instead of always landing on whoever's first.
+        const preferred = requestedUserId && ids.includes(requestedUserId) ? requestedUserId : undefined;
+        setSelectedId((prev) => prev ?? preferred ?? ids[0] ?? null);
 
         // The full regular-season schedule, not just weeks played so far -
         // Sleeper already has the whole season's pairings generated, future

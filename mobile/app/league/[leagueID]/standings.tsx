@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { View, Text, Image, FlatList, ScrollView, ActivityIndicator, Pressable } from "react-native";
+import { View, Text, Image, FlatList, ScrollView, ActivityIndicator, Pressable, Modal } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons, Feather } from "@expo/vector-icons";
 import { sleeper, backend } from "../../../lib/api";
@@ -52,6 +52,11 @@ export default function Standings() {
   const [divisionNames, setDivisionNames] = useState<Record<number, string>>({});
   const [viewMode, setViewMode] = useState<"overall" | "division">("overall");
   const [whatIfOpen, setWhatIfOpen] = useState(false);
+  // Which team's action sheet ("View Team" / "View Profile") is open, if
+  // any - tapping a row used to navigate straight to their profile, which
+  // buried "View Team" (their roster on League Managers) with no way to
+  // reach it from here at all.
+  const [actionsFor, setActionsFor] = useState<{ userId: string; name: string } | null>(null);
   // Everything the What-If simulator needs, captured once from the main
   // fetch below so it can re-run scenarios without re-fetching anything.
   const [simInputs, setSimInputs] = useState<{
@@ -315,6 +320,7 @@ export default function Standings() {
                 oddsField="playoffOdds"
                 zone={getZoneForRank(leagueID, rank, sortedTeamData.length)}
                 zoneStarts={isZoneStart(leagueID, rank, sortedTeamData.length)}
+                onPress={() => user.user_id && setActionsFor({ userId: user.user_id, name: user.name })}
               />
             );
           }}
@@ -332,7 +338,14 @@ export default function Standings() {
                   </Text>
                 </View>
                 {teams.map(([userId, user], i) => (
-                  <TeamRow key={userId} user={user} rank={i + 1} showPlayoffLine={false} oddsField="divisionOdds" />
+                  <TeamRow
+                    key={userId}
+                    user={user}
+                    rank={i + 1}
+                    showPlayoffLine={false}
+                    oddsField="divisionOdds"
+                    onPress={() => user.user_id && setActionsFor({ userId: user.user_id, name: user.name })}
+                  />
                 ))}
               </View>
             );
@@ -350,6 +363,44 @@ export default function Standings() {
         playoffSpots={simInputs?.playoffSpots ?? playoffSpots}
         divisionsCount={Object.keys(divisionNames).length}
       />
+
+      <Modal visible={actionsFor !== null} transparent animationType="fade" onRequestClose={() => setActionsFor(null)}>
+        <Pressable className="flex-1 bg-black/50 justify-end" onPress={() => setActionsFor(null)}>
+          <Pressable className="bg-[#141416] rounded-t-2xl overflow-hidden pb-6" onPress={() => {}}>
+            <View className="items-center pt-3 pb-2">
+              <View className="w-9 h-1 rounded-full bg-white/15" />
+            </View>
+            <Text numberOfLines={1} className="text-white font-bold text-[15px] text-center px-6 pb-3">
+              {actionsFor?.name}
+            </Text>
+            <Pressable
+              onPress={() => {
+                if (!actionsFor) return;
+                router.push({
+                  pathname: "/league/[leagueID]/leaguemanagers",
+                  params: { leagueID, userId: actionsFor.userId },
+                } as any);
+                setActionsFor(null);
+              }}
+              className="flex-row items-center gap-3 px-5 py-3.5 border-t border-white/10"
+            >
+              <Ionicons name="shirt-outline" size={18} color="#e5e7eb" />
+              <Text className="text-white text-[14px] font-semibold">View Team</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                if (!actionsFor) return;
+                router.push(`/profile/manager/${actionsFor.userId}`);
+                setActionsFor(null);
+              }}
+              className="flex-row items-center gap-3 px-5 py-3.5 border-t border-white/10"
+            >
+              <Ionicons name="person-circle-outline" size={18} color="#e5e7eb" />
+              <Text className="text-white text-[14px] font-semibold">View Profile</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -366,6 +417,7 @@ function TeamRow({
   oddsField,
   zone,
   zoneStarts,
+  onPress,
 }: {
   user: TeamData;
   rank: number;
@@ -375,8 +427,8 @@ function TeamRow({
   zone?: StandingsZone;
   /** true on the first row of `zone`, where its divider/label renders */
   zoneStarts?: boolean;
+  onPress: () => void;
 }) {
-  const router = useRouter();
   const zoneColor = zone ? ZONE_COLOR[zone.color] : undefined;
 
   const pointsFor =
@@ -415,14 +467,7 @@ function TeamRow({
         </View>
       )}
       <Pressable
-        onPress={() => {
-          if (!user.user_id) return;
-          // Every manager has a profile here regardless of whether they've
-          // signed up - the route itself redirects to their full account
-          // if one's linked, or shows their real Sleeper stats read-only
-          // if not.
-          router.push(`/profile/manager/${user.user_id}`);
-        }}
+        onPress={onPress}
         style={zoneColor ? { borderLeftWidth: 3, borderLeftColor: zoneColor, backgroundColor: `${zoneColor}14` } : undefined}
         className="flex-row items-center px-4 py-3 border-b border-white/5"
       >
