@@ -38,6 +38,27 @@ export interface MatchupCard {
   isFinal: boolean;
 }
 
+// The equivalent "post-sized card" for Boogie's analyst takes - same idea
+// as MatchupCard (a compact, structured snippet instead of a wall of text
+// or a bare attached photo) but general enough to cover every analyst
+// storyline: an eyebrow naming which one this is, 1-3 rows each pairing a
+// subject (a team or a player) with one real stat, and an optional footer
+// line for context that doesn't fit a row ("12 weeks left", "Week 7").
+export interface AnalystCardRow {
+  name: string;
+  avatar?: string;
+  stat: string;
+  statLabel?: string;
+  /** bolder/white treatment for the row that's the story's protagonist - the leader, the winner, the team getting the good end of it */
+  highlight?: boolean;
+}
+
+export interface AnalystCard {
+  eyebrow: string;
+  rows: AnalystCardRow[];
+  footer?: string;
+}
+
 // The embedded card shown when a post is quoting another one, styled the
 // way X renders a quote-tweet - a bordered mini-card with the quoted
 // author, their text, and their image, below the quoting post's own text.
@@ -67,6 +88,7 @@ export interface Post {
   text: string;
   imageUrl?: string;
   matchupCard?: MatchupCard;
+  analystCard?: AnalystCard;
   quotedPost?: QuotedPostRef;
   createdAt: string;
   createdAtMs: number;
@@ -268,6 +290,7 @@ export interface EnsureSystemPostInput {
   text: string;
   imageUrl?: string;
   matchupCard?: MatchupCard;
+  analystCard?: AnalystCard;
   leagueId?: string;
   targetType: "matchup" | "trade" | "waiver" | "analysis";
   targetId: string;
@@ -296,6 +319,7 @@ export async function ensureSystemPost(input: EnsureSystemPostInput): Promise<vo
     text: input.text,
     imageUrl: input.imageUrl ?? null,
     matchupCard: input.matchupCard ?? null,
+    analystCard: input.analystCard ?? null,
     createdAt: new Date(now).toISOString(),
     createdAtMs: now,
     leagueId: input.leagueId ?? null,

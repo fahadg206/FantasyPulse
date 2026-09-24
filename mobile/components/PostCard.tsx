@@ -206,6 +206,7 @@ export default function PostCard({
         {!!post.text && <Text className="text-white text-[20px] leading-[26px] mb-3">{post.text}</Text>}
 
         {post.matchupCard && <MatchupCardView card={post.matchupCard} />}
+        {post.analystCard && <AnalystCardView card={post.analystCard} onPress={onPressTarget} />}
 
         {post.imageUrl && (
           <Pressable onPress={() => setImageViewerOpen(true)}>
@@ -305,6 +306,7 @@ export default function PostCard({
         {!!post.text && <Text className="text-white text-[15px] mt-0.5 leading-[20px]">{post.text}</Text>}
 
         {post.matchupCard && <MatchupCardView card={post.matchupCard} />}
+        {post.analystCard && <AnalystCardView card={post.analystCard} onPress={onPressTarget} />}
 
         {post.imageUrl && (
           <Pressable onPress={() => setImageViewerOpen(true)}>
@@ -547,6 +549,56 @@ function QuotedPostCard({ quoted, className }: { quoted: NonNullable<Post["quote
 
   if (!isInternal) return content;
   return <Pressable onPress={() => router.push(`/post/${quoted.postId}`)}>{content}</Pressable>;
+}
+
+function AnalystCardView({ card, onPress }: { card: Post["analystCard"]; onPress?: () => void }) {
+  if (!card) return null;
+
+  const content = (
+    <View className="mt-2.5 rounded-2xl border border-white/10 bg-white/5 overflow-hidden">
+      <View className="flex-row items-center justify-between px-3.5 pt-3">
+        <Text className="text-[10px] font-bold tracking-widest text-brand">{card.eyebrow}</Text>
+      </View>
+      <View className="px-3.5 py-3 gap-2.5">
+        {card.rows.map((row, i) => (
+          <AnalystCardRow key={i} row={row} />
+        ))}
+      </View>
+      {!!card.footer && (
+        <View className="px-3.5 pb-3">
+          <Text className="text-gray-500 text-[11px]">{card.footer}</Text>
+        </View>
+      )}
+    </View>
+  );
+
+  if (!onPress) return content;
+  return <Pressable onPress={onPress}>{content}</Pressable>;
+}
+
+function AnalystCardRow({ row }: { row: NonNullable<Post["analystCard"]>["rows"][number] }) {
+  return (
+    <View className="flex-row items-center justify-between">
+      <View className="flex-row items-center gap-2 flex-1 mr-2">
+        <Avatar url={row.avatar} name={row.name} size={26} />
+        <Text
+          numberOfLines={1}
+          className={`text-[13px] flex-1 ${row.highlight ? "text-white font-bold" : "text-gray-400 font-semibold"}`}
+        >
+          {row.name}
+        </Text>
+      </View>
+      <View className="items-end">
+        <Text
+          style={{ fontVariant: ["tabular-nums"] }}
+          className={`text-[15px] ${row.highlight ? "text-white font-extrabold" : "text-gray-400 font-bold"}`}
+        >
+          {row.stat}
+        </Text>
+        {!!row.statLabel && <Text className="text-gray-600 text-[9px]">{row.statLabel}</Text>}
+      </View>
+    </View>
+  );
 }
 
 function MatchupCardView({ card }: { card: Post["matchupCard"] }) {

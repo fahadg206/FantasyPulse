@@ -17,6 +17,7 @@ import { rankTeams, determinePlayoffTeams, runMonteCarlo, basePointsFor } from "
 import { computePowerRankings, PowerRankingResult } from "./powerRankings";
 import { optimalLineupPoints } from "./startSitAccuracy";
 import { ensureSystemPost, postExists } from "./posts";
+import type { AnalystCard } from "./posts";
 import { tradeLabel } from "./announceTransactions";
 import type { TradeEvent, TickerEvent, AddDropEvent, TxAsset } from "./leagueTransactions";
 
@@ -26,6 +27,10 @@ function pick<T>(options: T[]): T {
 
 function nameOf(sim: LeagueSimData, userId: string): string {
   return sim.managerInfo[userId]?.name ?? "Unknown Team";
+}
+
+function formatValue(v: number): string {
+  return Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v));
 }
 
 // ---------------------------------------------------------------------
@@ -92,10 +97,19 @@ export async function ensureScheduleStorylinePost(leagueId: string, sim: LeagueS
     const easiest = sos[sos.length - 1];
     if (!hardest || !easiest || hardest.userId === easiest.userId) return;
 
+    const analystCard: AnalystCard = {
+      eyebrow: "STRENGTH OF SCHEDULE",
+      rows: [
+        { name: easiest.name, avatar: easiest.avatar, stat: String(easiest.sosScore), statLabel: "EASIEST", highlight: true },
+        { name: hardest.name, avatar: hardest.avatar, stat: String(hardest.sosScore), statLabel: "HARDEST" },
+      ],
+      footer: `${gamesLeft} weeks left`,
+    };
+
     await ensureSystemPost({
       id: `sos_story_${leagueId}_wk${currentWeek}`,
       text: scheduleStorylineText(gamesLeft, easiest, hardest),
-      imageUrl: easiest.avatar,
+      analystCard,
       leagueId,
       targetType: "analysis",
       targetId: `sos:wk${currentWeek}`,
@@ -168,13 +182,21 @@ async function ensureOneTradeGrade(
 
   const netToA = getsVal.total - givesVal.total;
   const totalValue = givesVal.total + getsVal.total;
-  // The team that came out ahead is the story's protagonist - lead the image with them.
-  const winningTeam = netToA >= 0 ? event.teamA : event.teamB;
+  const pct = totalValue > 0 ? Math.abs(netToA) / totalValue : 0;
+
+  const analystCard: AnalystCard = {
+    eyebrow: "TRADE GRADE",
+    rows: [
+      { name: event.teamA.name, avatar: event.teamA.avatar, stat: `${netToA >= 0 ? "+" : "-"}${formatValue(Math.abs(netToA))}`, statLabel: "VALUE", highlight: netToA >= 0 },
+      { name: event.teamB.name, avatar: event.teamB.avatar, stat: `${netToA <= 0 ? "+" : "-"}${formatValue(Math.abs(netToA))}`, statLabel: "VALUE", highlight: netToA < 0 },
+    ],
+    footer: pct < 0.08 ? "Fair trade - no real winner" : `${Math.round(pct * 100)}% value swing`,
+  };
 
   await ensureSystemPost({
     id: `tradegrade_${leagueId}_${event.id}`,
     text: tradeGradeText(event.teamA.name, event.teamB.name, netToA, totalValue),
-    imageUrl: winningTeam.avatar,
+    analystCard,
     leagueId,
     targetType: "trade",
     targetId: event.id,
@@ -304,10 +326,19 @@ export async function ensurePlayoffPicturePost(leagueId: string, sim: LeagueSimD
       bubbleOutSOS: sosById.get(bubbleOutId)?.tier,
     });
 
+    const analystCard: AnalystCard = {
+      eyebrow: `PLAYOFF PICTURE · WEEK ${currentWeek}`,
+      rows: [
+        { name: nameOf(sim, topSeedId), avatar: sim.managerInfo[topSeedId]?.avatar, stat: `${Math.round(playoffOdds[topSeedId] ?? 0)}%`, statLabel: "TOP SEED", highlight: true },
+        { name: nameOf(sim, bubbleInId), avatar: sim.managerInfo[bubbleInId]?.avatar, stat: `${Math.round(playoffOdds[bubbleInId] ?? 0)}%`, statLabel: "IN" },
+        { name: nameOf(sim, bubbleOutId), avatar: sim.managerInfo[bubbleOutId]?.avatar, stat: `${Math.round(playoffOdds[bubbleOutId] ?? 0)}%`, statLabel: "OUT" },
+      ],
+    };
+
     await ensureSystemPost({
       id: `playoff_picture_${leagueId}_wk${currentWeek}`,
       text,
-      imageUrl: sim.managerInfo[topSeedId]?.avatar,
+      analystCard,
       leagueId,
       targetType: "analysis",
       targetId: `playoffs:wk${currentWeek}`,
@@ -349,25 +380,39 @@ async function loadLastWeekRanks(leagueId: string, currentWeek: number): Promise
   }
 }
 
+interface RankMover {
+  userId: string;
+  name: string;
+  delta: number;
+}
+
+/** the biggest climb and biggest drop since last week, 2+ spots minimum - shared by the text and the card so both tell the same story. */
+function findMovers(
+  ranked: PowerRankingResult[],
+  nameById: Record<string, string>,
+  lastWeekRanks: Record<string, number> | null
+): { riser?: RankMover; faller?: RankMover } {
+  if (!lastWeekRanks) return {};
+  let riser: RankMover | undefined;
+  let faller: RankMover | undefined;
+  for (const r of ranked) {
+    const prevRank = lastWeekRanks[r.userId];
+    if (prevRank === undefined) continue;
+    const delta = prevRank - r.rank; // positive = moved up
+    if (delta >= 2 && (!riser || delta > riser.delta)) riser = { userId: r.userId, name: nameById[r.userId] ?? "Unknown Team", delta };
+    if (delta <= -2 && (!faller || delta < faller.delta)) faller = { userId: r.userId, name: nameById[r.userId] ?? "Unknown Team", delta };
+  }
+  return { riser, faller };
+}
+
 function powerRankMovementText(
   currentWeek: number,
   ranked: PowerRankingResult[],
   nameById: Record<string, string>,
-  lastWeekRanks: Record<string, number> | null
+  movers: { riser?: RankMover; faller?: RankMover }
 ): string {
   const topName = nameById[ranked[0]?.userId] ?? "Unknown Team";
-
-  let riser: { name: string; delta: number } | undefined;
-  let faller: { name: string; delta: number } | undefined;
-  if (lastWeekRanks) {
-    for (const r of ranked) {
-      const prevRank = lastWeekRanks[r.userId];
-      if (prevRank === undefined) continue;
-      const delta = prevRank - r.rank; // positive = moved up
-      if (delta >= 2 && (!riser || delta > riser.delta)) riser = { name: nameById[r.userId] ?? "Unknown Team", delta };
-      if (delta <= -2 && (!faller || delta < faller.delta)) faller = { name: nameById[r.userId] ?? "Unknown Team", delta };
-    }
-  }
+  const { riser, faller } = movers;
 
   const header = pick([
     `📶 Power Rankings, Week ${currentWeek}: ${topName} holds the top spot.`,
@@ -435,12 +480,27 @@ export async function ensurePowerRankingsMovementPost(leagueId: string, sim: Lea
     for (const userId of sim.teamIds) nameById[userId] = nameOf(sim, userId);
 
     const lastWeekRanks = await loadLastWeekRanks(leagueId, currentWeek);
-    const text = powerRankMovementText(currentWeek, ranked, nameById, lastWeekRanks);
+    const movers = findMovers(ranked, nameById, lastWeekRanks);
+    const text = powerRankMovementText(currentWeek, ranked, nameById, movers);
+
+    const topId = ranked[0]?.userId;
+    const analystCard: AnalystCard = {
+      eyebrow: `POWER RANKINGS · WEEK ${currentWeek}`,
+      rows: [
+        { name: nameById[topId] ?? "Unknown Team", avatar: sim.managerInfo[topId]?.avatar, stat: "#1", highlight: true },
+        ...(movers.riser
+          ? [{ name: movers.riser.name, avatar: sim.managerInfo[movers.riser.userId]?.avatar, stat: `+${movers.riser.delta}`, statLabel: "UP" }]
+          : []),
+        ...(movers.faller
+          ? [{ name: movers.faller.name, avatar: sim.managerInfo[movers.faller.userId]?.avatar, stat: `${movers.faller.delta}`, statLabel: "DOWN" }]
+          : []),
+      ],
+    };
 
     await ensureSystemPost({
       id: postId,
       text,
-      imageUrl: sim.managerInfo[ranked[0]?.userId]?.avatar,
+      analystCard,
       leagueId,
       targetType: "analysis",
       targetId: `powerrank:wk${currentWeek}`,
@@ -482,7 +542,9 @@ function rematchAlertText(a: string, b: string, week: number, firstWeek: number,
 export async function ensureRematchAlertPost(leagueId: string, sim: LeagueSimData, currentWeek: number): Promise<void> {
   try {
     const seen = new Set<string>();
-    let best: { a: string; b: string; firstWeek: number; marginPts: number; winnerId: string; matchupId?: string } | null = null;
+    let best:
+      | { aId: string; bId: string; firstWeek: number; marginPts: number; aFirstPts: number; bFirstPts: number; winnerId: string; matchupId?: string }
+      | null = null;
 
     for (const userId of sim.teamIds) {
       if (seen.has(userId)) continue;
@@ -504,10 +566,12 @@ export async function ensureRematchAlertPost(leagueId: string, sim: LeagueSimDat
         // The closest of the week's rematches is the most compelling story to lead with.
         if (!best || marginPts < best.marginPts) {
           best = {
-            a: nameOf(sim, userId),
-            b: nameOf(sim, oppId),
+            aId: userId,
+            bId: oppId,
             firstWeek: w,
             marginPts,
+            aFirstPts: myPts,
+            bFirstPts: oppPts,
             winnerId,
             matchupId: sim.matchupData[currentWeek]?.[userId]?.matchup_id,
           };
@@ -518,10 +582,19 @@ export async function ensureRematchAlertPost(leagueId: string, sim: LeagueSimDat
 
     if (!best) return;
 
+    const analystCard: AnalystCard = {
+      eyebrow: "REMATCH ALERT",
+      rows: [
+        { name: nameOf(sim, best.aId), avatar: sim.managerInfo[best.aId]?.avatar, stat: best.aFirstPts.toFixed(1), statLabel: `WK${best.firstWeek}`, highlight: best.aId === best.winnerId },
+        { name: nameOf(sim, best.bId), avatar: sim.managerInfo[best.bId]?.avatar, stat: best.bFirstPts.toFixed(1), statLabel: `WK${best.firstWeek}`, highlight: best.bId === best.winnerId },
+      ],
+      footer: `Rematch in Week ${currentWeek}`,
+    };
+
     await ensureSystemPost({
       id: `rematch_${leagueId}_wk${currentWeek}`,
-      text: rematchAlertText(best.a, best.b, currentWeek, best.firstWeek, best.marginPts, nameOf(sim, best.winnerId)),
-      imageUrl: sim.managerInfo[best.winnerId]?.avatar,
+      text: rematchAlertText(nameOf(sim, best.aId), nameOf(sim, best.bId), currentWeek, best.firstWeek, best.marginPts, nameOf(sim, best.winnerId)),
+      analystCard,
       leagueId,
       targetType: "analysis",
       targetId: best.matchupId ? `rematch:${currentWeek}:${best.matchupId}` : `rematch:wk${currentWeek}`,
@@ -602,10 +675,19 @@ export async function ensureBenchRegretPost(leagueId: string, sim: LeagueSimData
 
     const matchupId = sim.matchupData[targetWeek]?.[best.loserId]?.matchup_id;
 
+    const analystCard: AnalystCard = {
+      eyebrow: "BENCH REGRET",
+      rows: [
+        { name: nameOf(sim, best.loserId), avatar: sim.managerInfo[best.loserId]?.avatar, stat: `-${best.benchPointsLeft.toFixed(1)}`, statLabel: "LEFT ON BENCH", highlight: true },
+        { name: nameOf(sim, best.winnerId), avatar: sim.managerInfo[best.winnerId]?.avatar, stat: best.oppPts.toFixed(1), statLabel: "FINAL" },
+      ],
+      footer: best.snub ? `${best.snub.name} (${best.snub.points.toFixed(1)} pts) never left the bench` : `Week ${targetWeek}`,
+    };
+
     await ensureSystemPost({
       id: `benchregret_${leagueId}_wk${targetWeek}`,
       text: benchRegretText(nameOf(sim, best.loserId), nameOf(sim, best.winnerId), targetWeek, best.benchPointsLeft, best.oppPts, best.snub),
-      imageUrl: sim.managerInfo[best.loserId]?.avatar,
+      analystCard,
       leagueId,
       targetType: "analysis",
       targetId: matchupId ? `benchregret:${targetWeek}:${matchupId}` : `benchregret:wk${targetWeek}`,
@@ -664,16 +746,22 @@ export async function ensureWaiverHeadlinerPost(leagueId: string, events: Ticker
     const { asset, team } = best.event;
     if (!team.userId) return; // no real manager to link the post's target to
 
-    const imageUrl = asset.id
+    const playerAvatar = asset.id
       ? asset.pos === "DEF"
         ? `https://sleepercdn.com/images/team_logos/nfl/${asset.id.toLowerCase()}.png`
         : `https://sleepercdn.com/content/nfl/players/thumb/${asset.id}.jpg`
       : undefined;
 
+    const analystCard: AnalystCard = {
+      eyebrow: "WAIVER WIRE",
+      rows: [{ name: asset.label, avatar: playerAvatar, stat: asset.pos ?? "", statLabel: "ADDED", highlight: true }],
+      footer: `Added by ${team.name}`,
+    };
+
     await ensureSystemPost({
       id: postId,
       text: waiverHeadlinerText(team.name, asset.label, asset.pos),
-      imageUrl,
+      analystCard,
       leagueId,
       targetType: "waiver",
       // The Trades tab has nowhere to show a waiver move - link straight to
