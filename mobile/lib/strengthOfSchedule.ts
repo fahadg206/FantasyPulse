@@ -186,8 +186,8 @@ function computeTeamAnalytics(sim: LeagueSimData, currentWeek: number): Record<s
   return analytics;
 }
 
-/** who a team actually plays a given week - the two sides sharing a real matchup_id, Sleeper's own already-generated pairing for that week (future weeks included). */
-function findOpponent(sim: LeagueSimData, week: number, userId: string): string | null {
+/** who a team actually plays a given week - the two sides sharing a real matchup_id, Sleeper's own already-generated pairing for that week (future weeks included). Exported so other Boogie storylines (rematch alerts, bench-regret recaps) can look up the same real pairing without duplicating this lookup. */
+export function findOpponent(sim: LeagueSimData, week: number, userId: string): string | null {
   const mine = sim.matchupData[week]?.[userId];
   if (!mine?.matchup_id) return null;
   for (const otherId of sim.teamIds) {

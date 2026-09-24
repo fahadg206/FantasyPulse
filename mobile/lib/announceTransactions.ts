@@ -1,4 +1,4 @@
-import { buildLeagueTransactions, TradeEvent, TxAsset } from "./leagueTransactions";
+import { buildLeagueTransactions, TickerEvent, TradeEvent, TxAsset } from "./leagueTransactions";
 import { ensureSystemPost } from "./posts";
 
 // Boogie The Writer's breaking-news voice for the league's actual trade
@@ -85,11 +85,14 @@ export function finalScoreText(
 /**
  * Backfills a Boogie post for every trade this league has had this season -
  * safe to call from anywhere, as often as every screen load, since
- * ensureSystemPost no-ops once a post already exists. Returns the trade
- * events so callers that also need to *display* them (the Trades tab)
- * don't have to fetch transactions a second time.
+ * ensureSystemPost no-ops once a post already exists. Returns EVERY
+ * transaction event (trades AND adds/drops), not just the trades, so
+ * callers that need the full picture (Boogie's analyst desk, picking out
+ * a single headline waiver move) don't have to fetch transactions a
+ * second time - the Trades tab, which only wants trades, filters the
+ * kinds it cares about back out.
  */
-export async function announceLeagueTransactions(leagueId: string): Promise<TradeEvent[]> {
+export async function announceLeagueTransactions(leagueId: string): Promise<TickerEvent[]> {
   const events = await buildLeagueTransactions(leagueId);
   const tradeEvents = events.filter((e): e is TradeEvent => e.kind === "trade2" || e.kind === "tradeMulti");
 
@@ -107,5 +110,5 @@ export async function announceLeagueTransactions(leagueId: string): Promise<Trad
     )
   );
 
-  return tradeEvents;
+  return events;
 }

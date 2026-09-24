@@ -88,9 +88,9 @@ export default function Trades() {
     let cancelled = false;
 
     announceLeagueTransactions(leagueID)
-      .then((tradeEvents) => {
+      .then((events) => {
         if (cancelled) return;
-        setTrades(tradeEvents);
+        setTrades(events.filter((e): e is TradeEvent => e.kind === "trade2" || e.kind === "tradeMulti"));
       })
       .catch((error) => console.error("Error loading trades:", error))
       .finally(() => {
