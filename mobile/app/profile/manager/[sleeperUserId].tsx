@@ -34,7 +34,6 @@ export default function ManagerProfileBySleeperId() {
   const [redirecting, setRedirecting] = useState(false);
   const [sleeperUser, setSleeperUser] = useState<{ display_name?: string; avatar?: string } | null>(null);
   const [stats, setStats] = useState<FantasyProfileStats | null>(null);
-  const [statsLoading, setStatsLoading] = useState(true);
 
   useEffect(() => {
     if (!sleeperUserId) return;
@@ -73,8 +72,7 @@ export default function ManagerProfileBySleeperId() {
     if (!sleeperUserId) return;
     getFantasyProfileStats(sleeperUserId, CURRENT_SEASON)
       .then(setStats)
-      .catch((error) => console.error("Error loading manager's Sleeper stats:", error))
-      .finally(() => setStatsLoading(false));
+      .catch((error) => console.error("Error loading manager's Sleeper stats:", error));
   }, [sleeperUserId]);
 
   if (!sleeperUserId || checkingAccount || redirecting) {
@@ -106,15 +104,12 @@ export default function ManagerProfileBySleeperId() {
           </View>
         </View>
 
-        {!sleeperUserId ? null : statsLoading ? (
-          <ActivityIndicator color="#af1222" className="mt-4" />
-        ) : stats ? (
-          <ProfileActivity sleeperUserId={sleeperUserId} stats={stats} extraTitles={getManualTitles(sleeperUserId)} />
-        ) : (
-          <Text className="text-gray-500 text-[13px] text-center mt-4">
-            Couldn&apos;t load this manager&apos;s stats right now.
-          </Text>
-        )}
+        <ProfileActivity
+          sleeperUserId={sleeperUserId}
+          season={CURRENT_SEASON}
+          stats={stats}
+          extraTitles={getManualTitles(sleeperUserId)}
+        />
       </ScrollView>
     </SafeAreaView>
   );

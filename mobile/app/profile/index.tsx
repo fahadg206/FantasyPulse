@@ -49,7 +49,6 @@ export default function ProfileHome() {
   // second case needs its own recovery UI, not a crash on a null profile.
   const [profileChecked, setProfileChecked] = useState(false);
   const [stats, setStats] = useState<FantasyProfileStats | null>(null);
-  const [statsLoading, setStatsLoading] = useState(false);
   const [followCounts, setFollowCounts] = useState({ following: 0, followers: 0 });
 
   useEffect(() => onAuthChange((user) => {
@@ -85,11 +84,9 @@ export default function ProfileHome() {
       setStats(null);
       return;
     }
-    setStatsLoading(true);
     getFantasyProfileStats(profile.sleeperUserId, CURRENT_SEASON)
       .then(setStats)
-      .catch(console.error)
-      .finally(() => setStatsLoading(false));
+      .catch(console.error);
   }, [profile?.sleeperUserId]);
 
   if (!authChecked) {
@@ -170,15 +167,21 @@ export default function ProfileHome() {
                 uid={profile.uid}
                 onLinked={() => getUserProfile(profile.uid).then(setProfile)}
               />
-            ) : statsLoading ? (
-              <ActivityIndicator color="#af1222" className="mt-6" />
-            ) : stats ? (
+            ) : (
+              // Mounted immediately (not waiting on statsLoading) - its
+              // heaviest fetch (all-time stats) doesn't need `stats` at
+              // all, so gating this component's very existence behind
+              // that fetch was only ever making it wait around for no
+              // real reason. Renders its own skeleton silhouettes per
+              // section while each of its independent fetches is still in
+              // flight.
               <ProfileActivity
                 sleeperUserId={profile.sleeperUserId}
+                season={CURRENT_SEASON}
                 stats={stats}
                 extraTitles={getManualTitles(profile.sleeperUserId)}
               />
-            ) : null}
+            )}
 
             <FindManagerCard />
 

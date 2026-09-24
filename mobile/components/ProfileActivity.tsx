@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { View, Text, Pressable, Image, ActivityIndicator } from "react-native";
+import { View, Text, Pressable, Image } from "react-native";
 import { useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import { MotiView } from "moti";
@@ -20,6 +20,7 @@ import { formatTwitterTimestamp } from "../lib/formatTime";
 import { getTeamLogo } from "../lib/nflTeams";
 import { StartSitAccuracy } from "../lib/startSitAccuracy";
 import Avatar from "./Avatar";
+import { SkeletonBlock, SkeletonStatsBar, SkeletonRow, SkeletonMatchupCard, SkeletonListCard } from "./Skeleton";
 
 const POSITION_COLOR: Record<string, string> = {
   QB: "#ef4444",
@@ -43,13 +44,29 @@ function Card({ children }: { children: React.ReactNode }) {
 // leagues themselves (tappable through to the real league). Shared by both
 // the signed-in user's own profile and anyone else's public profile page,
 // so the two never drift apart visually.
+//
+// `stats` arrives as null until the parent's own getFantasyProfileStats
+// crawl resolves - this component mounts (and starts its OWN fetches)
+// the moment sleeperUserId is known, not once stats is ready. That
+// matters specifically for getAllTimeStats: it's the single heaviest
+// crawl here (every season since 2017, every league), and it never
+// actually needed stats.leagues in the first place - only
+// getWeeklyMatchups/getTopRosteredPlayers/getRecentAcquisitions do. Under
+// the old "wait for stats, then mount this component" structure, that
+// crawl couldn't even start until the parent's fetch had fully finished,
+// purely from component-mount ordering, not a real data dependency - now
+// it runs the moment this component exists, genuinely in parallel with
+// the parent's own fetch instead of stacked after it.
 export default function ProfileActivity({
   sleeperUserId,
+  season,
   stats,
   extraTitles = [],
 }: {
   sleeperUserId: string;
-  stats: FantasyProfileStats;
+  /** the season getAllTimeStats enumerates up through - independent of `stats` resolving, which is what lets that crawl start immediately */
+  season: string;
+  stats: FantasyProfileStats | null;
   /** championships from before this platform/account existed - not derivable from Sleeper, so they're passed in rather than crawled */
   extraTitles?: Title[];
 }) {
@@ -61,7 +78,32 @@ export default function ProfileActivity({
   const [startSit, setStartSit] = useState<StartSitAccuracy | null>(null);
   const [nemesis, setNemesis] = useState<AllTimeNemesis | null>(null);
 
+  // The heavy all-time crawl - starts as soon as sleeperUserId is known,
+  // not gated behind stats. Career record and start/sit accuracy used to
+  // be two fully separate all-time crawls, each re-enumerating every
+  // season since 2017 and re-fetching every league's roster data
+  // independently - merged into one shared crawl (getAllTimeStats) since
+  // they're only ever needed together here.
   useEffect(() => {
+    if (!sleeperUserId) return;
+    let cancelled = false;
+    getAllTimeStats(sleeperUserId, season)
+      .then((r) => {
+        if (cancelled) return;
+        setCareer(r.career);
+        setStartSit(r.startSit);
+        setNemesis(r.nemesis);
+      })
+      .catch(console.error);
+    return () => {
+      cancelled = true;
+    };
+  }, [sleeperUserId, season]);
+
+  // Everything that genuinely needs this season's resolved league list -
+  // waits for stats, unlike the crawl above.
+  useEffect(() => {
+    if (!stats) return;
     let cancelled = false;
     const leagues = stats.leagues.map((l) => ({ leagueId: l.leagueId, leagueName: l.leagueName }));
 
@@ -74,47 +116,32 @@ export default function ProfileActivity({
     getRecentAcquisitions(sleeperUserId, leagues, 5)
       .then((r) => !cancelled && setAcquisitions(r))
       .catch(console.error);
-    // Career record and start/sit accuracy used to be two fully separate
-    // all-time crawls, each re-enumerating every season since 2017 and
-    // re-fetching every league's roster data independently - merged into
-    // one shared crawl (getAllTimeStats) since they're only ever needed
-    // together here, cutting the total Sleeper API request count roughly
-    // in half and making this the biggest lever on how long the top of
-    // the profile page takes to fill in.
-    getAllTimeStats(sleeperUserId, stats.season)
-      .then((r) => {
-        if (cancelled) return;
-        setCareer(r.career);
-        setStartSit(r.startSit);
-        setNemesis(r.nemesis);
-      })
-      .catch(console.error);
 
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sleeperUserId, stats.season, stats.leagues.map((l) => l.leagueId).join(",")]);
+  }, [sleeperUserId, stats?.season, stats?.leagues.map((l) => l.leagueId).join(",")]);
 
   const allTitles = [...(career?.titles ?? []), ...extraTitles];
   const totalTitles = (career?.championships ?? 0) + extraTitles.length;
 
   return (
     <View>
-      {/* Career - leagues count front and center, plus all-time record */}
-      <View className="flex-row bg-[#141416] rounded-2xl border border-white/10 mb-4 overflow-hidden">
-        <CareerStat value={stats.totals.leaguesCount} label="Leagues" />
-        <CareerStat
-          value={career ? `${(career.winPct * 100).toFixed(0)}%` : "-"}
-          label="Win Rate"
-        />
-        <CareerStat value={career ? career.playoffAppearances : "-"} label="Playoff Appearances" />
-        <CareerStat
-          value={!career ? "-" : totalTitles > 0 ? `${totalTitles} 🏆` : "0"}
-          label="Titles"
-          last
-        />
-      </View>
+      {/* Career - leagues count front and center, plus all-time record.
+          Both stats and career load independently now (in parallel, not
+          one blocking the other) - shown as one silhouette until both are
+          in, rather than a row half real numbers and half "-" placeholders. */}
+      {!stats || !career ? (
+        <SkeletonStatsBar />
+      ) : (
+        <View className="flex-row bg-[#141416] rounded-2xl border border-white/10 mb-4 overflow-hidden">
+          <CareerStat value={stats.totals.leaguesCount} label="Leagues" />
+          <CareerStat value={`${(career.winPct * 100).toFixed(0)}%`} label="Win Rate" />
+          <CareerStat value={career.playoffAppearances} label="Playoff Appearances" />
+          <CareerStat value={totalTitles > 0 ? `${totalTitles} 🏆` : "0"} label="Titles" last />
+        </View>
+      )}
 
       {/* Titles - which league and season each championship actually came
           from, not just the count already shown above. Covers leagues no
@@ -198,8 +225,15 @@ export default function ProfileActivity({
       )}
 
       {/* Leagues */}
-      <SectionLabel>{stats.season} SEASON</SectionLabel>
-      {stats.leagues.map((l) => {
+      <SectionLabel>{season} SEASON</SectionLabel>
+      {!stats ? (
+        <>
+          <SkeletonRow withCard />
+          <SkeletonRow withCard />
+          <SkeletonRow withCard />
+        </>
+      ) : (
+        stats.leagues.map((l) => {
         // A win-loss record doesn't mean anything in a Chopped-format
         // league (no head-to-head) - cross-referenced against the same
         // detection getWeeklyMatchups already did, so it shows rank
@@ -243,12 +277,15 @@ export default function ProfileActivity({
             <Feather name="chevron-right" size={16} color="#6b7280" />
           </Pressable>
         );
-      })}
+        })
+      )}
 
       {/* This Week's Matchups */}
       {matchups === null ? (
-        <View className="items-center py-6">
-          <ActivityIndicator color="#af1222" />
+        <View className="mb-1">
+          <SkeletonBlock className="w-40 h-2.5 mb-2.5" />
+          <SkeletonMatchupCard />
+          <SkeletonMatchupCard />
         </View>
       ) : matchups.length > 0 ? (
         <View className="mb-1">
@@ -340,7 +377,9 @@ export default function ProfileActivity({
       ) : null}
 
       {/* Top Rostered Players */}
-      {topPlayers === null ? null : topPlayers.length > 0 ? (
+      {topPlayers === null ? (
+        <SkeletonListCard rows={3} />
+      ) : topPlayers.length > 0 ? (
         <Card>
           <SectionLabel>TOP ROSTERED PLAYERS</SectionLabel>
           <View className="gap-2.5">
@@ -368,7 +407,7 @@ export default function ProfileActivity({
                     </Text>
                   </View>
                   <Text className="text-gray-500 text-[11px]">
-                    {p.leagueCount} of {stats.totals.leaguesCount} leagues
+                    {p.leagueCount} of {stats?.totals.leaguesCount ?? "?"} leagues
                   </Text>
                 </View>
               );
@@ -378,7 +417,9 @@ export default function ProfileActivity({
       ) : null}
 
       {/* Recent Acquisitions */}
-      {acquisitions === null ? null : acquisitions.length > 0 ? (
+      {acquisitions === null ? (
+        <SkeletonListCard rows={3} />
+      ) : acquisitions.length > 0 ? (
         <Card>
           <SectionLabel>RECENTLY ACQUIRED</SectionLabel>
           <View className="gap-2.5">

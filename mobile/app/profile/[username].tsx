@@ -33,7 +33,6 @@ function BoogieProfile() {
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [currentUid, setCurrentUid] = useState<string | undefined>(undefined);
   const [stats, setStats] = useState<FantasyProfileStats | null>(null);
-  const [statsLoading, setStatsLoading] = useState(true);
   const [posts, setPosts] = useState<Post[]>([]);
   const [interactionState, setInteractionState] = useState<Record<string, { liked: boolean; reposted: boolean }>>({});
   const [postsLoading, setPostsLoading] = useState(true);
@@ -51,8 +50,7 @@ function BoogieProfile() {
   useEffect(() => {
     getFantasyProfileStats(BOOGIE_SLEEPER_USER_ID, CURRENT_SEASON)
       .then(setStats)
-      .catch((error) => console.error("Error loading Boogie's Sleeper stats:", error))
-      .finally(() => setStatsLoading(false));
+      .catch((error) => console.error("Error loading Boogie's Sleeper stats:", error));
   }, []);
 
   useEffect(() => {
@@ -97,15 +95,12 @@ function BoogieProfile() {
           </Text>
         </View>
 
-        {statsLoading ? (
-          <ActivityIndicator color="#af1222" className="mb-4" />
-        ) : stats ? (
-          <ProfileActivity
-            sleeperUserId={BOOGIE_SLEEPER_USER_ID}
-            stats={stats}
-            extraTitles={getManualTitles(BOOGIE_SLEEPER_USER_ID)}
-          />
-        ) : null}
+        <ProfileActivity
+          sleeperUserId={BOOGIE_SLEEPER_USER_ID}
+          season={CURRENT_SEASON}
+          stats={stats}
+          extraTitles={getManualTitles(BOOGIE_SLEEPER_USER_ID)}
+        />
 
         <View className="mt-2">
           <Text className="text-[10px] font-bold tracking-widest text-gray-500 mb-2.5">POSTS</Text>
@@ -150,7 +145,6 @@ export default function PublicProfile() {
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null | undefined>(undefined);
   const [stats, setStats] = useState<FantasyProfileStats | null>(null);
-  const [statsLoading, setStatsLoading] = useState(false);
   const [following, setFollowing] = useState(false);
   const [followsYou, setFollowsYou] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
@@ -184,11 +178,9 @@ export default function PublicProfile() {
 
   useEffect(() => {
     if (!profile?.sleeperUserId) return;
-    setStatsLoading(true);
     getFantasyProfileStats(profile.sleeperUserId, CURRENT_SEASON)
       .then(setStats)
-      .catch(console.error)
-      .finally(() => setStatsLoading(false));
+      .catch(console.error);
   }, [profile?.sleeperUserId]);
 
   const toggleFollow = async () => {
@@ -327,15 +319,14 @@ export default function PublicProfile() {
             <Text className="text-gray-500 text-[13px] text-center">
               This manager hasn't linked a Sleeper account yet.
             </Text>
-          ) : statsLoading ? (
-            <ActivityIndicator color="#af1222" className="mt-4" />
-          ) : stats ? (
+          ) : (
             <ProfileActivity
               sleeperUserId={profile.sleeperUserId}
+              season={CURRENT_SEASON}
               stats={stats}
               extraTitles={getManualTitles(profile.sleeperUserId)}
             />
-          ) : null}
+          )}
         </View>
 
         <ProfileTabbedPosts

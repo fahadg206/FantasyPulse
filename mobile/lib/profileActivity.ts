@@ -9,6 +9,7 @@ import {
 } from "./nflGameStatus";
 import { optimalLineupPoints, NON_STARTER_SLOTS, StartSitAccuracy } from "./startSitAccuracy";
 import type { LeagueSeasonStats } from "./fantasyProfile";
+import { cachedFetch } from "./requestCache";
 
 // Everything that makes a profile feel alive beyond a bare win/loss record:
 // the players this manager rosters the most across their leagues, what
@@ -21,11 +22,20 @@ import type { LeagueSeasonStats } from "./fantasyProfile";
 // League/roster/user lookups below go through lib/api.ts's `sleeper`
 // client (cached) rather than raw fetch, so a league already warmed by
 // another screen - or by getFantasyProfileStats's own crawl just before
-// this runs - is an instant hit instead of a second round trip. Matchups,
-// winners brackets, and NFL state stay on raw fetchJson - live-ish data
-// this app deliberately never caches, same as everywhere else.
+// this runs - is an instant hit instead of a second round trip. This
+// week's live matchups (getWeeklyMatchups, reconstructChoppedEliminations)
+// stay on raw uncached fetchJson - that's exactly the live-scoring data
+// that must never be stale. getAllTimeStats' own weekly-matchup and
+// winners-bracket fetches are the one deliberate exception (see
+// ALL_TIME_CRAWL_TTL_MS below): that crawl spans every season since 2017,
+// almost all of it already-finished and immutable, and even its one
+// current-season slice only ever feeds aggregate all-time totals here,
+// not a live score on screen - caching it is what makes navigating back
+// to a profile already viewed this session feel instant instead of
+// re-running the whole multi-season crawl from scratch every time.
 
 const SLEEPER = "https://api.sleeper.app/v1";
+const ALL_TIME_CRAWL_TTL_MS = 10 * 60 * 1000;
 
 async function fetchJson(url: string) {
   const res = await fetch(url);
@@ -160,9 +170,9 @@ export async function getAllTimeStats(sleeperUserId: string, currentSeason: stri
         const [leagueInfo, rosters, bracket] = await Promise.all([
           sleeper.getLeague(leagueId).then((r) => r.data),
           sleeper.getLeagueRosters(leagueId).then((r) => r.data),
-          fetch(`${SLEEPER}/league/${leagueId}/winners_bracket`)
-            .then((r) => r.json())
-            .catch(() => []),
+          cachedFetch(`bracket:${leagueId}`, ALL_TIME_CRAWL_TTL_MS, () =>
+            fetch(`${SLEEPER}/league/${leagueId}/winners_bracket`).then((r) => r.json())
+          ).catch(() => []),
         ]);
 
         const myRoster = rosters.find((r: any) => r.owner_id === sleeperUserId);
@@ -226,7 +236,11 @@ export async function getAllTimeStats(sleeperUserId: string, currentSeason: stri
         const weeksCount = Math.max(1, (leagueInfo.settings?.playoff_week_start ?? 15) - 1);
         const weeks = Array.from({ length: weeksCount }, (_, i) => i + 1);
         const weekResults = await Promise.all(
-          weeks.map((wk) => fetchJson(`${SLEEPER}/league/${leagueId}/matchups/${wk}`).catch(() => []))
+          weeks.map((wk) =>
+            cachedFetch(`alltime-matchups:${leagueId}:${wk}`, ALL_TIME_CRAWL_TTL_MS, () =>
+              fetchJson(`${SLEEPER}/league/${leagueId}/matchups/${wk}`)
+            ).catch(() => [])
+          )
         );
 
         for (const matchups of weekResults) {
