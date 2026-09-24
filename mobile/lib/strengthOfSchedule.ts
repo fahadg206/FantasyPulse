@@ -10,7 +10,10 @@
 // pairings including future weeks, since Sleeper generates the whole
 // season's schedule upfront) - no new fetch pipeline, same trusted inputs
 // Power Rankings, the Trade Calculator, and Standings' own What-If already
-// use.
+// use. matchupData[week][userId] is getMatchupData.ts's own ScheduleData
+// shape, so wins/losses/streak/starters_full_data/bench_full_data (with
+// real per-player points) all come along for free - the analytics below
+// are read straight off it, not invented.
 
 import { percentileRank } from "./powerRankings";
 import type { LeagueSimData } from "./leagueSimData";
@@ -25,7 +28,28 @@ export const TIER_FOR_SCORE = (score: number): SOSTier => {
   return "Cakewalk";
 };
 
-export interface WeeklyOpponent {
+export interface PlayerCard {
+  id: string;
+  name: string;
+  pos?: string;
+  team?: string;
+  avatar?: string;
+  /** real season-to-date average actual points, off weeks this player actually posted a score */
+  avgPoints: number;
+}
+
+export interface TeamAnalytics {
+  wins: number;
+  losses: number;
+  /** Sleeper's own roster.metadata.streak, e.g. "2W" or "1L" */
+  streak: string;
+  /** real season-to-date average actual points per game */
+  avgPoints: number;
+  /** top scorers on the roster this season, by real average points - starters and bench both, so an injured stud still surfaces */
+  bestPlayers: PlayerCard[];
+}
+
+export interface WeeklyOpponent extends TeamAnalytics {
   week: number;
   opponentUserId: string;
   opponentName: string;
@@ -34,7 +58,7 @@ export interface WeeklyOpponent {
   strength: number;
 }
 
-export interface TeamSOS {
+export interface TeamSOS extends TeamAnalytics {
   userId: string;
   name: string;
   avatar?: string;
@@ -92,6 +116,76 @@ function computeTeamStrength(sim: LeagueSimData, currentWeek: number): Record<st
   return strength;
 }
 
+/** real season-to-date average ACTUAL points for display (unlike computeTeamStrength above, no projection blended in - this is the literal "points they're averaging" number). */
+function computeAvgPoints(sim: LeagueSimData, userId: string, currentWeek: number): number {
+  const playedWeeks = sim.weekNumbers.filter((w) => w < currentWeek);
+  let total = 0;
+  let count = 0;
+  for (const w of playedWeeks) {
+    const pts = parseFloat(sim.matchupData[w]?.[userId]?.team_points || "0");
+    if (pts > 0) {
+      total += pts;
+      count += 1;
+    }
+  }
+  return count > 0 ? Math.round((total / count) * 10) / 10 : 0;
+}
+
+/** top real scorers on a roster this season - averaged off every played week's actual player_points, starters and bench alike (so a stud who got hurt and benched still shows up as this team's best player). */
+function computeBestPlayers(sim: LeagueSimData, userId: string, currentWeek: number): PlayerCard[] {
+  const playedWeeks = sim.weekNumbers.filter((w) => w < currentWeek);
+  const totals: Record<string, { name: string; pos?: string; team?: string; avatar?: string; total: number; count: number }> = {};
+
+  for (const w of playedWeeks) {
+    const teamWeek = sim.matchupData[w]?.[userId];
+    if (!teamWeek) continue;
+    const cards = [...(teamWeek.starters_full_data || []), ...(teamWeek.bench_full_data || [])];
+    for (const c of cards) {
+      if (!c?.id) continue;
+      const pts = parseFloat(c.points || "0");
+      if (!totals[c.id]) {
+        const name = `${c.fn ?? ""} ${c.ln ?? ""}`.trim() || c.id;
+        totals[c.id] = { name, pos: c.pos, team: c.team, avatar: c.avatar, total: 0, count: 0 };
+      }
+      totals[c.id].total += pts;
+      totals[c.id].count += 1;
+    }
+  }
+
+  return Object.entries(totals)
+    .map(([id, t]) => ({
+      id,
+      name: t.name,
+      pos: t.pos,
+      team: t.team,
+      avatar: t.avatar,
+      avgPoints: t.count > 0 ? Math.round((t.total / t.count) * 10) / 10 : 0,
+    }))
+    .filter((p) => p.avgPoints > 0)
+    .sort((a, b) => b.avgPoints - a.avgPoints)
+    .slice(0, 4);
+}
+
+function computeTeamAnalytics(sim: LeagueSimData, currentWeek: number): Record<string, TeamAnalytics> {
+  // Sleeper's wins/losses/streak come off the roster's live settings/metadata,
+  // not any particular week - any week's fetch carries the same current
+  // values, so the earliest one on hand is as good as any.
+  const anyWeek = sim.weekNumbers[0];
+  const analytics: Record<string, TeamAnalytics> = {};
+  for (const userId of sim.teamIds) {
+    const info = sim.managerInfo[userId];
+    const weekRow = sim.matchupData[anyWeek]?.[userId];
+    analytics[userId] = {
+      wins: parseInt(info?.wins as any, 10) || 0,
+      losses: parseInt(info?.losses as any, 10) || 0,
+      streak: weekRow?.streak && weekRow.streak !== "N/A" ? weekRow.streak : "-",
+      avgPoints: computeAvgPoints(sim, userId, currentWeek),
+      bestPlayers: computeBestPlayers(sim, userId, currentWeek),
+    };
+  }
+  return analytics;
+}
+
 /** who a team actually plays a given week - the two sides sharing a real matchup_id, Sleeper's own already-generated pairing for that week (future weeks included). */
 function findOpponent(sim: LeagueSimData, week: number, userId: string): string | null {
   const mine = sim.matchupData[week]?.[userId];
@@ -106,6 +200,7 @@ function findOpponent(sim: LeagueSimData, week: number, userId: string): string 
 
 export function computeStrengthOfSchedule(sim: LeagueSimData, currentWeek: number): TeamSOS[] {
   const strength = computeTeamStrength(sim, currentWeek);
+  const analytics = computeTeamAnalytics(sim, currentWeek);
   const remainingWeeks = sim.weekNumbers.filter((w) => w >= currentWeek);
 
   const results: TeamSOS[] = sim.teamIds.map((userId) => {
@@ -116,12 +211,14 @@ export function computeStrengthOfSchedule(sim: LeagueSimData, currentWeek: numbe
       const oppId = findOpponent(sim, week, userId);
       if (!oppId) continue;
       const oppInfo = sim.managerInfo[oppId];
+      const oppAnalytics = analytics[oppId];
       remaining.push({
         week,
         opponentUserId: oppId,
         opponentName: oppInfo?.name ?? "Unknown",
         opponentAvatar: oppInfo?.avatar,
         strength: strength[oppId] ?? 0,
+        ...oppAnalytics,
       });
     }
 
@@ -155,6 +252,7 @@ export function computeStrengthOfSchedule(sim: LeagueSimData, currentWeek: numbe
       toughest,
       easiest,
       gauntlet,
+      ...analytics[userId],
     };
   });
 
