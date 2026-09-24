@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { View, Text, Image, ScrollView, Pressable, ActivityIndicator } from "react-native";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import { sleeper, backend } from "../../../lib/api";
 import { rankTeams, determinePlayoffTeams, TeamSeedData } from "../../../lib/whatIfSimulation";
@@ -23,6 +23,7 @@ const VALUE_POSITIONS: PlayerPos[] = ["QB", "RB", "WR", "TE"];
 
 interface TeamMeta {
   rosterId: string;
+  userId?: string;
   teamName: string;
   avatar?: string;
 }
@@ -53,6 +54,7 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
 
 export default function DraftLottery() {
   const { leagueID } = useLocalSearchParams<{ leagueID: string }>();
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [lottery, setLottery] = useState<LotteryTeam[]>([]);
   const [board, setBoard] = useState<MockDraftPick[]>([]);
@@ -111,6 +113,7 @@ export default function DraftLottery() {
           const user = (users as any[]).find((u) => u.user_id === roster.owner_id);
           teamMeta[id] = {
             rosterId: id,
+            userId: roster.owner_id,
             // Real Sleeper usernames, not the custom team names - matches
             // how managers actually refer to each other.
             teamName: user?.display_name || "Unknown Manager",
@@ -176,10 +179,12 @@ export default function DraftLottery() {
               round,
               originalRosterId,
               currentRosterId,
+              userId: teamMeta[currentRosterId]?.userId,
               teamName: teamMeta[currentRosterId]?.teamName ?? "Unknown Manager",
               avatar: teamMeta[currentRosterId]?.avatar,
               viaTeamName: traded ? teamMeta[originalRosterId]?.teamName : undefined,
               viaAvatar: traded ? teamMeta[originalRosterId]?.avatar : undefined,
+              viaUserId: traded ? teamMeta[originalRosterId]?.userId : undefined,
             });
           }
         }
@@ -246,8 +251,10 @@ export default function DraftLottery() {
 
       <View className="rounded-2xl border border-white/10 overflow-hidden mb-8">
         {lottery.map((team, i) => (
-          <View
+          <Pressable
             key={team.rosterId}
+            disabled={!team.userId}
+            onPress={() => team.userId && router.push(`/profile/manager/${team.userId}`)}
             className={`flex-row items-center px-4 py-3 ${i !== lottery.length - 1 ? "border-b border-white/5" : ""}`}
           >
             <View className="w-[26px] h-[26px] rounded-full bg-white/5 items-center justify-center mr-2.5">
@@ -263,7 +270,7 @@ export default function DraftLottery() {
             <View className="bg-brand/15 border border-brand/30 rounded-full px-3 py-1">
               <Text className="text-brand text-[13px] font-bold">{team.odds}%</Text>
             </View>
-          </View>
+          </Pressable>
         ))}
       </View>
 
@@ -308,26 +315,39 @@ export default function DraftLottery() {
                 <View className="w-[24px] h-[24px] rounded-full bg-brand/15 border border-brand/30 items-center justify-center mr-2">
                   <Text className="text-brand text-[10px] font-bold">{pick.pickNumber}</Text>
                 </View>
-                <Image
-                  source={pick.avatar ? { uri: pick.avatar } : helmet}
-                  className="w-[22px] h-[22px] rounded-full mr-2 bg-white/10"
-                />
-                <View className="flex-1 mr-2">
-                  <Text numberOfLines={1} className="text-white font-semibold text-[12px]">
-                    {pick.teamName}
-                  </Text>
-                  {pick.viaTeamName && (
-                    <View className="flex-row items-center gap-1 mt-0.5">
-                      <Text numberOfLines={1} className="text-gray-500 text-[10px]">
-                        via {pick.viaTeamName}
-                      </Text>
-                      <Image
-                        source={pick.viaAvatar ? { uri: pick.viaAvatar } : helmet}
-                        className="w-[12px] h-[12px] rounded-full bg-white/10"
-                      />
-                    </View>
-                  )}
-                </View>
+                <Pressable
+                  disabled={!pick.userId}
+                  onPress={() => pick.userId && router.push(`/profile/manager/${pick.userId}`)}
+                  className="flex-1 flex-row items-center mr-2"
+                >
+                  <Image
+                    source={pick.avatar ? { uri: pick.avatar } : helmet}
+                    className="w-[22px] h-[22px] rounded-full mr-2 bg-white/10"
+                  />
+                  <View className="flex-1">
+                    <Text numberOfLines={1} className="text-white font-semibold text-[12px]">
+                      {pick.teamName}
+                    </Text>
+                    {pick.viaTeamName && (
+                      <Pressable
+                        disabled={!pick.viaUserId}
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          if (pick.viaUserId) router.push(`/profile/manager/${pick.viaUserId}`);
+                        }}
+                        className="flex-row items-center gap-1 mt-0.5"
+                      >
+                        <Text numberOfLines={1} className="text-gray-500 text-[10px]">
+                          via {pick.viaTeamName}
+                        </Text>
+                        <Image
+                          source={pick.viaAvatar ? { uri: pick.viaAvatar } : helmet}
+                          className="w-[12px] h-[12px] rounded-full bg-white/10"
+                        />
+                      </Pressable>
+                    )}
+                  </View>
+                </Pressable>
                 {displayNeeds.length === 1 ? (
                   <View
                     style={{ backgroundColor: `${POS_COLOR[displayNeeds[0]]}22`, borderColor: `${POS_COLOR[displayNeeds[0]]}55` }}

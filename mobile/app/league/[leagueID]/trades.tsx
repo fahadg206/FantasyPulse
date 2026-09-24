@@ -1,12 +1,28 @@
 import { useEffect, useState } from "react";
 import { View, Text, Pressable, ScrollView, ActivityIndicator } from "react-native";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
-import { TradeEvent } from "../../../lib/leagueTransactions";
+import { TradeEvent, TxTeam } from "../../../lib/leagueTransactions";
 import { AssetChips } from "../../../components/TransactionsTicker";
 import { formatTwitterTimestamp } from "../../../lib/formatTime";
 import CommentsSection from "../../../components/CommentsSection";
 import { announceLeagueTransactions, tradeLabel } from "../../../lib/announceTransactions";
+
+function TeamNameLink({ team }: { team: TxTeam }) {
+  const router = useRouter();
+  return (
+    <Pressable
+      disabled={!team.userId}
+      onPress={(e) => {
+        e.stopPropagation();
+        if (team.userId) router.push(`/profile/manager/${team.userId}`);
+      }}
+      hitSlop={4}
+    >
+      <Text className="text-white font-bold text-[13px]">{team.name}</Text>
+    </Pressable>
+  );
+}
 
 function TradeCard({ event, leagueId }: { event: TradeEvent; leagueId: string }) {
   const [expanded, setExpanded] = useState(false);
@@ -18,12 +34,12 @@ function TradeCard({ event, leagueId }: { event: TradeEvent; leagueId: string })
         {event.kind === "trade2" ? (
           <View className="gap-1.5">
             <View className="flex-row items-center flex-wrap gap-1.5">
-              <Text className="text-white font-bold text-[13px]">{event.teamA.name}</Text>
+              <TeamNameLink team={event.teamA} />
               <Text className="text-gray-400 text-[13px]">sends</Text>
             </View>
             <AssetChips assets={event.aGives} />
             <View className="flex-row items-center flex-wrap gap-1.5 mt-1">
-              <Text className="text-white font-bold text-[13px]">{event.teamB.name}</Text>
+              <TeamNameLink team={event.teamB} />
               <Text className="text-gray-400 text-[13px]">sends</Text>
             </View>
             <AssetChips assets={event.aGets} />
@@ -32,7 +48,10 @@ function TradeCard({ event, leagueId }: { event: TradeEvent; leagueId: string })
           <View className="gap-2">
             {event.parts.map((part, i) => (
               <View key={i}>
-                <Text className="text-white font-bold text-[13px] mb-1">{part.team.name} receives</Text>
+                <View className="flex-row items-center flex-wrap gap-1.5 mb-1">
+                  <TeamNameLink team={part.team} />
+                  <Text className="text-white text-[13px] font-bold">receives</Text>
+                </View>
                 <AssetChips assets={part.receives} />
               </View>
             ))}

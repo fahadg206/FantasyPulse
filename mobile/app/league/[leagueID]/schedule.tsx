@@ -451,6 +451,7 @@ export default function Schedule() {
                   <ScheduleTeamRow
                     name={team1.name}
                     avatar={team1.avatar}
+                    userId={team1.user_id}
                     points={team1.team_points}
                     showScore={!preGame}
                     emphasize={team1Leading}
@@ -462,6 +463,7 @@ export default function Schedule() {
                   <ScheduleTeamRow
                     name={team2.name}
                     avatar={team2.avatar}
+                    userId={team2.user_id}
                     points={team2.team_points}
                     showScore={!preGame}
                     emphasize={team2Leading}
@@ -519,6 +521,7 @@ function PerformerLine({ performer }: { performer: TopPerformer }) {
 function ScheduleTeamRow({
   name,
   avatar,
+  userId,
   points,
   showScore,
   emphasize,
@@ -529,6 +532,7 @@ function ScheduleTeamRow({
 }: {
   name: string;
   avatar?: string | ImageSourcePropType;
+  userId?: string;
   points?: string;
   showScore: boolean;
   emphasize: boolean;
@@ -538,6 +542,7 @@ function ScheduleTeamRow({
   favoriteLine?: FavoriteLine;
   overUnderText?: string;
 }) {
+  const router = useRouter();
   // Team names are always white - only the score dims to gray for a
   // final's non-winning side (bold+white still means "the confirmed
   // winner", now also marked with a solid red triangle right before the
@@ -571,7 +576,14 @@ function ScheduleTeamRow({
   return (
     <View className="flex-row items-stretch">
       <View className="flex-1 flex-row items-center justify-between mr-3">
-        <View className="flex-row items-center flex-1 mr-3">
+        <Pressable
+          disabled={!userId}
+          onPress={(e) => {
+            e.stopPropagation();
+            if (userId) router.push(`/profile/manager/${userId}`);
+          }}
+          className="flex-row items-center flex-1 mr-3"
+        >
           <Image
             source={typeof avatar === "string" ? { uri: avatar } : avatar}
             className="w-[44px] h-[44px] rounded-full mr-3 bg-white/10"
@@ -579,7 +591,7 @@ function ScheduleTeamRow({
           <Text numberOfLines={1} className={`text-[16px] flex-1 ${weight} text-white`}>
             {name}
           </Text>
-        </View>
+        </Pressable>
         <View className="flex-row items-center">
           {emphasize && (
             <View

@@ -9,7 +9,6 @@ import WhatIfModal from "../../../components/WhatIfModal";
 import { runMonteCarlo } from "../../../lib/whatIfSimulation";
 import { getZoneForRank, isZoneStart, StandingsZone } from "../../../lib/leagueZones";
 import { LOTTERY_LEAGUE_IDS } from "../../../lib/draftLottery";
-import { getUserProfileBySleeperId } from "../../../lib/socialAuth";
 
 const helmet = require("../../../assets/images/helmet2.png");
 
@@ -416,13 +415,13 @@ function TeamRow({
         </View>
       )}
       <Pressable
-        onPress={async () => {
+        onPress={() => {
           if (!user.user_id) return;
-          // Not every Sleeper manager in a league has actually signed up
-          // here - this just quietly does nothing for one who hasn't,
-          // rather than navigating to a dead-end "no profile" screen.
-          const profile = await getUserProfileBySleeperId(user.user_id).catch(() => null);
-          if (profile) router.push(`/profile/${profile.username}`);
+          // Every manager has a profile here regardless of whether they've
+          // signed up - the route itself redirects to their full account
+          // if one's linked, or shows their real Sleeper stats read-only
+          // if not.
+          router.push(`/profile/manager/${user.user_id}`);
         }}
         style={zoneColor ? { borderLeftWidth: 3, borderLeftColor: zoneColor, backgroundColor: `${zoneColor}14` } : undefined}
         className="flex-row items-center px-4 py-3 border-b border-white/5"

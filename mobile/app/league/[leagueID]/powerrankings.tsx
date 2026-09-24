@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { View, Text, Image, ScrollView, ActivityIndicator } from "react-native";
-import { useLocalSearchParams } from "expo-router";
+import { View, Text, Image, Pressable, ScrollView, ActivityIndicator } from "react-native";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import { sleeper, backend } from "../../../lib/api";
 import { getLeagueValueSettings, LeagueValueSettings, RawPlayerValue } from "../../../lib/playerValue";
@@ -89,9 +89,13 @@ function RankingRow({
   record?: { wins: number; losses: number };
 }) {
   const meta = TIER_META[item.tier];
+  const router = useRouter();
 
   return (
-    <View className={`flex-row items-center gap-3 p-3.5 mb-2.5 rounded-2xl bg-[#141416] border ${meta.border}`}>
+    <Pressable
+      onPress={() => router.push(`/profile/manager/${item.userId}`)}
+      className={`flex-row items-center gap-3 p-3.5 mb-2.5 rounded-2xl bg-[#141416] border ${meta.border}`}
+    >
       <View
         style={{ borderColor: meta.color }}
         className="w-9 h-9 rounded-full border-2 items-center justify-center"
@@ -143,7 +147,7 @@ function RankingRow({
           {item.assetScore !== null && <SubStat label="VAL" value={item.assetScore} />}
         </View>
       </View>
-    </View>
+    </Pressable>
   );
 }
 

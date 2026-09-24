@@ -1,12 +1,15 @@
-import { View, Text, Image } from "react-native";
+import { View, Text, Image, Pressable } from "react-native";
+import { useRouter } from "expo-router";
 
 const helmet = require("../assets/images/helmet2.png");
 
 type Props = {
   nameOne: string;
   avatarOne?: string;
+  userIdOne?: string;
   nameTwo: string;
   avatarTwo?: string;
+  userIdTwo?: string;
   winsOne: number;
   winsTwo: number;
   ties: number;
@@ -20,8 +23,10 @@ type Props = {
 export default function HeadToHead({
   nameOne,
   avatarOne,
+  userIdOne,
   nameTwo,
   avatarTwo,
+  userIdTwo,
   winsOne,
   winsTwo,
   ties,
@@ -31,6 +36,7 @@ export default function HeadToHead({
   playoffWinsTwo = 0,
   playoffTies = 0,
 }: Props) {
+  const router = useRouter();
   const hasPlayoffHistory = playoffWinsOne + playoffWinsTwo + playoffTies > 0;
   const totalWins = winsOne + winsTwo + ties || 1;
   const totalPoints = pointsOne + pointsTwo || 1;
@@ -41,19 +47,27 @@ export default function HeadToHead({
   return (
     <View className="w-full bg-[#141416] border border-white/10 rounded-2xl p-5 items-center mb-4">
       <View className="flex-row items-center justify-between w-full mb-4">
-        <View className="items-center flex-1">
+        <Pressable
+          disabled={!userIdOne}
+          onPress={() => userIdOne && router.push(`/profile/manager/${userIdOne}`)}
+          className="items-center flex-1"
+        >
           <Image source={avatarOne ? { uri: avatarOne } : helmet} className="w-[52px] h-[52px] rounded-full border-2 border-[#3b82f6] mb-1.5" />
           <Text numberOfLines={1} className="text-white font-bold text-[12px]">
             {nameOne}
           </Text>
-        </View>
+        </Pressable>
         <Text className="text-gray-500 text-[11px] font-bold px-2">VS</Text>
-        <View className="items-center flex-1">
+        <Pressable
+          disabled={!userIdTwo}
+          onPress={() => userIdTwo && router.push(`/profile/manager/${userIdTwo}`)}
+          className="items-center flex-1"
+        >
           <Image source={avatarTwo ? { uri: avatarTwo } : helmet} className="w-[52px] h-[52px] rounded-full border-2 border-brand mb-1.5" />
           <Text numberOfLines={1} className="text-white font-bold text-[12px]">
             {nameTwo}
           </Text>
-        </View>
+        </Pressable>
       </View>
 
       <Text style={{ fontVariant: ["tabular-nums"] }} className="text-white text-[30px] font-bold">

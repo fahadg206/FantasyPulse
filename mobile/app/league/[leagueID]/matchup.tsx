@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { View, Text, Image, ScrollView, ActivityIndicator, Pressable } from "react-native";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import { sleeper } from "../../../lib/api";
 import getMatchupData, { ScheduleData, Starter } from "../../../lib/getMatchupData";
@@ -350,7 +350,7 @@ export default function MatchupDetail() {
       {/* Header */}
       <View className="pt-6 pb-5 px-4">
         <View className="flex-row items-center justify-between">
-          <TeamHeader name={team1.name} avatar={team1.avatar} record={total1} />
+          <TeamHeader name={team1.name} avatar={team1.avatar} userId={team1Id ?? undefined} record={total1} />
           <View className="items-center px-2">
             {preGame ? (
               <>
@@ -387,7 +387,7 @@ export default function MatchupDetail() {
               </>
             )}
           </View>
-          <TeamHeader name={team2.name} avatar={team2.avatar} record={total2} align="right" />
+          <TeamHeader name={team2.name} avatar={team2.avatar} userId={team2Id ?? undefined} record={total2} align="right" />
         </View>
 
         {/* Season average points per game for each team - how they
@@ -568,16 +568,23 @@ function SectionHeader({ title, week }: { title: string; week?: number }) {
 function TeamHeader({
   name,
   avatar,
+  userId,
   record,
   align = "left",
 }: {
   name: string;
   avatar: any;
+  userId?: string;
   record: string;
   align?: "left" | "right";
 }) {
+  const router = useRouter();
   return (
-    <View className="items-center flex-1">
+    <Pressable
+      disabled={!userId}
+      onPress={() => userId && router.push(`/profile/manager/${userId}`)}
+      className="items-center flex-1"
+    >
       <Image
         source={typeof avatar === "string" ? { uri: avatar } : avatar}
         className="w-[52px] h-[52px] rounded-full mb-1.5"
@@ -586,7 +593,7 @@ function TeamHeader({
         {name}
       </Text>
       <Text className="text-gray-400 text-[10px] mt-0.5">{record}</Text>
-    </View>
+    </Pressable>
   );
 }
 

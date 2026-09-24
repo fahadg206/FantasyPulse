@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { View, Text, Image, Pressable, ScrollView, Modal, FlatList, ActivityIndicator } from "react-native";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather, FontAwesome } from "@expo/vector-icons";
 import { sleeper, backend } from "../../../lib/api";
 import ManagerPicker, { PickableManager } from "../../../components/ManagerPicker";
@@ -72,6 +72,7 @@ function fairnessVerdict(maxAbsNet: number) {
 
 export default function TradeCalculator() {
   const { leagueID } = useLocalSearchParams<{ leagueID: string }>();
+  const router = useRouter();
 
   // --- league-wide, loaded once ---
   const [users, setUsers] = useState<PickableManager[]>([]);
@@ -384,7 +385,10 @@ export default function TradeCalculator() {
 
             return (
               <View key={userId} style={{ borderColor: `${accent}33` }} className="bg-[#141416] border rounded-2xl overflow-hidden">
-                <View className="flex-row items-center gap-3 px-4 pt-4 pb-3">
+                <Pressable
+                  onPress={() => router.push(`/profile/manager/${userId}`)}
+                  className="flex-row items-center gap-3 px-4 pt-4 pb-3"
+                >
                   <Image source={user?.avatar ? { uri: user.avatar } : helmet} className="w-[40px] h-[40px] rounded-full" />
                   <View className="flex-1">
                     <Text numberOfLines={1} className="text-white text-[15px] font-bold">
@@ -396,7 +400,7 @@ export default function TradeCalculator() {
                         : "No changes yet"}
                     </Text>
                   </View>
-                </View>
+                </Pressable>
 
                 {notableNeeds.length > 0 && (
                   <View className="flex-row items-center gap-1.5 px-4 pb-3">

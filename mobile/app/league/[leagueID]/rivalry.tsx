@@ -224,8 +224,10 @@ export default function RivalryScreen() {
           <HeadToHead
             nameOne={userOneInfo?.userName ?? ""}
             avatarOne={userOneInfo?.avatar}
+            userIdOne={userOne ?? undefined}
             nameTwo={userTwoInfo?.userName ?? ""}
             avatarTwo={userTwoInfo?.avatar}
+            userIdTwo={userTwo ?? undefined}
             winsOne={rivalry.wins.one}
             winsTwo={rivalry.wins.two}
             ties={rivalry.ties}

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { View, Text, Image, Pressable, ScrollView, ActivityIndicator } from "react-native";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { Feather } from "@expo/vector-icons";
 import { sleeper, backend } from "../../../lib/api";
 import getMatchupData, { ScheduleData, Starter } from "../../../lib/getMatchupData";
 import PlayerCard from "../../../components/PlayerCard";
@@ -45,6 +46,7 @@ const TIER_STYLE: Record<PowerRankingTier, { bg: string; text: string }> = {
 
 export default function LeagueManagers() {
   const { leagueID } = useLocalSearchParams<{ leagueID: string }>();
+  const router = useRouter();
   const [scheduleData, setScheduleData] = useState<ScheduleData>({});
   const [managerIds, setManagerIds] = useState<string[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -250,6 +252,16 @@ export default function LeagueManagers() {
                 className="w-[76px] h-[76px] rounded-full mb-2 border-2 border-brand"
               />
               <Text className="text-xl font-bold text-white">{selectedManager.name}</Text>
+
+              {selectedId && (
+                <Pressable
+                  onPress={() => router.push(`/profile/manager/${selectedId}`)}
+                  className="flex-row items-center gap-1.5 bg-white/5 border border-white/10 rounded-full px-3 py-1.5 mt-2"
+                >
+                  <Feather name="user" size={11} color="#af1222" />
+                  <Text className="text-brand text-[11px] font-bold">View Profile</Text>
+                </Pressable>
+              )}
 
               <View className="flex-row flex-wrap items-center justify-center gap-1.5 mt-2 px-6">
                 {currentExtrasLoading ? (

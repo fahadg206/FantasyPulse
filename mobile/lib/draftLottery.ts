@@ -10,6 +10,7 @@ export const MOCK_DRAFT_ROUNDS = 4;
 
 export interface LotteryTeam {
   rosterId: string;
+  userId?: string;
   teamName: string;
   avatar?: string;
   odds: number;
@@ -20,7 +21,7 @@ const LOTTERY_STEP_PCT = 5;
 
 /** the teams currently on the outside of the playoff picture, worst record first, each assigned descending odds starting at 30% and stepping down 5% per slot */
 export function computeLotteryOdds(
-  nonPlayoffTeamsWorstFirst: { rosterId: string; teamName: string; avatar?: string }[]
+  nonPlayoffTeamsWorstFirst: { rosterId: string; userId?: string; teamName: string; avatar?: string }[]
 ): LotteryTeam[] {
   return nonPlayoffTeamsWorstFirst.map((t, i) => ({
     ...t,
@@ -127,11 +128,13 @@ export interface DraftSlot {
   originalRosterId: string;
   /** who's actually making this pick - equals originalRosterId unless the pick was traded */
   currentRosterId: string;
+  userId?: string;
   teamName: string;
   avatar?: string;
   /** set when this pick was traded away from its original team - the original team's name/avatar, for the "via" note */
   viaTeamName?: string;
   viaAvatar?: string;
+  viaUserId?: string;
 }
 
 export interface MockDraftPick extends DraftSlot {
