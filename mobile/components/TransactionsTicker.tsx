@@ -2,18 +2,9 @@ import { useEffect, useState } from "react";
 import { View, Text, Image, Pressable } from "react-native";
 import { MotiView } from "moti";
 import { Easing } from "react-native-reanimated";
-import { getTeamLogo } from "../lib/nflTeams";
+import { getTeamLogo, POSITION_COLORS } from "../lib/nflTeams";
 import { buildLeagueTransactions, TxAsset, AddDropEvent, TradeEvent } from "../lib/leagueTransactions";
 import { usePlayerDetail } from "./PlayerDetailProvider";
-
-const POSITION_COLOR: Record<string, string> = {
-  QB: "#ef4444",
-  WR: "#3b82f6",
-  RB: "#22c55e",
-  TE: "#eab308",
-  K: "#a855f7",
-  DEF: "#94a3b8",
-};
 
 export function AssetChip({ asset }: { asset: TxAsset }) {
   const playerDetail = usePlayerDetail();
@@ -39,7 +30,7 @@ export function AssetChip({ asset }: { asset: TxAsset }) {
       />
       <Text className="text-white text-[12px] font-semibold">{asset.label}</Text>
       {asset.pos && (
-        <Text style={{ color: POSITION_COLOR[asset.pos] ?? "#9ca3af" }} className="text-[10px] font-bold">
+        <Text style={{ color: POSITION_COLORS[asset.pos] ?? "#9ca3af" }} className="text-[10px] font-bold">
           {asset.pos}
         </Text>
       )}

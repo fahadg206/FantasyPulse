@@ -19,3 +19,20 @@ export function getTeamLogo(team?: string): string | null {
   if (!team || team === "FA") return null;
   return `https://sleepercdn.com/images/team_logos/nfl/${team.toLowerCase()}.png`;
 }
+
+// A position's own accent color - the same "at a glance" color-coding
+// real fantasy sites use (Sleeper's own QB/RB/WR/TE labels are colored
+// this same way). Shared by AssetChip's position tag and the player
+// detail card's whole accent language, instead of each keeping its own copy.
+export const POSITION_COLORS: Record<string, string> = {
+  QB: "#ef4444",
+  RB: "#22c55e",
+  WR: "#3b82f6",
+  TE: "#eab308",
+  K: "#a855f7",
+  DEF: "#94a3b8",
+};
+
+export function getPositionColor(pos?: string): string {
+  return (pos && POSITION_COLORS[pos.toUpperCase()]) || "#9ca3af";
+}

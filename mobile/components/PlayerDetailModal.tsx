@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { View, Text, Image, Pressable, Modal, ScrollView, ActivityIndicator, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { LinearGradient } from "expo-linear-gradient";
 import { Feather, Ionicons } from "@expo/vector-icons";
-import { getTeamColor, getTeamLogo } from "../lib/nflTeams";
+import { getTeamColor, getTeamLogo, getPositionColor } from "../lib/nflTeams";
 import { sleeper, backend } from "../lib/api";
 import { getPlayerGameLog, getPlayerCareerStats, GameLogEntry, SeasonTotals } from "../lib/playerBoxScore";
 import { getPlayerBio, formatHeight, PlayerBio } from "../lib/playerBio";
@@ -21,12 +22,20 @@ interface Props {
 }
 
 type Tab = "summary" | "gamelog" | "team" | "history";
-const TABS: { key: Tab; label: string }[] = [
-  { key: "summary", label: "SUMMARY" },
-  { key: "gamelog", label: "GAME LOG" },
-  { key: "team", label: "TEAM" },
-  { key: "history", label: "HISTORY" },
+const TABS: { key: Tab; label: string; icon: keyof typeof Feather.glyphMap }[] = [
+  { key: "summary", label: "SUMMARY", icon: "activity" },
+  { key: "gamelog", label: "GAME LOG", icon: "list" },
+  { key: "team", label: "TEAM", icon: "users" },
+  { key: "history", label: "HISTORY", icon: "clock" },
 ];
+
+/** how hot or cold a real positional rank reads - green top-5, yellow top-12, red outside that. */
+function formColorForRank(rank: number | undefined): string {
+  if (rank === undefined) return "#6b7280";
+  if (rank <= 5) return "#4ade80";
+  if (rank <= 12) return "#eab308";
+  return "#ef4444";
+}
 
 interface RosterContext {
   owner?: { name: string; avatar?: string };
@@ -207,6 +216,7 @@ export default function PlayerDetailModal({ visible, onClose, leagueID, playerId
   }, [tab, playerId, leagueID, season, scoringSettings, txHistory]);
 
   const color = getTeamColor(team);
+  const positionColor = getPositionColor(position);
   const logo = getTeamLogo(team);
   const resolvedPhoto =
     photoUri ?? (position === "DEF" ? logo ?? undefined : `https://sleepercdn.com/content/nfl/players/thumb/${playerId}.jpg`);
@@ -217,6 +227,8 @@ export default function PlayerDetailModal({ visible, onClose, leagueID, playerId
   const best = log.reduce((max, g) => (g.points > (max?.points ?? -Infinity) ? g : max), undefined as GameLogEntry | undefined);
   const maxPoints = Math.max(1, ...log.map((g) => g.points));
   const trend = [...log].reverse();
+  const mostRecent = log[0]; // log is most-recent-first
+  const formColor = formColorForRank(mostRecent?.posRank);
 
   const statGroups = STAT_GROUPS[position] ?? [];
 
@@ -228,20 +240,22 @@ export default function PlayerDetailModal({ visible, onClose, leagueID, playerId
       presentationStyle={Platform.OS === "ios" ? "pageSheet" : undefined}
     >
       <SafeAreaView className="flex-1 bg-[#0c0c0e]" edges={["top", "bottom"]}>
-          <View style={{ backgroundColor: color }} className="overflow-hidden pt-3">
+          <LinearGradient colors={[color, color, "#0c0c0e"]} locations={[0, 0.65, 1]} className="overflow-hidden pt-3">
             {logo && (
               <Image
                 source={{ uri: logo }}
                 resizeMode="contain"
-                style={{ position: "absolute", width: 160, height: 160, opacity: 0.25, right: -35, top: -35 }}
+                style={{ position: "absolute", width: 160, height: 160, opacity: 0.22, right: -35, top: -35 }}
               />
             )}
             <View className="flex-row items-start px-5 pt-2 pb-3">
-              <Image
-                source={resolvedPhoto ? { uri: resolvedPhoto } : undefined}
-                className={position === "DEF" ? "w-[64px] h-[64px] mr-3" : "w-[64px] h-[64px] rounded-full mr-3 bg-white/20"}
-                resizeMode={position === "DEF" ? "contain" : "cover"}
-              />
+              <View style={{ borderColor: positionColor }} className="rounded-full border-2 p-0.5 mr-3">
+                <Image
+                  source={resolvedPhoto ? { uri: resolvedPhoto } : undefined}
+                  className={position === "DEF" ? "w-[60px] h-[60px]" : "w-[60px] h-[60px] rounded-full bg-white/20"}
+                  resizeMode={position === "DEF" ? "contain" : "cover"}
+                />
+              </View>
               <View className="flex-1">
                 {rosterContext.owner && (
                   <View className="flex-row items-center gap-1 mb-0.5">
@@ -250,30 +264,38 @@ export default function PlayerDetailModal({ visible, onClose, leagueID, playerId
                   </View>
                 )}
                 <Text className="text-white text-[20px] font-extrabold leading-6">{name}</Text>
-                <Text className="text-white/85 text-[12px] font-bold mt-1">
-                  {position} · {team ?? "FA"}
-                  {bio?.number ? ` · #${bio.number}` : ""}
-                </Text>
+                <View className="flex-row items-center gap-1.5 mt-1.5">
+                  <View style={{ backgroundColor: positionColor }} className="px-2 py-0.5 rounded-md">
+                    <Text className="text-white text-[11px] font-extrabold">{position}</Text>
+                  </View>
+                  <Text className="text-white/85 text-[12px] font-bold">
+                    {team ?? "FA"}
+                    {bio?.number ? ` · #${bio.number}` : ""}
+                  </Text>
+                </View>
               </View>
             </View>
 
             {bio && (
               <View className="flex-row px-5 pb-4">
-                {bio.age !== undefined && <BioStat label="AGE" value={String(bio.age)} />}
-                {formatHeight(bio.height) && <BioStat label="HEIGHT" value={formatHeight(bio.height)!} />}
-                {bio.weight && <BioStat label="WEIGHT" value={`${bio.weight} lbs`} />}
-                {bio.years_exp !== undefined && <BioStat label="EXP" value={bio.years_exp === 0 ? "R" : String(bio.years_exp)} />}
+                {bio.age !== undefined && <BioStat icon="calendar" label="AGE" value={String(bio.age)} />}
+                {formatHeight(bio.height) && <BioStat icon="arrow-up" label="HEIGHT" value={formatHeight(bio.height)!} />}
+                {bio.weight && <BioStat icon="disc" label="WEIGHT" value={`${bio.weight} lbs`} />}
+                {bio.years_exp !== undefined && (
+                  <BioStat icon="award" label="EXP" value={bio.years_exp === 0 ? "R" : String(bio.years_exp)} />
+                )}
               </View>
             )}
-          </View>
+          </LinearGradient>
 
-          <View className="flex-row border-b border-white/10 px-2">
+          <View className="flex-row border-b border-white/10 px-2 bg-[#0c0c0e]">
             {TABS.map((t) => (
-              <Pressable key={t.key} onPress={() => setTab(t.key)} className="flex-1 items-center py-3">
-                <Text className={`text-[11px] font-bold tracking-wide ${tab === t.key ? "text-white" : "text-gray-500"}`}>
+              <Pressable key={t.key} onPress={() => setTab(t.key)} className="flex-1 items-center py-3 gap-1">
+                <Feather name={t.icon} size={13} color={tab === t.key ? positionColor : "#6b7280"} />
+                <Text className={`text-[10px] font-bold tracking-wide ${tab === t.key ? "text-white" : "text-gray-500"}`}>
                   {t.label}
                 </Text>
-                {tab === t.key && <View className="h-[2px] w-full bg-white rounded-full mt-2" />}
+                {tab === t.key && <View style={{ backgroundColor: positionColor }} className="h-[2.5px] w-full rounded-full mt-1" />}
               </Pressable>
             ))}
           </View>
@@ -286,26 +308,62 @@ export default function PlayerDetailModal({ visible, onClose, leagueID, playerId
             <ScrollView contentContainerClassName="pb-8" showsVerticalScrollIndicator={false}>
               {tab === "summary" && (
                 <View className="px-5 pt-4">
-                  <View className="flex-row bg-[#141416] border border-white/10 rounded-2xl p-3 mb-5">
-                    <SummaryStat label="GP" value={String(gamesPlayed)} />
-                    <SummaryStat label="PPG" value={ppg.toFixed(1)} />
-                    <SummaryStat label="TOTAL" value={totalPoints.toFixed(1)} />
-                    <SummaryStat label="BEST" value={best ? best.points.toFixed(1) : "-"} last />
+                  <View
+                    style={{ borderColor: `${positionColor}44` }}
+                    className="border rounded-2xl p-4 mb-4 overflow-hidden"
+                  >
+                    <LinearGradient
+                      colors={[`${positionColor}2e`, "transparent"]}
+                      style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
+                    />
+                    <Text className="text-gray-400 text-[10px] font-bold tracking-widest mb-1.5">POINTS PER GAME</Text>
+                    <View className="flex-row items-end justify-between">
+                      <Text style={{ color: positionColor }} className="text-[44px] font-extrabold leading-none">
+                        {ppg.toFixed(1)}
+                      </Text>
+                      {mostRecent?.posRank !== undefined && (
+                        <View style={{ backgroundColor: `${formColor}22`, borderColor: `${formColor}55` }} className="border px-2.5 py-1.5 rounded-xl items-end">
+                          <Text style={{ color: formColor }} className="text-[13px] font-extrabold">
+                            #{mostRecent.posRank} at {position}
+                          </Text>
+                          <Text className="text-gray-500 text-[9px] font-semibold">Week {mostRecent.week}</Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+
+                  <View className="flex-row gap-2.5 mb-5">
+                    <StatChip icon="calendar" label="GAMES" value={String(gamesPlayed)} color="#3b82f6" />
+                    <StatChip icon="bar-chart-2" label="TOTAL" value={totalPoints.toFixed(1)} color={positionColor} />
+                    <StatChip icon="star" label="BEST" value={best ? best.points.toFixed(1) : "-"} color="#eab308" />
                   </View>
 
                   {trend.length > 1 && (
-                    <View className="mb-5">
-                      <Text className="text-gray-500 text-[10px] font-bold tracking-widest mb-2">SEASON TREND</Text>
+                    <View className="bg-[#141416] border border-white/10 rounded-2xl p-4 mb-5">
+                      <View className="flex-row items-center justify-between mb-3">
+                        <Text className="text-gray-400 text-[10px] font-bold tracking-widest">SEASON TREND</Text>
+                        <View className="flex-row items-center gap-1.5">
+                          <View style={{ backgroundColor: "#eab308" }} className="w-2 h-2 rounded-full" />
+                          <Text className="text-gray-500 text-[9px] font-semibold">Best game</Text>
+                        </View>
+                      </View>
                       <View className="flex-row items-end gap-1.5 h-[70px]">
-                        {trend.map((g) => (
-                          <View key={g.week} className="flex-1 items-center">
-                            <View
-                              style={{ height: Math.max(4, (g.points / maxPoints) * 60), backgroundColor: "#af1222" }}
-                              className="w-full rounded-t-sm opacity-80"
-                            />
-                            <Text className="text-gray-600 text-[8px] font-bold mt-1">{g.week}</Text>
-                          </View>
-                        ))}
+                        {trend.map((g) => {
+                          const isBest = best && g.week === best.week;
+                          return (
+                            <View key={g.week} className="flex-1 items-center">
+                              <View
+                                style={{ height: Math.max(4, (g.points / maxPoints) * 60), backgroundColor: isBest ? "#eab308" : positionColor }}
+                                className="w-full rounded-t-md opacity-90"
+                              />
+                              <Text className="text-gray-600 text-[8px] font-bold mt-1">{g.week}</Text>
+                            </View>
+                          );
+                        })}
+                      </View>
+                      <View className="flex-row items-center gap-1.5 mt-3 pt-3 border-t border-white/5">
+                        <Feather name="minus" size={10} color="#6b7280" />
+                        <Text className="text-gray-500 text-[10px]">Averaging {ppg.toFixed(1)} PPG this season</Text>
                       </View>
                     </View>
                   )}
@@ -351,11 +409,13 @@ export default function PlayerDetailModal({ visible, onClose, leagueID, playerId
                               {g.week}
                             </Cell>
                             <Cell width={52}>{g.opponent ?? "-"}</Cell>
-                            <Cell width={54} bold color="#fff">
+                            <Cell width={54} bold color={positionColor}>
                               {g.points.toFixed(1)}
                             </Cell>
                             <Cell width={48}>{g.snapPct !== undefined ? `${g.snapPct}%` : "-"}</Cell>
-                            <Cell width={44}>{g.posRank !== undefined ? `#${g.posRank}` : "-"}</Cell>
+                            <Cell width={44} bold color={g.posRank !== undefined ? formColorForRank(g.posRank) : undefined}>
+                              {g.posRank !== undefined ? `#${g.posRank}` : "-"}
+                            </Cell>
                             {statGroups.map((grp) =>
                               grp.cols.map((c) => (
                                 <Cell key={c.key} width={44}>
@@ -375,10 +435,11 @@ export default function PlayerDetailModal({ visible, onClose, leagueID, playerId
                 <View className="px-5 pt-4">
                   <Text className="text-gray-500 text-[10px] font-bold tracking-widest mb-2">ROSTERED BY</Text>
                   {rosterContext.owner ? (
-                    <View className="flex-row items-center gap-2.5 bg-[#141416] border border-white/10 rounded-2xl p-3 mb-5">
+                    <View style={{ borderColor: `${positionColor}33` }} className="flex-row items-center gap-2.5 bg-[#141416] border rounded-2xl p-3 mb-5">
                       <Image
                         source={rosterContext.owner.avatar ? { uri: rosterContext.owner.avatar } : undefined}
-                        className="w-9 h-9 rounded-full bg-white/10"
+                        style={{ borderColor: positionColor }}
+                        className="w-9 h-9 rounded-full bg-white/10 border-2"
                       />
                       <Text className="text-white font-bold text-[14px]">{rosterContext.owner.name}</Text>
                     </View>
@@ -392,7 +453,7 @@ export default function PlayerDetailModal({ visible, onClose, leagueID, playerId
                   {rosterContext.teammates.length === 0 ? (
                     <Text className="text-gray-500 text-[13px]">No other {team ?? ""} players rostered here.</Text>
                   ) : (
-                    <View className="bg-[#141416] border border-white/10 rounded-2xl overflow-hidden">
+                    <View style={{ borderColor: `${positionColor}22` }} className="bg-[#141416] border rounded-2xl overflow-hidden">
                       {rosterContext.teammates.map((t, i) => (
                         <View key={i} className={`flex-row items-center justify-between px-3.5 py-2.5 ${i !== 0 ? "border-t border-white/5" : ""}`}>
                           <Text className="text-white text-[13px] font-semibold">{t.name}</Text>
@@ -426,7 +487,7 @@ export default function PlayerDetailModal({ visible, onClose, leagueID, playerId
                       {career && career.length > 0 && (
                         <>
                           <Text className="text-gray-500 text-[10px] font-bold tracking-widest mb-2">CAREER</Text>
-                          <View className="bg-[#141416] border border-white/10 rounded-2xl overflow-hidden">
+                          <View style={{ borderColor: `${positionColor}33` }} className="bg-[#141416] border rounded-2xl overflow-hidden">
                             <View className="flex-row px-3.5 py-2 border-b border-white/10">
                               <Text className="text-gray-600 text-[9px] font-bold w-[52px]">SEASON</Text>
                               <Text className="text-gray-600 text-[9px] font-bold flex-1 text-center">GP</Text>
@@ -442,7 +503,7 @@ export default function PlayerDetailModal({ visible, onClose, leagueID, playerId
                                 <Text style={{ fontVariant: ["tabular-nums"] }} className="text-gray-300 text-[12px] flex-1 text-center">
                                   {s.totalPoints.toFixed(1)}
                                 </Text>
-                                <Text style={{ fontVariant: ["tabular-nums"] }} className="text-white text-[12px] font-bold flex-1 text-center">
+                                <Text style={{ fontVariant: ["tabular-nums"], color: positionColor }} className="text-[12px] font-extrabold flex-1 text-center">
                                   {s.ppg.toFixed(1)}
                                 </Text>
                               </View>
@@ -465,20 +526,26 @@ export default function PlayerDetailModal({ visible, onClose, leagueID, playerId
   );
 }
 
-function BioStat({ label, value }: { label: string; value: string }) {
+function BioStat({ icon, label, value }: { icon: keyof typeof Feather.glyphMap; label: string; value: string }) {
   return (
     <View className="mr-6">
-      <Text className="text-white/70 text-[9px] font-bold tracking-wide">{label}</Text>
+      <View className="flex-row items-center gap-1">
+        <Feather name={icon} size={9} color="rgba(255,255,255,0.6)" />
+        <Text className="text-white/70 text-[9px] font-bold tracking-wide">{label}</Text>
+      </View>
       <Text className="text-white text-[15px] font-extrabold mt-0.5">{value}</Text>
     </View>
   );
 }
 
-function SummaryStat({ label, value, last }: { label: string; value: string; last?: boolean }) {
+function StatChip({ icon, label, value, color }: { icon: keyof typeof Feather.glyphMap; label: string; value: string; color: string }) {
   return (
-    <View className={`flex-1 items-center ${last ? "" : "border-r border-white/10"}`}>
-      <Text className="text-gray-500 text-[10px]">{label}</Text>
-      <Text className="text-white font-bold text-[16px] mt-0.5">{value}</Text>
+    <View style={{ borderColor: `${color}33` }} className="flex-1 bg-[#141416] border rounded-xl py-3 items-center">
+      <Feather name={icon} size={13} color={color} />
+      <Text style={{ color }} className="font-extrabold text-[15px] mt-1.5">
+        {value}
+      </Text>
+      <Text className="text-gray-500 text-[9px] font-bold tracking-wide mt-0.5">{label}</Text>
     </View>
   );
 }
@@ -506,12 +573,15 @@ function Cell({ children, width, bold, color }: { children: React.ReactNode; wid
 
 function TransactionCard({ event }: { event: TickerEvent }) {
   if (event.kind === "add" || event.kind === "drop") {
+    const semanticColor = event.kind === "add" ? "#4ade80" : "#ef4444";
     return (
-      <View className="bg-[#141416] border border-white/10 rounded-2xl px-3.5 py-3">
+      <View style={{ borderColor: `${semanticColor}33` }} className="bg-[#141416] border rounded-2xl px-3.5 py-3">
         <View className="flex-row items-center justify-between">
           <View className="flex-row items-center gap-1.5">
-            <Ionicons name={event.kind === "add" ? "add-circle" : "remove-circle"} size={13} color={event.kind === "add" ? "#4ade80" : "#ef4444"} />
-            <Text className="text-gray-400 text-[10px] font-bold tracking-wide">{event.kind === "add" ? "ADDED" : "DROPPED"}</Text>
+            <Ionicons name={event.kind === "add" ? "add-circle" : "remove-circle"} size={13} color={semanticColor} />
+            <Text style={{ color: semanticColor }} className="text-[10px] font-extrabold tracking-wide">
+              {event.kind === "add" ? "ADDED" : "DROPPED"}
+            </Text>
           </View>
           <Text className="text-gray-600 text-[10px]">{new Date(event.timestamp).toLocaleDateString()}</Text>
         </View>
@@ -540,11 +610,13 @@ function TransactionCard({ event }: { event: TickerEvent }) {
   }
 
   return (
-    <View className="bg-[#141416] border border-white/10 rounded-2xl px-3.5 py-3">
+    <View style={{ borderColor: "#3b82f633" }} className="bg-[#141416] border rounded-2xl px-3.5 py-3">
       <View className="flex-row items-center justify-between mb-1.5">
         <View className="flex-row items-center gap-1.5">
           <Ionicons name="swap-horizontal" size={13} color="#3b82f6" />
-          <Text className="text-gray-400 text-[10px] font-bold tracking-wide">TRADED</Text>
+          <Text style={{ color: "#3b82f6" }} className="text-[10px] font-extrabold tracking-wide">
+            TRADED
+          </Text>
         </View>
         <Text className="text-gray-600 text-[10px]">{new Date(event.timestamp).toLocaleDateString()}</Text>
       </View>
