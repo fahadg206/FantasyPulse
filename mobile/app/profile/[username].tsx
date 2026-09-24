@@ -9,6 +9,7 @@ import { getFantasyProfileStats, FantasyProfileStats } from "../../lib/fantasyPr
 import { followUser, unfollowUser, isFollowing, getFollowingUids, getFollowerUids } from "../../lib/follows";
 import { getOrCreateConversation } from "../../lib/messages";
 import { getPostsByAuthor, isPostLiked, isPostReposted, BOOGIE_UID, BOOGIE_USERNAME, BOOGIE_SLEEPER_USER_ID, Post } from "../../lib/posts";
+import { getPostTargetRoute } from "../../lib/postNavigation";
 import ProfileActivity from "../../components/ProfileActivity";
 import ProfileTabbedPosts from "../../components/ProfileTabbedPosts";
 import SwipeableTabs from "../../components/SwipeableTabs";
@@ -118,15 +119,8 @@ function BoogieProfile() {
                   liked={interactionState[post.id]?.liked ?? false}
                   reposted={interactionState[post.id]?.reposted ?? false}
                   onPressTarget={() => {
-                    if (post.targetType === "matchup" && post.targetId && post.leagueId) {
-                      const [week, matchupID] = post.targetId.split(":");
-                      router.push({
-                        pathname: "/league/[leagueID]/matchup",
-                        params: { leagueID: post.leagueId, week, matchupID },
-                      } as any);
-                    } else if ((post.targetType === "trade" || post.targetType === "waiver") && post.leagueId) {
-                      router.push({ pathname: "/league/[leagueID]/trades", params: { leagueID: post.leagueId } } as any);
-                    }
+                    const route = getPostTargetRoute(post);
+                    if (route) router.push(route as any);
                   }}
                 />
               ))}

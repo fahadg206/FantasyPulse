@@ -10,6 +10,7 @@ import {
   isPostReposted,
   Post,
 } from "../lib/posts";
+import { getPostTargetRoute } from "../lib/postNavigation";
 import PostCard from "./PostCard";
 
 type ProfileTab = "posts" | "reposts" | "likes";
@@ -115,15 +116,8 @@ export default function ProfileTabbedPosts({
                   tab === "posts" ? () => setPosts((prev) => prev.filter((p) => p.id !== post.id)) : undefined
                 }
                 onPressTarget={() => {
-                  if (post.targetType === "matchup" && post.targetId && post.leagueId) {
-                    const [week, matchupID] = post.targetId.split(":");
-                    router.push({
-                      pathname: "/league/[leagueID]/matchup",
-                      params: { leagueID: post.leagueId, week, matchupID },
-                    } as any);
-                  } else if ((post.targetType === "trade" || post.targetType === "waiver") && post.leagueId) {
-                    router.push({ pathname: "/league/[leagueID]/trades", params: { leagueID: post.leagueId } } as any);
-                  }
+                  const route = getPostTargetRoute(post);
+                  if (route) router.push(route as any);
                 }}
               />
             </View>

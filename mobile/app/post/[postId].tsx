@@ -6,6 +6,7 @@ import { Feather } from "@expo/vector-icons";
 import type { User } from "firebase/auth";
 import { onAuthChange, isReadOnly, getUserProfile, UserProfile } from "../../lib/socialAuth";
 import { getPost, getReplies, isPostLiked, isPostReposted, Post } from "../../lib/posts";
+import { getPostTargetRoute } from "../../lib/postNavigation";
 import PostCard from "../../components/PostCard";
 import ReplyModal from "../../components/ReplyModal";
 import Avatar from "../../components/Avatar";
@@ -130,6 +131,10 @@ export default function PostThread() {
                       setParentPost(null);
                       setParentDeleted(true);
                     }}
+                    onPressTarget={() => {
+                      const route = getPostTargetRoute(parentPost);
+                      if (route) router.push(route as any);
+                    }}
                   />
                   {/* Thread connector - same visual language as the reply
                       composer's own thread line, lined up under the
@@ -157,6 +162,10 @@ export default function PostThread() {
                 onReplied={(reply) => {
                   setReplies((prev) => [...prev, reply]);
                   setInteractionState((prev) => ({ ...prev, [reply.id]: { liked: false, reposted: false } }));
+                }}
+                onPressTarget={() => {
+                  const route = getPostTargetRoute(post);
+                  if (route) router.push(route as any);
                 }}
                 expanded
               />

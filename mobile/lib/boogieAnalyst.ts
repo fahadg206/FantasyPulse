@@ -95,9 +95,10 @@ export async function ensureScheduleStorylinePost(leagueId: string, sim: LeagueS
     await ensureSystemPost({
       id: `sos_story_${leagueId}_wk${currentWeek}`,
       text: scheduleStorylineText(gamesLeft, easiest, hardest),
+      imageUrl: easiest.avatar,
       leagueId,
       targetType: "analysis",
-      targetId: `sos_wk${currentWeek}`,
+      targetId: `sos:wk${currentWeek}`,
       targetLabel: "Strength of Schedule",
     });
   } catch (error) {
@@ -167,10 +168,13 @@ async function ensureOneTradeGrade(
 
   const netToA = getsVal.total - givesVal.total;
   const totalValue = givesVal.total + getsVal.total;
+  // The team that came out ahead is the story's protagonist - lead the image with them.
+  const winningTeam = netToA >= 0 ? event.teamA : event.teamB;
 
   await ensureSystemPost({
     id: `tradegrade_${leagueId}_${event.id}`,
     text: tradeGradeText(event.teamA.name, event.teamB.name, netToA, totalValue),
+    imageUrl: winningTeam.avatar,
     leagueId,
     targetType: "trade",
     targetId: event.id,
@@ -303,9 +307,10 @@ export async function ensurePlayoffPicturePost(leagueId: string, sim: LeagueSimD
     await ensureSystemPost({
       id: `playoff_picture_${leagueId}_wk${currentWeek}`,
       text,
+      imageUrl: sim.managerInfo[topSeedId]?.avatar,
       leagueId,
       targetType: "analysis",
-      targetId: `playoffs_wk${currentWeek}`,
+      targetId: `playoffs:wk${currentWeek}`,
       targetLabel: "Playoff Picture",
     });
   } catch (error) {
@@ -435,9 +440,10 @@ export async function ensurePowerRankingsMovementPost(leagueId: string, sim: Lea
     await ensureSystemPost({
       id: postId,
       text,
+      imageUrl: sim.managerInfo[ranked[0]?.userId]?.avatar,
       leagueId,
       targetType: "analysis",
-      targetId: `powerrank_wk${currentWeek}`,
+      targetId: `powerrank:wk${currentWeek}`,
       targetLabel: "Power Rankings",
     });
 
@@ -476,7 +482,7 @@ function rematchAlertText(a: string, b: string, week: number, firstWeek: number,
 export async function ensureRematchAlertPost(leagueId: string, sim: LeagueSimData, currentWeek: number): Promise<void> {
   try {
     const seen = new Set<string>();
-    let best: { a: string; b: string; firstWeek: number; marginPts: number; winnerName: string } | null = null;
+    let best: { a: string; b: string; firstWeek: number; marginPts: number; winnerId: string; matchupId?: string } | null = null;
 
     for (const userId of sim.teamIds) {
       if (seen.has(userId)) continue;
@@ -493,11 +499,18 @@ export async function ensureRematchAlertPost(leagueId: string, sim: LeagueSimDat
         const oppPts = parseFloat(sim.matchupData[w]?.[oppId]?.team_points || "0");
         if (myPts === 0 && oppPts === 0) break; // that week never actually played out
         const marginPts = Math.abs(myPts - oppPts);
-        const winnerName = nameOf(sim, myPts >= oppPts ? userId : oppId);
+        const winnerId = myPts >= oppPts ? userId : oppId;
 
         // The closest of the week's rematches is the most compelling story to lead with.
         if (!best || marginPts < best.marginPts) {
-          best = { a: nameOf(sim, userId), b: nameOf(sim, oppId), firstWeek: w, marginPts, winnerName };
+          best = {
+            a: nameOf(sim, userId),
+            b: nameOf(sim, oppId),
+            firstWeek: w,
+            marginPts,
+            winnerId,
+            matchupId: sim.matchupData[currentWeek]?.[userId]?.matchup_id,
+          };
         }
         break; // only the most recent prior meeting matters
       }
@@ -507,10 +520,11 @@ export async function ensureRematchAlertPost(leagueId: string, sim: LeagueSimDat
 
     await ensureSystemPost({
       id: `rematch_${leagueId}_wk${currentWeek}`,
-      text: rematchAlertText(best.a, best.b, currentWeek, best.firstWeek, best.marginPts, best.winnerName),
+      text: rematchAlertText(best.a, best.b, currentWeek, best.firstWeek, best.marginPts, nameOf(sim, best.winnerId)),
+      imageUrl: sim.managerInfo[best.winnerId]?.avatar,
       leagueId,
       targetType: "analysis",
-      targetId: `rematch_wk${currentWeek}`,
+      targetId: best.matchupId ? `rematch:${currentWeek}:${best.matchupId}` : `rematch:wk${currentWeek}`,
       targetLabel: "Rematch Alert",
     });
   } catch (error) {
@@ -586,12 +600,15 @@ export async function ensureBenchRegretPost(leagueId: string, sim: LeagueSimData
 
     if (!best) return;
 
+    const matchupId = sim.matchupData[targetWeek]?.[best.loserId]?.matchup_id;
+
     await ensureSystemPost({
       id: `benchregret_${leagueId}_wk${targetWeek}`,
       text: benchRegretText(nameOf(sim, best.loserId), nameOf(sim, best.winnerId), targetWeek, best.benchPointsLeft, best.oppPts, best.snub),
+      imageUrl: sim.managerInfo[best.loserId]?.avatar,
       leagueId,
       targetType: "analysis",
-      targetId: `benchregret_wk${targetWeek}`,
+      targetId: matchupId ? `benchregret:${targetWeek}:${matchupId}` : `benchregret:wk${targetWeek}`,
       targetLabel: "Bench Regret",
     });
   } catch (error) {
@@ -644,14 +661,25 @@ export async function ensureWaiverHeadlinerPost(leagueId: string, events: Ticker
       if (!best || value > best.value) best = { event, value };
     }
     if (!best || best.value <= 0) return;
+    const { asset, team } = best.event;
+    if (!team.userId) return; // no real manager to link the post's target to
+
+    const imageUrl = asset.id
+      ? asset.pos === "DEF"
+        ? `https://sleepercdn.com/images/team_logos/nfl/${asset.id.toLowerCase()}.png`
+        : `https://sleepercdn.com/content/nfl/players/thumb/${asset.id}.jpg`
+      : undefined;
 
     await ensureSystemPost({
       id: postId,
-      text: waiverHeadlinerText(best.event.team.name, best.event.asset.label, best.event.asset.pos),
+      text: waiverHeadlinerText(team.name, asset.label, asset.pos),
+      imageUrl,
       leagueId,
       targetType: "waiver",
-      targetId: best.event.id,
-      targetLabel: `${best.event.team.name} waiver move`,
+      // The Trades tab has nowhere to show a waiver move - link straight to
+      // the acquiring manager's profile instead (see postNavigation.ts).
+      targetId: team.userId,
+      targetLabel: `${team.name} waiver move`,
     });
   } catch (error) {
     console.error("Error posting waiver headliner:", error);

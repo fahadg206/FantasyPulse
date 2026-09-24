@@ -6,6 +6,7 @@ import { Feather } from "@expo/vector-icons";
 import type { User } from "firebase/auth";
 import { onAuthChange, isReadOnly, getUserProfile, UserProfile } from "../lib/socialAuth";
 import { getFeedPostsForLeague, createPost, isPostLiked, isPostReposted, Post } from "../lib/posts";
+import { getPostTargetRoute } from "../lib/postNavigation";
 import { storage, StorageKeys } from "../lib/storage";
 import PostCard from "../components/PostCard";
 import ComposeBox from "../components/ComposeBox";
@@ -200,15 +201,8 @@ export default function Feed() {
               liked={interactionState[item.id]?.liked ?? false}
               reposted={interactionState[item.id]?.reposted ?? false}
               onPressTarget={() => {
-                if (item.targetType === "matchup" && item.targetId && item.leagueId) {
-                  const [week, matchupID] = item.targetId.split(":");
-                  router.push({
-                    pathname: "/league/[leagueID]/matchup",
-                    params: { leagueID: item.leagueId, week, matchupID },
-                  } as any);
-                } else if ((item.targetType === "trade" || item.targetType === "waiver") && item.leagueId) {
-                  router.push({ pathname: "/league/[leagueID]/trades", params: { leagueID: item.leagueId } } as any);
-                }
+                const route = getPostTargetRoute(item);
+                if (route) router.push(route as any);
               }}
               onDeleted={() => setPosts((prev) => prev.filter((p) => p.id !== item.id))}
             />
