@@ -14,6 +14,8 @@ export interface BracketMatch {
   placement?: number;
   teams: [BracketTeam | null, BracketTeam | null];
   winnerRosterId?: number;
+  /** which earlier match (if any) feeds each slot - [t1's feeder, t2's feeder], undefined for a fresh bye/seed with no predecessor. Drives the visual bracket layout (PlayoffBracket.tsx computes each match's vertical position as the midpoint of its feeders'). */
+  fromMatchIds: [number | undefined, number | undefined];
 }
 
 export interface Bracket {
@@ -85,6 +87,26 @@ export async function getPlayoffBracket(leagueId: string): Promise<Bracket | nul
     };
   };
 
+  // Which earlier match produced a given slot - Sleeper's own t1_from/
+  // t2_from template is authoritative when present, but is inconsistently
+  // omitted even for a slot that's clearly fed by an earlier match once
+  // that match (and this one) are both fully decided - the resolved roster
+  // id itself is still real signal there: if it equals some earlier
+  // round's winner or loser, that match is the feeder, template or not.
+  // A slot with neither a template nor a matching earlier result is a
+  // fresh bye/seed with no predecessor at all.
+  const resolveFeederMatchId = (
+    rosterId: number | undefined,
+    from: { w?: number; l?: number } | undefined,
+    round: number
+  ): number | undefined => {
+    if (from?.w !== undefined) return from.w;
+    if (from?.l !== undefined) return from.l;
+    if (rosterId === undefined) return undefined;
+    const earlier = bracketRaw.find((g: any) => g.r < round && (g.w === rosterId || g.l === rosterId));
+    return earlier?.m;
+  };
+
   const rounds: BracketMatch[][] = [];
   for (let r = 1; r <= maxRound; r++) {
     const week = playoffWeekStart + (r - 1);
@@ -98,6 +120,10 @@ export async function getPlayoffBracket(leagueId: string): Promise<Bracket | nul
           placement: g.p,
           teams: [resolveTeam(g.t1, g.t1_from, week), resolveTeam(g.t2, g.t2_from, week)],
           winnerRosterId: g.w,
+          fromMatchIds: [
+            resolveFeederMatchId(g.t1, g.t1_from, g.r),
+            resolveFeederMatchId(g.t2, g.t2_from, g.r),
+          ],
         })
       );
     rounds.push(matches);

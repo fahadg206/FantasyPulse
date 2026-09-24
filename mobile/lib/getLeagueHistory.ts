@@ -7,6 +7,8 @@ export interface HistoryTeam {
 
 export interface SeasonHistory {
   season: string;
+  /** that season's own Sleeper league id - not the current league's, since a Sleeper league gets a new id every season and only chains back via previous_league_id. Needed to fetch that season's own bracket (getPlayoffBracket) rather than only ever being able to show the current one. */
+  leagueId: string;
   leagueName: string;
   champion?: HistoryTeam;
   runnerUp?: HistoryTeam;
@@ -47,6 +49,7 @@ export async function getLeagueHistory(leagueId: string): Promise<SeasonHistory[
           const thirdPlaceGame = bracket.find((g: any) => g.p === 3 && g.w !== undefined);
           history.push({
             season: leagueRes.data.season,
+            leagueId: leagueIdForRequest,
             leagueName: leagueRes.data.name,
             champion: rosterToTeam[championGame.w],
             runnerUp: rosterToTeam[championGame.l],
