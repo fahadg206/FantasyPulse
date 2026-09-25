@@ -590,10 +590,16 @@ function PlayerRankCard({ player, onPress, showStatus = true }: { player: StartS
             )}
           </View>
         </View>
-        {showStatus && (
-          <View style={{ backgroundColor: isStarting ? "#4ade8022" : "#6b728022" }} className="px-2.5 py-1 rounded-full">
-            <Text style={{ color: isStarting ? "#4ade80" : "#9ca3af" }} className="text-[10px] font-extrabold">
-              {isStarting ? player.recommendedSlot : "BENCH"}
+        {player.opponent && (
+          <View
+            style={{ backgroundColor: showStatus ? (isStarting ? "#4ade8022" : "#6b728022") : "rgba(255,255,255,0.08)" }}
+            className="px-2.5 py-1 rounded-full"
+          >
+            <Text
+              style={{ color: showStatus ? (isStarting ? "#4ade80" : "#9ca3af") : "#d1d5db" }}
+              className="text-[10px] font-extrabold"
+            >
+              {player.opponent}
             </Text>
           </View>
         )}

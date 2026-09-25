@@ -20,8 +20,12 @@
 import { getAllPlayersData } from "./playerBio";
 import { getEspnWeeklyData, normalizePlayerName } from "./espnFantasy";
 import { getFantasyCalcIndex } from "./fantasyCalc";
+import { getLiveGameDetailsByTeam } from "./nflGameStatus";
+import { cachedFetch } from "./requestCache";
 import { computeOptimalLineupAssignment, LineupSlotAssignment } from "./tradeAnalysis";
 import { computeAdjustedValue, RawPlayerValue, LeagueValueSettings } from "./playerValue";
+
+const OPPONENTS_TTL_MS = 60 * 60 * 1000; // real ESPN scoreboard data - an hour keeps this fresh without refetching on every board rebuild
 
 export interface RankSource {
   label: string;
@@ -42,6 +46,8 @@ export interface StartSitPlayer {
   outlook?: string;
   /** real KTC dynasty asset value, dynasty leagues only - shown as context alongside (not instead of) the KTC rank source below */
   dynastyValue?: number;
+  /** this week's real NFL opponent, ESPN scoreboard - "@BUF" away, "BUF" home. Undefined on a bye or for a team ESPN has no game for. */
+  opponent?: string;
   /** the starting slot this player landed in the recommended lineup, if any - undefined means the board has them on the bench. Never set for the arbitrary-player comparison path, since there's no roster/lineup to place them into. */
   recommendedSlot?: string;
 }
@@ -66,15 +72,19 @@ interface ScoringIndex {
   espnIndex: Awaited<ReturnType<typeof getEspnWeeklyData>>;
   ktcRankByPlayer: Record<string, number>;
   fantasyCalcIndex: Map<string, { positionRank: number }>;
+  opponentByTeam: Record<string, { opponentAbbr?: string; isHome: boolean }>;
 }
 
 async function buildScoringIndex(ctx: ScoringContext): Promise<ScoringIndex> {
   const { week, season, playersData, leagueValueSettings, valuesBySleeperId } = ctx;
 
-  const [espnAllPlayers, espnIndex, fantasyCalcIndex] = await Promise.all([
+  const [espnAllPlayers, espnIndex, fantasyCalcIndex, opponentByTeam] = await Promise.all([
     getAllPlayersData().catch(() => ({}) as Record<string, { espn_id?: number }>),
     getEspnWeeklyData(season, week).catch(() => ({ byId: new Map(), byName: new Map() })),
     getFantasyCalcIndex(leagueValueSettings.isDynasty, leagueValueSettings.isSuperflex).catch(() => new Map()),
+    cachedFetch(`nflOpponents:${season}:${week}`, OPPONENTS_TTL_MS, () => getLiveGameDetailsByTeam(week, season)).catch(
+      () => ({}) as Record<string, { opponentAbbr?: string; isHome: boolean }>
+    ),
   ]);
 
   // Sleeper's own positional rank - the same real weekly projection this
@@ -121,7 +131,7 @@ async function buildScoringIndex(ctx: ScoringContext): Promise<ScoringIndex> {
     }
   }
 
-  return { sleeperRankByPlayer, projByPlayer, espnAllPlayers, espnIndex, ktcRankByPlayer, fantasyCalcIndex };
+  return { sleeperRankByPlayer, projByPlayer, espnAllPlayers, espnIndex, ktcRankByPlayer, fantasyCalcIndex, opponentByTeam };
 }
 
 function scorePlayer(pid: string, playersData: Record<string, any>, idx: ScoringIndex, isDynasty: boolean): StartSitPlayer {
@@ -153,6 +163,9 @@ function scorePlayer(pid: string, playersData: Record<string, any>, idx: Scoring
   const consensusRank =
     sources.length > 0 ? Math.round((sources.reduce((s, r) => s + r.rank, 0) / sources.length) * 10) / 10 : null;
 
+  const gameDetail = team ? idx.opponentByTeam[team] : undefined;
+  const opponent = gameDetail?.opponentAbbr ? `${gameDetail.isHome ? "" : "@"}${gameDetail.opponentAbbr}` : undefined;
+
   return {
     playerId: pid,
     name,
@@ -162,6 +175,7 @@ function scorePlayer(pid: string, playersData: Record<string, any>, idx: Scoring
     sources,
     consensusRank,
     outlook: espnEntry?.outlook,
+    opponent,
   };
 }
 
