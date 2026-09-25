@@ -229,6 +229,41 @@ export default function StartSitScreen() {
         Sleeper, ESPN, KTC, and FantasyCalc rankings, averaged into one consensus for every player - Week {week}.
       </Text>
 
+      <View className="rounded-2xl border border-white/10 bg-[#141416] p-4 mt-4">
+        <Text className="text-gray-500 text-[11px] font-bold tracking-widest mb-1">COMPARE ANY TWO PLAYERS</Text>
+        <Text className="text-gray-600 text-[11px] mb-3">Not just your roster - look up any two players in the league.</Text>
+        <View className="flex-row items-center gap-2">
+          <ComparePickerSlot
+            player={comparePlayers[0] ? leagueMeta?.playersData[comparePlayers[0]] : undefined}
+            playerId={comparePlayers[0]}
+            onPress={() => setPickerSlot(0)}
+            onClear={() => setComparePlayers(([, b]) => [null, b])}
+          />
+          <Text className="text-gray-600 text-[11px] font-extrabold">VS</Text>
+          <ComparePickerSlot
+            player={comparePlayers[1] ? leagueMeta?.playersData[comparePlayers[1]] : undefined}
+            playerId={comparePlayers[1]}
+            onPress={() => setPickerSlot(1)}
+            onClear={() => setComparePlayers(([a]) => [a, null])}
+          />
+        </View>
+
+        {comparing && <ActivityIndicator color="#af1222" className="mt-5" />}
+
+        {!comparing && compareResults && (
+          <View className="gap-2.5 mt-4">
+            {compareResults.map((p) => (
+              <PlayerRankCard
+                key={p.playerId}
+                player={p}
+                showStatus={false}
+                onPress={() => playerDetail?.openPlayer({ playerId: p.playerId, name: p.name, position: p.pos, team: p.team })}
+              />
+            ))}
+          </View>
+        )}
+      </View>
+
       {loadingTeams ? (
         <ActivityIndicator color="#af1222" className="mt-8" />
       ) : (
@@ -297,41 +332,6 @@ export default function StartSitScreen() {
               </View>
             </>
           )}
-
-          <View className="rounded-2xl border border-white/10 bg-[#141416] p-4">
-            <Text className="text-gray-500 text-[11px] font-bold tracking-widest mb-1">COMPARE ANY TWO PLAYERS</Text>
-            <Text className="text-gray-600 text-[11px] mb-3">Not just your roster - look up any two players in the league.</Text>
-            <View className="flex-row items-center gap-2">
-              <ComparePickerSlot
-                player={comparePlayers[0] ? leagueMeta?.playersData[comparePlayers[0]] : undefined}
-                playerId={comparePlayers[0]}
-                onPress={() => setPickerSlot(0)}
-                onClear={() => setComparePlayers(([, b]) => [null, b])}
-              />
-              <Text className="text-gray-600 text-[11px] font-extrabold">VS</Text>
-              <ComparePickerSlot
-                player={comparePlayers[1] ? leagueMeta?.playersData[comparePlayers[1]] : undefined}
-                playerId={comparePlayers[1]}
-                onPress={() => setPickerSlot(1)}
-                onClear={() => setComparePlayers(([a]) => [a, null])}
-              />
-            </View>
-
-            {comparing && <ActivityIndicator color="#af1222" className="mt-5" />}
-
-            {!comparing && compareResults && (
-              <View className="gap-2.5 mt-4">
-                {compareResults.map((p) => (
-                  <PlayerRankCard
-                    key={p.playerId}
-                    player={p}
-                    showStatus={false}
-                    onPress={() => playerDetail?.openPlayer({ playerId: p.playerId, name: p.name, position: p.pos, team: p.team })}
-                  />
-                ))}
-              </View>
-            )}
-          </View>
         </>
       )}
 
@@ -487,15 +487,22 @@ function LineupRow({ slotLabel, player, onPress }: { slotLabel: string; player?:
     );
   }
   const posColor = getPositionColor(player.pos);
+  const teamColor = getTeamColor(player.team);
+  const logo = getTeamLogo(player.team);
   return (
     <Pressable onPress={onPress} className="flex-row items-center px-3 py-2.5 bg-white/5 rounded-xl">
       <Text style={{ color: posColor }} className="text-[10px] font-extrabold w-[64px]">
         {slotLabel}
       </Text>
-      <Image
-        source={{ uri: `https://sleepercdn.com/content/nfl/players/thumb/${player.playerId}.jpg` }}
-        className="w-7 h-7 rounded-full bg-white/10 mr-2.5"
-      />
+      <View style={{ backgroundColor: teamColor }} className="w-7 h-7 rounded-full items-center justify-center mr-2.5 overflow-hidden">
+        {logo && (
+          <Image source={{ uri: logo }} resizeMode="contain" style={{ position: "absolute", width: 22, height: 22, opacity: 0.35 }} />
+        )}
+        <Image
+          source={{ uri: `https://sleepercdn.com/content/nfl/players/thumb/${player.playerId}.jpg` }}
+          className="w-7 h-7 rounded-full"
+        />
+      </View>
       <Text numberOfLines={1} className="flex-1 text-white text-[13px] font-semibold mr-2">
         {player.name}
       </Text>
@@ -520,47 +527,43 @@ function PlayerRankCard({ player, onPress, showStatus = true }: { player: StartS
   const isStarting = player.recommendedSlot !== undefined;
 
   return (
-    <Pressable onPress={onPress} className="bg-[#141416] border border-white/10 rounded-2xl overflow-hidden">
-      {/* Team-color header, matching PlayerCard's established look - the logo is
-          bled large and faded into the background, not a small badge. */}
-      <View style={{ backgroundColor: teamColor }} className="overflow-hidden">
-        {logo && (
-          <Image
-            source={{ uri: logo }}
-            resizeMode="contain"
-            style={{ position: "absolute", width: 120, height: 120, opacity: 0.32, right: -20, top: -24 }}
-          />
-        )}
-        <View className="flex-row items-center px-3.5 py-3">
+    <Pressable
+      onPress={onPress}
+      style={{ borderColor: isStarting ? `${posColor}44` : "rgba(255,255,255,0.1)" }}
+      className="bg-[#141416] border rounded-2xl overflow-hidden"
+    >
+      <View className="flex-row items-center px-3.5 pt-3.5">
+        <View style={{ backgroundColor: teamColor }} className="w-11 h-11 rounded-full items-center justify-center mr-3 overflow-hidden">
+          {logo && <Image source={{ uri: logo }} resizeMode="contain" style={{ position: "absolute", width: 34, height: 34, opacity: 0.35 }} />}
           <Image
             source={{ uri: `https://sleepercdn.com/content/nfl/players/thumb/${player.playerId}.jpg` }}
-            className="w-11 h-11 rounded-full bg-white/20"
+            className="w-11 h-11 rounded-full"
           />
-          <View className="flex-1 ml-3 mr-2">
-            <Text numberOfLines={1} className="text-white font-bold text-[14px]">
-              {player.name}
-            </Text>
-            <View className="flex-row items-center gap-1.5 mt-0.5">
-              <Text className="text-white/85 text-[11px] font-semibold">
-                {player.pos}
-                {player.team ? ` · ${player.team}` : ""}
-              </Text>
-              {player.dynastyValue !== undefined && (
-                <View className="flex-row items-center gap-0.5">
-                  <Feather name="trending-up" size={9} color="#fde047" />
-                  <Text className="text-yellow-300 text-[10px] font-bold">{formatValue(player.dynastyValue)}</Text>
-                </View>
-              )}
-            </View>
-          </View>
-          {showStatus && (
-            <View className="bg-black/30 px-2.5 py-1 rounded-full">
-              <Text style={{ color: isStarting ? "#4ade80" : "#ffffffb3" }} className="text-[10px] font-extrabold">
-                {isStarting ? player.recommendedSlot : "BENCH"}
-              </Text>
-            </View>
-          )}
         </View>
+        <View className="flex-1 mr-2">
+          <Text numberOfLines={1} className="text-white font-bold text-[14px]">
+            {player.name}
+          </Text>
+          <View className="flex-row items-center gap-1.5 mt-0.5">
+            <View style={{ backgroundColor: posColor }} className="px-1.5 py-0.5 rounded">
+              <Text className="text-white text-[9px] font-extrabold">{player.pos}</Text>
+            </View>
+            <Text className="text-gray-500 text-[10px] font-semibold">{player.team ?? "FA"}</Text>
+            {player.dynastyValue !== undefined && (
+              <View className="flex-row items-center gap-0.5">
+                <Feather name="trending-up" size={9} color="#eab308" />
+                <Text className="text-yellow-500 text-[10px] font-bold">{formatValue(player.dynastyValue)}</Text>
+              </View>
+            )}
+          </View>
+        </View>
+        {showStatus && (
+          <View style={{ backgroundColor: isStarting ? "#4ade8022" : "#6b728022" }} className="px-2.5 py-1 rounded-full">
+            <Text style={{ color: isStarting ? "#4ade80" : "#9ca3af" }} className="text-[10px] font-extrabold">
+              {isStarting ? player.recommendedSlot : "BENCH"}
+            </Text>
+          </View>
+        )}
       </View>
 
       <View className="flex-row items-center gap-2 px-3.5 pt-3 pb-3">
