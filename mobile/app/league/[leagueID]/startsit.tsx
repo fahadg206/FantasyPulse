@@ -279,13 +279,18 @@ export default function StartSitScreen() {
 
         {!comparing && compareResults && (
           <View className="gap-2.5 mt-4">
-            {compareResults.map((p) => (
-              <PlayerRankCard
-                key={p.playerId}
-                player={p}
-                onPress={() => playerDetail?.openPlayer({ playerId: p.playerId, name: p.name, position: p.pos, team: p.team })}
-              />
-            ))}
+            {compareResults.map((p) => {
+              const other = compareResults.find((r) => r.playerId !== p.playerId);
+              const recommendedStart = !!other && p.projectedPoints > other.projectedPoints;
+              return (
+                <PlayerRankCard
+                  key={p.playerId}
+                  player={p}
+                  recommendedStart={recommendedStart}
+                  onPress={() => playerDetail?.openPlayer({ playerId: p.playerId, name: p.name, position: p.pos, team: p.team })}
+                />
+              );
+            })}
           </View>
         )}
       </View>
@@ -552,18 +557,34 @@ function LineupRow({ slotLabel, player, onPress }: { slotLabel: string; player?:
   );
 }
 
-function PlayerRankCard({ player, onPress }: { player: StartSitPlayer; onPress: () => void }) {
+function PlayerRankCard({
+  player,
+  onPress,
+  recommendedStart = false,
+}: {
+  player: StartSitPlayer;
+  onPress: () => void;
+  /** the pick in a head-to-head "compare any two players" matchup - highlights the whole card green with a START badge, independent of any roster/lineup context */
+  recommendedStart?: boolean;
+}) {
   const posColor = getPositionColor(player.pos);
   const teamColor = getTeamColor(player.team);
   const logo = getTeamLogo(player.team);
   const isStarting = player.recommendedSlot !== undefined;
+  const borderColor = recommendedStart ? "#4ade80" : isStarting ? `${posColor}44` : "rgba(255,255,255,0.1)";
 
   return (
     <Pressable
       onPress={onPress}
-      style={{ borderColor: isStarting ? `${posColor}44` : "rgba(255,255,255,0.1)" }}
-      className="bg-[#141416] border rounded-2xl overflow-hidden"
+      style={{ borderColor }}
+      className={`border rounded-2xl overflow-hidden ${recommendedStart ? "bg-[#122015]" : "bg-[#141416]"}`}
     >
+      {recommendedStart && (
+        <View className="flex-row items-center gap-1.5 bg-[#4ade80] px-3.5 py-1.5">
+          <Feather name="check-circle" size={12} color="#0c0c0e" />
+          <Text className="text-[#0c0c0e] text-[10px] font-extrabold tracking-wide">START</Text>
+        </View>
+      )}
       <View className="flex-row items-center px-3.5 pt-3.5">
         <View style={{ backgroundColor: teamColor }} className="w-11 h-11 rounded-full items-center justify-center mr-3 overflow-hidden">
           {logo && <Image source={{ uri: logo }} resizeMode="contain" style={{ position: "absolute", width: 34, height: 34, opacity: 0.35 }} />}
