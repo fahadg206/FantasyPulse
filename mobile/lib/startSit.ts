@@ -46,8 +46,8 @@ export interface StartSitPlayer {
   outlook?: string;
   /** real KTC dynasty asset value, dynasty leagues only - shown as context alongside (not instead of) the KTC rank source below */
   dynastyValue?: number;
-  /** this week's real NFL opponent, ESPN scoreboard - "@BUF" away, "BUF" home. Undefined on a bye or for a team ESPN has no game for. */
-  opponent?: string;
+  /** this week's real NFL opponent, ESPN scoreboard. Undefined on a bye or for a team ESPN has no game for. */
+  opponent?: { team: string; isHome: boolean };
   /** the starting slot this player landed in the recommended lineup, if any - undefined means the board has them on the bench. Never set for the arbitrary-player comparison path, since there's no roster/lineup to place them into. */
   recommendedSlot?: string;
 }
@@ -164,7 +164,7 @@ function scorePlayer(pid: string, playersData: Record<string, any>, idx: Scoring
     sources.length > 0 ? Math.round((sources.reduce((s, r) => s + r.rank, 0) / sources.length) * 10) / 10 : null;
 
   const gameDetail = team ? idx.opponentByTeam[team] : undefined;
-  const opponent = gameDetail?.opponentAbbr ? `${gameDetail.isHome ? "" : "@"}${gameDetail.opponentAbbr}` : undefined;
+  const opponent = gameDetail?.opponentAbbr ? { team: gameDetail.opponentAbbr, isHome: gameDetail.isHome } : undefined;
 
   return {
     playerId: pid,

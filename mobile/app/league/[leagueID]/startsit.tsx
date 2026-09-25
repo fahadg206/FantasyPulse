@@ -283,7 +283,6 @@ export default function StartSitScreen() {
               <PlayerRankCard
                 key={p.playerId}
                 player={p}
-                showStatus={false}
                 onPress={() => playerDetail?.openPlayer({ playerId: p.playerId, name: p.name, position: p.pos, team: p.team })}
               />
             ))}
@@ -553,7 +552,7 @@ function LineupRow({ slotLabel, player, onPress }: { slotLabel: string; player?:
   );
 }
 
-function PlayerRankCard({ player, onPress, showStatus = true }: { player: StartSitPlayer; onPress: () => void; showStatus?: boolean }) {
+function PlayerRankCard({ player, onPress }: { player: StartSitPlayer; onPress: () => void }) {
   const posColor = getPositionColor(player.pos);
   const teamColor = getTeamColor(player.team);
   const logo = getTeamLogo(player.team);
@@ -591,16 +590,11 @@ function PlayerRankCard({ player, onPress, showStatus = true }: { player: StartS
           </View>
         </View>
         {player.opponent && (
-          <View
-            style={{ backgroundColor: showStatus ? (isStarting ? "#4ade8022" : "#6b728022") : "rgba(255,255,255,0.08)" }}
-            className="px-2.5 py-1 rounded-full"
-          >
-            <Text
-              style={{ color: showStatus ? (isStarting ? "#4ade80" : "#9ca3af") : "#d1d5db" }}
-              className="text-[10px] font-extrabold"
-            >
-              {player.opponent}
-            </Text>
+          <View className="flex-row items-center gap-1.5 bg-white/5 px-2.5 py-1 rounded-full">
+            <Text className="text-gray-400 text-[10px] font-bold">{player.opponent.isHome ? "vs" : "@"}</Text>
+            {getTeamLogo(player.opponent.team) && (
+              <Image source={{ uri: getTeamLogo(player.opponent.team)! }} resizeMode="contain" style={{ width: 16, height: 16 }} />
+            )}
           </View>
         )}
       </View>
