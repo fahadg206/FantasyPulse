@@ -30,6 +30,16 @@ function formatValue(v: number): string {
   return Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v));
 }
 
+// A team defense's "playerId" is just its team abbreviation (e.g. "DAL") -
+// Sleeper's player-thumb CDN 404s on that (verified live), the same reason
+// PlayerCard.tsx already falls back to the team logo for DEF. Same fix
+// here, everywhere Start/Sit shows a player photo, so kickers (who do have
+// real headshots) and defenses both render correctly.
+function getPlayerPhotoUri(playerId: string, pos: string | undefined, team: string | undefined): string | undefined {
+  if (pos === "DEF") return getTeamLogo(team) ?? undefined;
+  return `https://sleepercdn.com/content/nfl/players/thumb/${playerId}.jpg`;
+}
+
 /** "#4" -> "QB4" - a positional rank reads the same way real rankings pages label it. */
 function formatRank(pos: string, rank: number | null): string {
   return rank === null ? "—" : `${pos}${Math.round(rank)}`;
@@ -408,7 +418,11 @@ function ComparePickerSlot({
   const color = getTeamColor(player.t);
   return (
     <Pressable onPress={onPress} style={{ backgroundColor: color }} className="flex-1 flex-row items-center gap-2 rounded-xl py-2 px-2.5">
-      <Image source={{ uri: `https://sleepercdn.com/content/nfl/players/thumb/${playerId}.jpg` }} className="w-7 h-7 rounded-full bg-white/20" />
+      <Image
+        source={{ uri: getPlayerPhotoUri(playerId, player.pos, player.t) }}
+        resizeMode={player.pos === "DEF" ? "contain" : "cover"}
+        className="w-7 h-7 rounded-full bg-white/20"
+      />
       <Text numberOfLines={1} className="flex-1 text-white text-[12px] font-bold">
         {player.fn} {player.ln}
       </Text>
@@ -484,7 +498,11 @@ function PlayerPickerModal({
               return (
                 <Pressable onPress={() => onPick(pid)} className="flex-row items-center gap-3 py-2.5 border-b border-white/5">
                   <View style={{ backgroundColor: color }} className="w-9 h-9 rounded-full overflow-hidden items-center justify-center">
-                    <Image source={{ uri: `https://sleepercdn.com/content/nfl/players/thumb/${pid}.jpg` }} className="w-9 h-9 rounded-full" />
+                    <Image
+                      source={{ uri: getPlayerPhotoUri(pid, p?.pos, p?.t) }}
+                      resizeMode={p?.pos === "DEF" ? "contain" : "cover"}
+                      className="w-9 h-9 rounded-full"
+                    />
                   </View>
                   <View className="flex-1">
                     <Text className="text-white text-[13px] font-semibold">
@@ -532,12 +550,14 @@ function LineupRow({ slotLabel, player, onPress }: { slotLabel: string; player?:
         </Text>
       </View>
       <View style={{ backgroundColor: teamColor }} className="w-8 h-8 rounded-full items-center justify-center mr-3 overflow-hidden">
-        {logo && (
+        {logo && player.pos !== "DEF" && (
           <Image source={{ uri: logo }} resizeMode="contain" style={{ position: "absolute", width: 26, height: 26, opacity: 0.35 }} />
         )}
         <Image
-          source={{ uri: `https://sleepercdn.com/content/nfl/players/thumb/${player.playerId}.jpg` }}
-          className="w-8 h-8 rounded-full"
+          source={{ uri: getPlayerPhotoUri(player.playerId, player.pos, player.team) }}
+          resizeMode={player.pos === "DEF" ? "contain" : "cover"}
+          style={player.pos === "DEF" ? { width: 20, height: 20 } : undefined}
+          className={player.pos === "DEF" ? undefined : "w-8 h-8 rounded-full"}
         />
       </View>
       <Text numberOfLines={1} className="flex-1 text-white text-[13px] font-semibold mr-2.5">
@@ -587,10 +607,14 @@ function PlayerRankCard({
       )}
       <View className="flex-row items-center px-3.5 pt-3.5">
         <View style={{ backgroundColor: teamColor }} className="w-11 h-11 rounded-full items-center justify-center mr-3 overflow-hidden">
-          {logo && <Image source={{ uri: logo }} resizeMode="contain" style={{ position: "absolute", width: 34, height: 34, opacity: 0.35 }} />}
+          {logo && player.pos !== "DEF" && (
+            <Image source={{ uri: logo }} resizeMode="contain" style={{ position: "absolute", width: 34, height: 34, opacity: 0.35 }} />
+          )}
           <Image
-            source={{ uri: `https://sleepercdn.com/content/nfl/players/thumb/${player.playerId}.jpg` }}
-            className="w-11 h-11 rounded-full"
+            source={{ uri: getPlayerPhotoUri(player.playerId, player.pos, player.team) }}
+            resizeMode={player.pos === "DEF" ? "contain" : "cover"}
+            style={player.pos === "DEF" ? { width: 28, height: 28 } : undefined}
+            className={player.pos === "DEF" ? undefined : "w-11 h-11 rounded-full"}
           />
         </View>
         <View className="flex-1 mr-2">
