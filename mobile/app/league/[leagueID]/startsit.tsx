@@ -590,10 +590,10 @@ function PlayerRankCard({ player, onPress }: { player: StartSitPlayer; onPress: 
           </View>
         </View>
         {player.opponent && (
-          <View className="flex-row items-center gap-1.5 bg-white/5 px-2.5 py-1 rounded-full">
-            <Text className="text-gray-400 text-[10px] font-bold">{player.opponent.isHome ? "vs" : "@"}</Text>
+          <View className="flex-row items-center gap-2 bg-white/5 px-3 py-1.5 rounded-full">
+            <Text className="text-gray-400 text-[12px] font-bold">{player.opponent.isHome ? "vs" : "@"}</Text>
             {getTeamLogo(player.opponent.team) && (
-              <Image source={{ uri: getTeamLogo(player.opponent.team)! }} resizeMode="contain" style={{ width: 16, height: 16 }} />
+              <Image source={{ uri: getTeamLogo(player.opponent.team)! }} resizeMode="contain" style={{ width: 22, height: 22 }} />
             )}
           </View>
         )}
