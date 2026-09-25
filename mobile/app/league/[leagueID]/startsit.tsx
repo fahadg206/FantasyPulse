@@ -35,6 +35,33 @@ function formatRank(pos: string, rank: number | null): string {
   return rank === null ? "—" : `${pos}${Math.round(rank)}`;
 }
 
+// Sleeper's real roster_positions slot names run long ("SUPER_FLEX",
+// "WRRB_FLEX") - shortened here so the lineup row has room to breathe.
+const SLOT_LABELS: Record<string, string> = {
+  SUPER_FLEX: "SFLEX",
+  SUPERFLEX: "SFLEX",
+  "QB/RB/WR/TE": "SFLEX",
+  WRRB_FLEX: "FLEX",
+  REC_FLEX: "FLEX",
+};
+function formatSlotLabel(slot: string): string {
+  return SLOT_LABELS[slot] ?? slot;
+}
+
+// Real favicons for each ranking source, via Google's favicon service - a
+// small recognizable mark instead of a text label, so a chip stays legible
+// at a glance no matter how many sources a player has.
+const SOURCE_DOMAINS: Record<string, string> = {
+  Sleeper: "sleeper.com",
+  ESPN: "espn.com",
+  KTC: "keeptradecut.com",
+  FantasyCalc: "fantasycalc.com",
+};
+function getSourceLogo(label: string): string | null {
+  const domain = SOURCE_DOMAINS[label];
+  return domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=64` : null;
+}
+
 export default function StartSitScreen() {
   const { leagueID } = useLocalSearchParams<{ leagueID: string }>();
   const playerDetail = usePlayerDetail();
@@ -295,7 +322,7 @@ export default function StartSitScreen() {
             <>
               <View className="rounded-2xl overflow-hidden border border-brand/25 mb-5">
                 <LinearGradient colors={["#2a0a0e", "#150507"]} className="p-4">
-                  <View className="flex-row items-center justify-between mb-3">
+                  <View className="flex-row items-center justify-between mb-4">
                     <Text className="text-brand text-[10px] font-bold tracking-widest">RECOMMENDED LINEUP</Text>
                     <View className="items-end">
                       <Text style={{ fontVariant: ["tabular-nums"] }} className="text-white text-[18px] font-extrabold">
@@ -304,7 +331,7 @@ export default function StartSitScreen() {
                       <Text className="text-gray-500 text-[9px] font-semibold">PROJECTED PTS</Text>
                     </View>
                   </View>
-                  <View className="gap-1.5">
+                  <View className="gap-2.5">
                     {board.lineup.map((slot, i) => {
                       const p = board.players.find((pl) => pl.playerId === slot.playerId);
                       return (
@@ -480,8 +507,12 @@ function PlayerPickerModal({
 function LineupRow({ slotLabel, player, onPress }: { slotLabel: string; player?: StartSitPlayer; onPress: () => void }) {
   if (!player) {
     return (
-      <View className="flex-row items-center px-3 py-2.5 bg-white/5 rounded-xl opacity-50">
-        <Text className="text-gray-500 text-[10px] font-bold w-[64px]">{slotLabel}</Text>
+      <View className="flex-row items-center px-3.5 py-3 bg-white/5 rounded-xl opacity-50">
+        <View className="w-[50px] mr-3">
+          <Text numberOfLines={1} className="text-gray-500 text-[10px] font-bold">
+            {formatSlotLabel(slotLabel)}
+          </Text>
+        </View>
         <Text className="text-gray-500 text-[12px] italic">Empty</Text>
       </View>
     );
@@ -490,25 +521,27 @@ function LineupRow({ slotLabel, player, onPress }: { slotLabel: string; player?:
   const teamColor = getTeamColor(player.team);
   const logo = getTeamLogo(player.team);
   return (
-    <Pressable onPress={onPress} className="flex-row items-center px-3 py-2.5 bg-white/5 rounded-xl">
-      <Text style={{ color: posColor }} className="text-[10px] font-extrabold w-[64px]">
-        {slotLabel}
-      </Text>
-      <View style={{ backgroundColor: teamColor }} className="w-7 h-7 rounded-full items-center justify-center mr-2.5 overflow-hidden">
+    <Pressable onPress={onPress} className="flex-row items-center px-3.5 py-3 bg-white/5 rounded-xl">
+      <View style={{ backgroundColor: `${posColor}1f` }} className="w-[50px] py-1 rounded-md items-center mr-3">
+        <Text numberOfLines={1} style={{ color: posColor }} className="text-[10px] font-extrabold">
+          {formatSlotLabel(slotLabel)}
+        </Text>
+      </View>
+      <View style={{ backgroundColor: teamColor }} className="w-8 h-8 rounded-full items-center justify-center mr-3 overflow-hidden">
         {logo && (
-          <Image source={{ uri: logo }} resizeMode="contain" style={{ position: "absolute", width: 22, height: 22, opacity: 0.35 }} />
+          <Image source={{ uri: logo }} resizeMode="contain" style={{ position: "absolute", width: 26, height: 26, opacity: 0.35 }} />
         )}
         <Image
           source={{ uri: `https://sleepercdn.com/content/nfl/players/thumb/${player.playerId}.jpg` }}
-          className="w-7 h-7 rounded-full"
+          className="w-8 h-8 rounded-full"
         />
       </View>
-      <Text numberOfLines={1} className="flex-1 text-white text-[13px] font-semibold mr-2">
+      <Text numberOfLines={1} className="flex-1 text-white text-[13px] font-semibold mr-2.5">
         {player.name}
       </Text>
       {player.consensusRank !== null && (
-        <View style={{ backgroundColor: `${posColor}22` }} className="px-2 py-0.5 rounded-md mr-2">
-          <Text style={{ color: posColor }} className="text-[10px] font-extrabold">
+        <View style={{ backgroundColor: `${posColor}22` }} className="px-2 py-1 rounded-md mr-2.5">
+          <Text numberOfLines={1} style={{ color: posColor }} className="text-[10px] font-extrabold">
             {formatRank(player.pos, player.consensusRank)}
           </Text>
         </View>
@@ -566,23 +599,34 @@ function PlayerRankCard({ player, onPress, showStatus = true }: { player: StartS
         )}
       </View>
 
-      <View className="flex-row items-center gap-2 px-3.5 pt-3 pb-3">
-        {player.sources.map((s) => (
-          <View key={s.label} className="flex-1 bg-[#0c0c0e] rounded-xl py-2 items-center">
-            <Text className="text-gray-500 text-[9px] font-bold tracking-wide">{s.label.toUpperCase()}</Text>
-            <Text className="text-white text-[13px] font-bold mt-0.5">{formatRank(player.pos, s.rank)}</Text>
-          </View>
-        ))}
-        <View style={{ borderColor: `${posColor}55` }} className="flex-1 border-2 rounded-xl py-2 items-center">
-          <Text style={{ color: posColor }} className="text-[9px] font-bold tracking-wide">
-            CONSENSUS
+      <View className="flex-row items-center gap-2 px-3.5 pt-3 pb-3 flex-wrap">
+        {player.sources.map((s) => {
+          const logo = getSourceLogo(s.label);
+          return (
+            <View key={s.label} style={{ flexGrow: 1, flexBasis: 64 }} className="bg-[#0c0c0e] rounded-xl py-2 items-center">
+              {logo ? (
+                <Image source={{ uri: logo }} style={{ width: 15, height: 15, borderRadius: 3 }} resizeMode="contain" />
+              ) : (
+                <Text numberOfLines={1} className="text-gray-500 text-[9px] font-bold tracking-wide">
+                  {s.label.toUpperCase()}
+                </Text>
+              )}
+              <Text className="text-white text-[13px] font-bold mt-1">{formatRank(player.pos, s.rank)}</Text>
+            </View>
+          );
+        })}
+        <View style={{ borderColor: `${posColor}55`, flexGrow: 1, flexBasis: 64 }} className="border-2 rounded-xl py-2 items-center">
+          <Text numberOfLines={1} style={{ color: posColor }} className="text-[9px] font-bold tracking-wide">
+            AVG
           </Text>
           <Text style={{ color: posColor }} className="text-[13px] font-extrabold mt-0.5">
             {formatRank(player.pos, player.consensusRank)}
           </Text>
         </View>
-        <View className="flex-1 bg-[#0c0c0e] rounded-xl py-2 items-center">
-          <Text className="text-gray-500 text-[9px] font-bold tracking-wide">PROJ</Text>
+        <View style={{ flexGrow: 1, flexBasis: 64 }} className="bg-[#0c0c0e] rounded-xl py-2 items-center">
+          <Text numberOfLines={1} className="text-gray-500 text-[9px] font-bold tracking-wide">
+            PROJ
+          </Text>
           <Text className="text-white text-[13px] font-bold mt-0.5">{player.projectedPoints.toFixed(1)}</Text>
         </View>
       </View>
