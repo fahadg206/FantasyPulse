@@ -156,6 +156,14 @@ export const backend = {
         console.error("Error sending push notifications:", error);
         return null;
       }),
+
+  // Real ESPN fantasy rankings for one week, trimmed server-side from
+  // ESPN's own ~40MB full-player feed down to just the few hundred
+  // players who actually have real rank/outlook data that week - see
+  // src/pages/api/fetchEspnRankings.js for why this can't happen
+  // client-side.
+  fetchEspnRankings: (season: string | number, week: number): Promise<Record<string, { name: string; rank?: number; outlook?: string }>> =>
+    fetch(`${APP_ORIGIN}/api/fetchEspnRankings?season=${season}&week=${week}`).then((r) => r.json()),
 };
 
 // Firestore collection names + shapes, mirrored from the web app.

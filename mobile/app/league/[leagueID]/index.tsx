@@ -183,6 +183,7 @@ export default function Dashboard() {
   if (!leagueID) return null;
 
   const links: QuickLink[] = [
+    { label: "Start / Sit", icon: "swap-vertical", family: "ion", path: `/league/${leagueID}/startsit` },
     { label: "Standings", icon: "list", family: "ion", path: `/league/${leagueID}/standings` },
     { label: "Schedule", icon: "calendar", family: "feather", path: `/league/${leagueID}/schedule` },
     { label: "Managers", icon: "people", family: "ion", path: `/league/${leagueID}/leaguemanagers` },

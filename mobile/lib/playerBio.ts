@@ -23,6 +23,9 @@ export interface PlayerBio {
   years_exp?: number;
   college?: string;
   status?: string;
+  /** this player's real id on ESPN's own platform - Sleeper's own database carries every major platform's cross-reference id (espn_id, yahoo_id, ...) so matching a player across providers never needs fuzzy name matching. */
+  espn_id?: number;
+  yahoo_id?: number;
 }
 
 export async function getAllPlayersData(): Promise<Record<string, PlayerBio>> {

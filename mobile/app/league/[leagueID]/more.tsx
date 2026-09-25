@@ -73,6 +73,12 @@ export default function More() {
       path: `/league/${leagueID}/strengthofschedule`,
     },
     {
+      label: "Start / Sit",
+      description: "Real expert consensus rankings and your best lineup, one tap away",
+      icon: <Ionicons name="swap-vertical" size={20} color="#af1222" />,
+      path: `/league/${leagueID}/startsit`,
+    },
+    {
       label: "Trade Calculator",
       description: "Check if a trade is fair before you make it",
       icon: <Feather name="repeat" size={20} color="#af1222" />,
