@@ -1,16 +1,25 @@
-// Real multi-source start/sit consensus - two real, live, verified expert
-// sources (Sleeper's own weekly projections, already the projection
-// engine behind every other part of this app, and ESPN's public fantasy
-// rankings feed, cross-referenced player-by-player via Sleeper's own
-// espn_id field, no fuzzy name matching), each turned into a real
-// positional rank, averaged into one consensus number - same idea a real
-// "expert consensus rankings" page uses, just built from sources this app
-// can actually verify rather than guessed at. FantasyPros and RotoBaller
-// both gate this exact data behind a paid/approved API this app doesn't
-// have access to - deliberately not scraped around.
+// Real multi-source start/sit consensus - four real, live, verified
+// sources, each turned into a real positional rank and averaged into one
+// consensus number, the same idea a real "expert consensus rankings" page
+// uses, just built entirely from sources this app can actually verify
+// rather than guessed at:
+//   - Sleeper: this app's own real weekly projections, ranked leaguewide
+//   - ESPN: ESPN's public fantasy rankings feed (espn_id, with a
+//     normalized-name fallback for the players Sleeper doesn't cross-link)
+//   - KTC: this app's own real KeepTradeCut market values (the same data
+//     that powers Power Rankings and the Trade Calculator), ranked by
+//     position - dynasty leagues only, where a trade-value market means
+//     something
+//   - FantasyCalc: FantasyCalc's own public values API, keyed directly by
+//     Sleeper ID (no fuzzy matching needed) and pulled in the league's own
+//     format (dynasty/redraft, 1QB/superflex) - works for every league
+// FantasyPros and RotoBaller both gate this exact kind of data behind a
+// paid/approved API this app doesn't have access to - deliberately not
+// scraped around.
 
 import { getAllPlayersData } from "./playerBio";
 import { getEspnWeeklyData, normalizePlayerName } from "./espnFantasy";
+import { getFantasyCalcIndex } from "./fantasyCalc";
 import { computeOptimalLineupAssignment, LineupSlotAssignment } from "./tradeAnalysis";
 import { computeAdjustedValue, RawPlayerValue, LeagueValueSettings } from "./playerValue";
 
@@ -27,13 +36,13 @@ export interface StartSitPlayer {
   /** Sleeper's own real weekly projection - what actually drives the recommended lineup below */
   projectedPoints: number;
   sources: RankSource[];
-  /** average of every source's positional rank for this player - null when no source has data for them (e.g. a player neither feed considers relevant this week) */
+  /** average of every source's positional rank for this player - null when no source has data for them (e.g. a player none of the feeds consider relevant this week) */
   consensusRank: number | null;
   /** ESPN's own real written take for this player this week, when they've published one */
   outlook?: string;
-  /** real KTC dynasty asset value, dynasty leagues only - shown as context, not folded into the start/sit consensus (it measures long-term value, not this week's matchup) */
+  /** real KTC dynasty asset value, dynasty leagues only - shown as context alongside (not instead of) the KTC rank source below */
   dynastyValue?: number;
-  /** the starting slot this player landed in the recommended lineup, if any - undefined means the board has them on the bench */
+  /** the starting slot this player landed in the recommended lineup, if any - undefined means the board has them on the bench. Never set for the arbitrary-player comparison path, since there's no roster/lineup to place them into. */
   recommendedSlot?: string;
 }
 
@@ -42,28 +51,36 @@ export interface StartSitBoard {
   players: StartSitPlayer[];
 }
 
-export async function buildStartSitBoard(params: {
-  rosterPlayerIds: string[];
-  startingSlots: string[];
+interface ScoringContext {
   week: number;
   season: string;
-  /** from backend.fetchPlayers(leagueId) - fn/ln/pos/t/wi for every player relevant to this league */
   playersData: Record<string, any>;
-  isDynasty: boolean;
+  leagueValueSettings: LeagueValueSettings;
   valuesBySleeperId?: Record<string, RawPlayerValue>;
-  leagueValueSettings?: LeagueValueSettings;
-}): Promise<StartSitBoard> {
-  const { rosterPlayerIds, startingSlots, week, season, playersData, isDynasty, valuesBySleeperId, leagueValueSettings } = params;
+}
 
-  const [allPlayers, espnIndex] = await Promise.all([
+interface ScoringIndex {
+  sleeperRankByPlayer: Record<string, number>;
+  projByPlayer: Record<string, number>;
+  espnAllPlayers: Record<string, { espn_id?: number }>;
+  espnIndex: Awaited<ReturnType<typeof getEspnWeeklyData>>;
+  ktcRankByPlayer: Record<string, number>;
+  fantasyCalcIndex: Map<string, { positionRank: number }>;
+}
+
+async function buildScoringIndex(ctx: ScoringContext): Promise<ScoringIndex> {
+  const { week, season, playersData, leagueValueSettings, valuesBySleeperId } = ctx;
+
+  const [espnAllPlayers, espnIndex, fantasyCalcIndex] = await Promise.all([
     getAllPlayersData().catch(() => ({}) as Record<string, { espn_id?: number }>),
     getEspnWeeklyData(season, week).catch(() => ({ byId: new Map(), byName: new Map() })),
+    getFantasyCalcIndex(leagueValueSettings.isDynasty, leagueValueSettings.isSuperflex).catch(() => new Map()),
   ]);
 
   // Sleeper's own positional rank - the same real weekly projection this
   // app already uses everywhere else, ranked against every real player at
-  // that position leaguewide (not just this one roster), so "rank 4 at
-  // RB" means the same thing here as it would anywhere else in the app.
+  // that position leaguewide (not just one roster), so "rank 4 at RB"
+  // means the same thing here as anywhere else in the app.
   const projByPlayer: Record<string, number> = {};
   const posGroups: Record<string, string[]> = {};
   for (const pid in playersData) {
@@ -80,54 +97,107 @@ export async function buildStartSitBoard(params: {
     });
   }
 
+  // KTC's own real market value, ranked by position across every player
+  // this app has a value for (not just one roster) - the same real crawl
+  // that already powers Power Rankings and the Trade Calculator, just
+  // turned into a rank instead of a raw number.
+  const ktcRankByPlayer: Record<string, number> = {};
+  if (valuesBySleeperId) {
+    const ktcGroups: Record<string, { pid: string; value: number }[]> = {};
+    for (const pid in valuesBySleeperId) {
+      const raw = valuesBySleeperId[pid];
+      const pos = raw?.Position;
+      if (!pos) continue;
+      const value = computeAdjustedValue(raw, leagueValueSettings);
+      if (!value) continue;
+      (ktcGroups[pos] ??= []).push({ pid, value });
+    }
+    for (const pos in ktcGroups) {
+      ktcGroups[pos]
+        .sort((a, b) => b.value - a.value)
+        .forEach((entry, i) => {
+          ktcRankByPlayer[entry.pid] = i + 1;
+        });
+    }
+  }
+
+  return { sleeperRankByPlayer, projByPlayer, espnAllPlayers, espnIndex, ktcRankByPlayer, fantasyCalcIndex };
+}
+
+function scorePlayer(pid: string, playersData: Record<string, any>, idx: ScoringIndex, isDynasty: boolean): StartSitPlayer {
+  const p = playersData[pid];
+  const name = `${p?.fn ?? ""} ${p?.ln ?? ""}`.trim() || pid;
+  const pos = p?.pos ?? "";
+  const team = p?.t;
+
+  const sources: RankSource[] = [];
+  if (idx.sleeperRankByPlayer[pid] !== undefined) sources.push({ label: "Sleeper", rank: idx.sleeperRankByPlayer[pid] });
+
+  // Sleeper's own espn_id cross-reference is the fast, exact path, but
+  // it's genuinely missing for plenty of current relevant players
+  // (confirmed live) - falling back to a normalized name match against
+  // the same ESPN response is what actually gets real coverage.
+  const espnId = idx.espnAllPlayers[pid]?.espn_id;
+  const espnEntry = (espnId !== undefined ? idx.espnIndex.byId.get(espnId) : undefined) ?? idx.espnIndex.byName.get(normalizePlayerName(name));
+  if (espnEntry?.rank !== undefined) sources.push({ label: "ESPN", rank: espnEntry.rank });
+
+  // KTC - dynasty leagues only, where a trade-value market actually means something.
+  if (isDynasty && idx.ktcRankByPlayer[pid] !== undefined) {
+    sources.push({ label: "KTC", rank: idx.ktcRankByPlayer[pid] });
+  }
+
+  // FantasyCalc - keyed directly by Sleeper ID, works for both formats.
+  const fcEntry = idx.fantasyCalcIndex.get(pid);
+  if (fcEntry) sources.push({ label: "FantasyCalc", rank: fcEntry.positionRank });
+
+  const consensusRank =
+    sources.length > 0 ? Math.round((sources.reduce((s, r) => s + r.rank, 0) / sources.length) * 10) / 10 : null;
+
+  return {
+    playerId: pid,
+    name,
+    pos,
+    team,
+    projectedPoints: idx.projByPlayer[pid] ?? 0,
+    sources,
+    consensusRank,
+    outlook: espnEntry?.outlook,
+  };
+}
+
+export async function buildStartSitBoard(params: {
+  rosterPlayerIds: string[];
+  startingSlots: string[];
+  week: number;
+  season: string;
+  /** from backend.fetchPlayers(leagueId) - fn/ln/pos/t/wi for every fantasy-relevant player in the NFL, not just this roster */
+  playersData: Record<string, any>;
+  isDynasty: boolean;
+  leagueValueSettings: LeagueValueSettings;
+  valuesBySleeperId?: Record<string, RawPlayerValue>;
+}): Promise<StartSitBoard> {
+  const { rosterPlayerIds, startingSlots, week, season, playersData, isDynasty, leagueValueSettings, valuesBySleeperId } = params;
+
+  const idx = await buildScoringIndex({ week, season, playersData, leagueValueSettings, valuesBySleeperId });
+
   const posById: Record<string, string | undefined> = {};
   const pointsById: Record<string, number> = {};
   for (const pid of rosterPlayerIds) {
     posById[pid] = playersData[pid]?.pos;
-    pointsById[pid] = projByPlayer[pid] ?? 0;
+    pointsById[pid] = idx.projByPlayer[pid] ?? 0;
   }
   const lineup = computeOptimalLineupAssignment(rosterPlayerIds, pointsById, posById, startingSlots);
   const slotByPlayerId = new Map<string, string>();
   for (const a of lineup) if (a.playerId) slotByPlayerId.set(a.playerId, a.slot);
 
   const players: StartSitPlayer[] = rosterPlayerIds.map((pid) => {
-    const p = playersData[pid];
-    const name = `${p?.fn ?? ""} ${p?.ln ?? ""}`.trim() || pid;
-    const pos = p?.pos ?? "";
-    const team = p?.t;
-
-    const sources: RankSource[] = [];
-    if (sleeperRankByPlayer[pid] !== undefined) sources.push({ label: "Sleeper", rank: sleeperRankByPlayer[pid] });
-
-    // Sleeper's own espn_id cross-reference is the fast, exact path, but
-    // it's genuinely missing for plenty of current relevant players
-    // (confirmed live) - falling back to a normalized name match against
-    // the same ESPN response is what actually gets real coverage.
-    const espnId = allPlayers[pid]?.espn_id;
-    const espnEntry = (espnId !== undefined ? espnIndex.byId.get(espnId) : undefined) ?? espnIndex.byName.get(normalizePlayerName(name));
-    if (espnEntry?.rank !== undefined) sources.push({ label: "ESPN", rank: espnEntry.rank });
-
-    const consensusRank =
-      sources.length > 0 ? Math.round((sources.reduce((s, r) => s + r.rank, 0) / sources.length) * 10) / 10 : null;
-
+    const scored = scorePlayer(pid, playersData, idx, isDynasty);
     let dynastyValue: number | undefined;
     if (isDynasty && valuesBySleeperId && leagueValueSettings) {
       const raw = valuesBySleeperId[pid];
       if (raw) dynastyValue = computeAdjustedValue(raw, leagueValueSettings);
     }
-
-    return {
-      playerId: pid,
-      name,
-      pos,
-      team,
-      projectedPoints: pointsById[pid],
-      sources,
-      consensusRank,
-      outlook: espnEntry?.outlook,
-      dynastyValue,
-      recommendedSlot: slotByPlayerId.get(pid),
-    };
+    return { ...scored, dynastyValue, recommendedSlot: slotByPlayerId.get(pid) };
   });
 
   // Starters (in their assigned slot's order) first, then the bench sorted
@@ -146,4 +216,33 @@ export async function buildStartSitBoard(params: {
   });
 
   return { lineup, players };
+}
+
+/**
+ * The same real multi-source scoring, for any players at all - not scoped
+ * to one roster or one lineup. Powers the "compare any two players" picker:
+ * pick anyone in the league, real or hypothetical matchup, and see the same
+ * Sleeper/ESPN/KTC/FantasyCalc breakdown side by side.
+ */
+export async function scoreArbitraryPlayers(params: {
+  playerIds: string[];
+  week: number;
+  season: string;
+  playersData: Record<string, any>;
+  isDynasty: boolean;
+  leagueValueSettings: LeagueValueSettings;
+  valuesBySleeperId?: Record<string, RawPlayerValue>;
+}): Promise<StartSitPlayer[]> {
+  const { playerIds, week, season, playersData, isDynasty, leagueValueSettings, valuesBySleeperId } = params;
+  const idx = await buildScoringIndex({ week, season, playersData, leagueValueSettings, valuesBySleeperId });
+
+  return playerIds.map((pid) => {
+    const scored = scorePlayer(pid, playersData, idx, isDynasty);
+    let dynastyValue: number | undefined;
+    if (isDynasty && valuesBySleeperId) {
+      const raw = valuesBySleeperId[pid];
+      if (raw) dynastyValue = computeAdjustedValue(raw, leagueValueSettings);
+    }
+    return { ...scored, dynastyValue };
+  });
 }

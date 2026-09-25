@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
-import { View, Text, Image, Pressable, ScrollView, ActivityIndicator, RefreshControl } from "react-native";
+import { useEffect, useMemo, useState } from "react";
+import { View, Text, Image, Pressable, ScrollView, ActivityIndicator, RefreshControl, Modal, TextInput, FlatList } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { sleeper, backend } from "../../../lib/api";
 import { getLeagueValueSettings, RawPlayerValue, LeagueValueSettings } from "../../../lib/playerValue";
-import { buildStartSitBoard, StartSitBoard, StartSitPlayer } from "../../../lib/startSit";
+import { buildStartSitBoard, scoreArbitraryPlayers, StartSitBoard, StartSitPlayer } from "../../../lib/startSit";
 import { getTeamColor, getTeamLogo, getPositionColor } from "../../../lib/nflTeams";
 import { usePlayerDetail } from "../../../components/PlayerDetailProvider";
 
@@ -18,8 +18,21 @@ interface TeamOption {
   rosterPlayerIds: string[];
 }
 
+interface LeagueMeta {
+  season: string;
+  startingSlots: string[];
+  settings: LeagueValueSettings;
+  playersData: Record<string, any>;
+  valuesBySleeperId?: Record<string, RawPlayerValue>;
+}
+
 function formatValue(v: number): string {
   return Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v));
+}
+
+/** "#4" -> "QB4" - a positional rank reads the same way real rankings pages label it. */
+function formatRank(pos: string, rank: number | null): string {
+  return rank === null ? "—" : `${pos}${Math.round(rank)}`;
 }
 
 export default function StartSitScreen() {
@@ -30,12 +43,19 @@ export default function StartSitScreen() {
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [week, setWeek] = useState(1);
   const [loadingTeams, setLoadingTeams] = useState(true);
+  const [leagueMeta, setLeagueMeta] = useState<LeagueMeta | null>(null);
   const [loadingBoard, setLoadingBoard] = useState(false);
   const [board, setBoard] = useState<StartSitBoard | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
 
-  // League + team list, once.
+  // Any-two-players comparison, independent of the selected roster.
+  const [comparePlayers, setComparePlayers] = useState<[string | null, string | null]>([null, null]);
+  const [compareResults, setCompareResults] = useState<StartSitPlayer[] | null>(null);
+  const [comparing, setComparing] = useState(false);
+  const [pickerSlot, setPickerSlot] = useState<0 | 1 | null>(null);
+
+  // Team list, once.
   useEffect(() => {
     if (!leagueID) return;
     let cancelled = false;
@@ -76,13 +96,11 @@ export default function StartSitScreen() {
     };
   }, [leagueID]);
 
-  // The board itself, rebuilt whenever the selected team (or a refresh) changes.
+  // League-wide data (every fantasy-relevant player, not just one roster) -
+  // shared by the recommended lineup below and the any-two-players picker.
   useEffect(() => {
-    if (!leagueID || !selectedUserId || week === 0) return;
-    const team = teams.find((t) => t.userId === selectedUserId);
-    if (!team) return;
+    if (!leagueID) return;
     let cancelled = false;
-    setLoadingBoard(true);
 
     (async () => {
       try {
@@ -103,15 +121,37 @@ export default function StartSitScreen() {
           (p: string) => !["BN", "IR", "TAXI"].includes(p)
         );
 
+        setLeagueMeta({ season: league.season, startingSlots, settings, playersData, valuesBySleeperId });
+      } catch (error) {
+        console.error("Error loading start/sit league data:", error);
+        if (!cancelled) setLeagueMeta(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [leagueID, refreshKey]);
+
+  // The recommended-lineup board, rebuilt whenever the selected team, week, or league data changes.
+  useEffect(() => {
+    if (!leagueMeta || !selectedUserId || week === 0) return;
+    const team = teams.find((t) => t.userId === selectedUserId);
+    if (!team) return;
+    let cancelled = false;
+    setLoadingBoard(true);
+
+    (async () => {
+      try {
         const result = await buildStartSitBoard({
           rosterPlayerIds: team.rosterPlayerIds,
-          startingSlots,
+          startingSlots: leagueMeta.startingSlots,
           week,
-          season: league.season,
-          playersData,
-          isDynasty: settings.isDynasty,
-          valuesBySleeperId,
-          leagueValueSettings: settings,
+          season: leagueMeta.season,
+          playersData: leagueMeta.playersData,
+          isDynasty: leagueMeta.settings.isDynasty,
+          leagueValueSettings: leagueMeta.settings,
+          valuesBySleeperId: leagueMeta.valuesBySleeperId,
         });
         if (!cancelled) setBoard(result);
       } catch (error) {
@@ -128,8 +168,41 @@ export default function StartSitScreen() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leagueID, selectedUserId, week, teams, refreshKey]);
+  }, [selectedUserId, leagueMeta, week, teams]);
+
+  // The two-player comparison, whenever both slots are filled.
+  useEffect(() => {
+    if (!leagueMeta || comparePlayers[0] == null || comparePlayers[1] == null) {
+      setCompareResults(null);
+      return;
+    }
+    let cancelled = false;
+    setComparing(true);
+
+    (async () => {
+      try {
+        const results = await scoreArbitraryPlayers({
+          playerIds: [comparePlayers[0]!, comparePlayers[1]!],
+          week,
+          season: leagueMeta.season,
+          playersData: leagueMeta.playersData,
+          isDynasty: leagueMeta.settings.isDynasty,
+          leagueValueSettings: leagueMeta.settings,
+          valuesBySleeperId: leagueMeta.valuesBySleeperId,
+        });
+        if (!cancelled) setCompareResults(results);
+      } catch (error) {
+        console.error("Error comparing players:", error);
+        if (!cancelled) setCompareResults(null);
+      } finally {
+        if (!cancelled) setComparing(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [comparePlayers, leagueMeta, week]);
 
   if (!leagueID) return null;
 
@@ -153,8 +226,7 @@ export default function StartSitScreen() {
       <Text className="text-[11px] font-bold tracking-widest text-brand mb-1">START / SIT</Text>
       <Text className="text-white text-[21px] font-bold">Set Your Lineup</Text>
       <Text className="text-gray-500 text-[12px] mt-1.5">
-        Real Sleeper projections and ESPN's own weekly expert rankings, averaged into one consensus for every player
-        on the roster - Week {week}.
+        Sleeper, ESPN, KTC, and FantasyCalc rankings, averaged into one consensus for every player - Week {week}.
       </Text>
 
       {loadingTeams ? (
@@ -200,14 +272,21 @@ export default function StartSitScreen() {
                   <View className="gap-1.5">
                     {board.lineup.map((slot, i) => {
                       const p = board.players.find((pl) => pl.playerId === slot.playerId);
-                      return <LineupRow key={`${slot.slot}-${i}`} slotLabel={slot.slot} player={p} onPress={() => p && playerDetail?.openPlayer({ playerId: p.playerId, name: p.name, position: p.pos, team: p.team })} />;
+                      return (
+                        <LineupRow
+                          key={`${slot.slot}-${i}`}
+                          slotLabel={slot.slot}
+                          player={p}
+                          onPress={() => p && playerDetail?.openPlayer({ playerId: p.playerId, name: p.name, position: p.pos, team: p.team })}
+                        />
+                      );
                     })}
                   </View>
                 </LinearGradient>
               </View>
 
               <Text className="text-gray-500 text-[11px] font-bold tracking-widest mb-3">FULL RANKINGS BREAKDOWN</Text>
-              <View className="gap-2.5">
+              <View className="gap-2.5 mb-6">
                 {board.players.map((p) => (
                   <PlayerRankCard
                     key={p.playerId}
@@ -218,9 +297,183 @@ export default function StartSitScreen() {
               </View>
             </>
           )}
+
+          <View className="rounded-2xl border border-white/10 bg-[#141416] p-4">
+            <Text className="text-gray-500 text-[11px] font-bold tracking-widest mb-1">COMPARE ANY TWO PLAYERS</Text>
+            <Text className="text-gray-600 text-[11px] mb-3">Not just your roster - look up any two players in the league.</Text>
+            <View className="flex-row items-center gap-2">
+              <ComparePickerSlot
+                player={comparePlayers[0] ? leagueMeta?.playersData[comparePlayers[0]] : undefined}
+                playerId={comparePlayers[0]}
+                onPress={() => setPickerSlot(0)}
+                onClear={() => setComparePlayers(([, b]) => [null, b])}
+              />
+              <Text className="text-gray-600 text-[11px] font-extrabold">VS</Text>
+              <ComparePickerSlot
+                player={comparePlayers[1] ? leagueMeta?.playersData[comparePlayers[1]] : undefined}
+                playerId={comparePlayers[1]}
+                onPress={() => setPickerSlot(1)}
+                onClear={() => setComparePlayers(([a]) => [a, null])}
+              />
+            </View>
+
+            {comparing && <ActivityIndicator color="#af1222" className="mt-5" />}
+
+            {!comparing && compareResults && (
+              <View className="gap-2.5 mt-4">
+                {compareResults.map((p) => (
+                  <PlayerRankCard
+                    key={p.playerId}
+                    player={p}
+                    showStatus={false}
+                    onPress={() => playerDetail?.openPlayer({ playerId: p.playerId, name: p.name, position: p.pos, team: p.team })}
+                  />
+                ))}
+              </View>
+            )}
+          </View>
         </>
       )}
+
+      <PlayerPickerModal
+        visible={pickerSlot !== null}
+        playersData={leagueMeta?.playersData ?? {}}
+        week={week}
+        excludeId={pickerSlot === 0 ? comparePlayers[1] : comparePlayers[0]}
+        onClose={() => setPickerSlot(null)}
+        onPick={(pid) => {
+          if (pickerSlot === null) return;
+          setComparePlayers((prev) => {
+            const next: [string | null, string | null] = [...prev];
+            next[pickerSlot] = pid;
+            return next;
+          });
+          setPickerSlot(null);
+        }}
+      />
     </ScrollView>
+  );
+}
+
+function ComparePickerSlot({
+  player,
+  playerId,
+  onPress,
+  onClear,
+}: {
+  player?: any;
+  playerId: string | null;
+  onPress: () => void;
+  onClear: () => void;
+}) {
+  if (!player || !playerId) {
+    return (
+      <Pressable onPress={onPress} className="flex-1 flex-row items-center justify-center gap-1.5 border border-dashed border-white/15 rounded-xl py-3">
+        <Feather name="plus" size={13} color="#6b7280" />
+        <Text className="text-gray-500 text-[12px] font-semibold">Pick a player</Text>
+      </Pressable>
+    );
+  }
+  const color = getTeamColor(player.t);
+  return (
+    <Pressable onPress={onPress} style={{ backgroundColor: color }} className="flex-1 flex-row items-center gap-2 rounded-xl py-2 px-2.5">
+      <Image source={{ uri: `https://sleepercdn.com/content/nfl/players/thumb/${playerId}.jpg` }} className="w-7 h-7 rounded-full bg-white/20" />
+      <Text numberOfLines={1} className="flex-1 text-white text-[12px] font-bold">
+        {player.fn} {player.ln}
+      </Text>
+      <Pressable onPress={onClear} hitSlop={8}>
+        <Feather name="x" size={13} color="#ffffffaa" />
+      </Pressable>
+    </Pressable>
+  );
+}
+
+function PlayerPickerModal({
+  visible,
+  playersData,
+  week,
+  excludeId,
+  onClose,
+  onPick,
+}: {
+  visible: boolean;
+  playersData: Record<string, any>;
+  week: number;
+  excludeId?: string | null;
+  onClose: () => void;
+  onPick: (playerId: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+
+  useEffect(() => {
+    if (!visible) setQuery("");
+  }, [visible]);
+
+  const results = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const ids = Object.keys(playersData).filter((pid) => {
+      if (pid === excludeId) return false;
+      if (!q) return true;
+      const p = playersData[pid];
+      return `${p?.fn ?? ""} ${p?.ln ?? ""}`.toLowerCase().includes(q);
+    });
+    ids.sort((a, b) => {
+      const pa = playersData[a];
+      const pb = playersData[b];
+      if (q) return `${pa?.fn ?? ""} ${pa?.ln ?? ""}`.localeCompare(`${pb?.fn ?? ""} ${pb?.ln ?? ""}`);
+      return parseFloat(pb?.wi?.[String(week)]?.p || "0") - parseFloat(pa?.wi?.[String(week)]?.p || "0");
+    });
+    return ids.slice(0, 40);
+  }, [playersData, query, excludeId, week]);
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable className="flex-1 bg-black/50 justify-end" onPress={onClose}>
+        <Pressable className="bg-[#141416] rounded-t-3xl p-4" style={{ maxHeight: "75%" }} onPress={(e) => e.stopPropagation()}>
+          <View className="w-10 h-1 rounded-full bg-white/20 self-center mb-3" />
+          <Text className="text-white text-[15px] font-bold mb-3">Pick a player</Text>
+          <View className="flex-row items-center gap-2 bg-white/5 rounded-xl px-3 py-2.5 mb-3">
+            <Feather name="search" size={14} color="#6b7280" />
+            <TextInput
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search any player…"
+              placeholderTextColor="#6b7280"
+              className="flex-1 text-white text-[13px]"
+              autoFocus
+            />
+          </View>
+          <FlatList
+            data={results}
+            keyExtractor={(pid) => pid}
+            renderItem={({ item: pid }) => {
+              const p = playersData[pid];
+              const color = getTeamColor(p?.t);
+              const posColor = getPositionColor(p?.pos);
+              return (
+                <Pressable onPress={() => onPick(pid)} className="flex-row items-center gap-3 py-2.5 border-b border-white/5">
+                  <View style={{ backgroundColor: color }} className="w-9 h-9 rounded-full overflow-hidden items-center justify-center">
+                    <Image source={{ uri: `https://sleepercdn.com/content/nfl/players/thumb/${pid}.jpg` }} className="w-9 h-9 rounded-full" />
+                  </View>
+                  <View className="flex-1">
+                    <Text className="text-white text-[13px] font-semibold">
+                      {p?.fn} {p?.ln}
+                    </Text>
+                    <View className="flex-row items-center gap-1.5 mt-0.5">
+                      <Text style={{ color: posColor }} className="text-[10px] font-bold">
+                        {p?.pos}
+                      </Text>
+                      <Text className="text-gray-500 text-[10px]">{p?.t ?? "FA"}</Text>
+                    </View>
+                  </View>
+                </Pressable>
+              );
+            }}
+            ListEmptyComponent={<Text className="text-gray-500 text-[12px] text-center py-6">No players found</Text>}
+          />
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -249,7 +502,7 @@ function LineupRow({ slotLabel, player, onPress }: { slotLabel: string; player?:
       {player.consensusRank !== null && (
         <View style={{ backgroundColor: `${posColor}22` }} className="px-2 py-0.5 rounded-md mr-2">
           <Text style={{ color: posColor }} className="text-[10px] font-extrabold">
-            #{player.consensusRank}
+            {formatRank(player.pos, player.consensusRank)}
           </Text>
         </View>
       )}
@@ -260,50 +513,53 @@ function LineupRow({ slotLabel, player, onPress }: { slotLabel: string; player?:
   );
 }
 
-function PlayerRankCard({ player, onPress }: { player: StartSitPlayer; onPress: () => void }) {
+function PlayerRankCard({ player, onPress, showStatus = true }: { player: StartSitPlayer; onPress: () => void; showStatus?: boolean }) {
   const posColor = getPositionColor(player.pos);
   const teamColor = getTeamColor(player.team);
   const logo = getTeamLogo(player.team);
   const isStarting = player.recommendedSlot !== undefined;
 
   return (
-    <Pressable
-      onPress={onPress}
-      style={{ borderColor: isStarting ? `${posColor}44` : "rgba(255,255,255,0.1)" }}
-      className="bg-[#141416] border rounded-2xl overflow-hidden"
-    >
-      <View className="flex-row items-center px-3.5 pt-3.5">
-        <View style={{ backgroundColor: teamColor }} className="w-11 h-11 rounded-full items-center justify-center mr-3 overflow-hidden">
-          {logo && <Image source={{ uri: logo }} resizeMode="contain" style={{ position: "absolute", width: 34, height: 34, opacity: 0.35 }} />}
+    <Pressable onPress={onPress} className="bg-[#141416] border border-white/10 rounded-2xl overflow-hidden">
+      {/* Team-color header, matching PlayerCard's established look - the logo is
+          bled large and faded into the background, not a small badge. */}
+      <View style={{ backgroundColor: teamColor }} className="overflow-hidden">
+        {logo && (
+          <Image
+            source={{ uri: logo }}
+            resizeMode="contain"
+            style={{ position: "absolute", width: 120, height: 120, opacity: 0.32, right: -20, top: -24 }}
+          />
+        )}
+        <View className="flex-row items-center px-3.5 py-3">
           <Image
             source={{ uri: `https://sleepercdn.com/content/nfl/players/thumb/${player.playerId}.jpg` }}
-            className="w-11 h-11 rounded-full"
+            className="w-11 h-11 rounded-full bg-white/20"
           />
-        </View>
-        <View className="flex-1 mr-2">
-          <Text numberOfLines={1} className="text-white font-bold text-[14px]">
-            {player.name}
-          </Text>
-          <View className="flex-row items-center gap-1.5 mt-0.5">
-            <View style={{ backgroundColor: posColor }} className="px-1.5 py-0.5 rounded">
-              <Text className="text-white text-[9px] font-extrabold">{player.pos}</Text>
+          <View className="flex-1 ml-3 mr-2">
+            <Text numberOfLines={1} className="text-white font-bold text-[14px]">
+              {player.name}
+            </Text>
+            <View className="flex-row items-center gap-1.5 mt-0.5">
+              <Text className="text-white/85 text-[11px] font-semibold">
+                {player.pos}
+                {player.team ? ` · ${player.team}` : ""}
+              </Text>
+              {player.dynastyValue !== undefined && (
+                <View className="flex-row items-center gap-0.5">
+                  <Feather name="trending-up" size={9} color="#fde047" />
+                  <Text className="text-yellow-300 text-[10px] font-bold">{formatValue(player.dynastyValue)}</Text>
+                </View>
+              )}
             </View>
-            <Text className="text-gray-500 text-[10px] font-semibold">{player.team ?? "FA"}</Text>
-            {player.dynastyValue !== undefined && (
-              <View className="flex-row items-center gap-0.5">
-                <Feather name="trending-up" size={9} color="#eab308" />
-                <Text className="text-yellow-500 text-[10px] font-bold">{formatValue(player.dynastyValue)}</Text>
-              </View>
-            )}
           </View>
-        </View>
-        <View
-          style={{ backgroundColor: isStarting ? "#4ade8022" : "#6b728022" }}
-          className="px-2.5 py-1 rounded-full"
-        >
-          <Text style={{ color: isStarting ? "#4ade80" : "#9ca3af" }} className="text-[10px] font-extrabold">
-            {isStarting ? player.recommendedSlot : "BENCH"}
-          </Text>
+          {showStatus && (
+            <View className="bg-black/30 px-2.5 py-1 rounded-full">
+              <Text style={{ color: isStarting ? "#4ade80" : "#ffffffb3" }} className="text-[10px] font-extrabold">
+                {isStarting ? player.recommendedSlot : "BENCH"}
+              </Text>
+            </View>
+          )}
         </View>
       </View>
 
@@ -311,7 +567,7 @@ function PlayerRankCard({ player, onPress }: { player: StartSitPlayer; onPress: 
         {player.sources.map((s) => (
           <View key={s.label} className="flex-1 bg-[#0c0c0e] rounded-xl py-2 items-center">
             <Text className="text-gray-500 text-[9px] font-bold tracking-wide">{s.label.toUpperCase()}</Text>
-            <Text className="text-white text-[13px] font-bold mt-0.5">#{s.rank}</Text>
+            <Text className="text-white text-[13px] font-bold mt-0.5">{formatRank(player.pos, s.rank)}</Text>
           </View>
         ))}
         <View style={{ borderColor: `${posColor}55` }} className="flex-1 border-2 rounded-xl py-2 items-center">
@@ -319,7 +575,7 @@ function PlayerRankCard({ player, onPress }: { player: StartSitPlayer; onPress: 
             CONSENSUS
           </Text>
           <Text style={{ color: posColor }} className="text-[13px] font-extrabold mt-0.5">
-            {player.consensusRank !== null ? `#${player.consensusRank}` : "—"}
+            {formatRank(player.pos, player.consensusRank)}
           </Text>
         </View>
         <View className="flex-1 bg-[#0c0c0e] rounded-xl py-2 items-center">
