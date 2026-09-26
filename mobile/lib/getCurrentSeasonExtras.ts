@@ -4,6 +4,10 @@ import { computePowerRankings, PowerRankingResult } from "./powerRankings";
 
 export interface CurrentSeasonExtras {
   tier: PowerRankingResult | null;
+  /** every manager's own result from the same power-rankings pass, not
+   * just the requested one - lets a caller show a full "everyone ranked"
+   * leaderboard instead of just this one manager's rank. */
+  allRankings: PowerRankingResult[];
   /** picks-traded-flow, roster age, rookie-on-roster, and recently-acquired
    * only mean anything in a dynasty league - a redraft roster resets every
    * offseason, so none of that is real signal there. Callers gate their
@@ -48,6 +52,7 @@ export async function getCurrentSeasonExtras(
   const myRoster = rostersRes.data.find((r: any) => r.owner_id === managerUserId);
 
   let tier: PowerRankingResult | null = null;
+  let allRankings: PowerRankingResult[] = [];
   try {
     let playerValuesBySleeperId: Record<string, any> = {};
     if (settings.isDynasty) {
@@ -76,6 +81,7 @@ export async function getCurrentSeasonExtras(
         }, 0),
     });
     tier = rankings.find((r) => r.userId === managerUserId) || null;
+    allRankings = rankings;
   } catch (error) {
     console.error("Error computing tier for GM scout:", error);
   }
@@ -142,5 +148,5 @@ export async function getCurrentSeasonExtras(
     }
   }
 
-  return { tier, isDynasty: settings.isDynasty, avgRosterAge, rookieOnRoster, recentlyAcquired };
+  return { tier, allRankings, isDynasty: settings.isDynasty, avgRosterAge, rookieOnRoster, recentlyAcquired };
 }

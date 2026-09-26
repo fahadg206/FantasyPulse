@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { View, Text, Image, Pressable, ScrollView, ActivityIndicator } from "react-native";
+import { View, Text, Image, Pressable, ScrollView, ActivityIndicator, Modal, FlatList } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import { sleeper, backend } from "../../../lib/api";
@@ -31,6 +31,19 @@ type WeekResult = {
   // Kabo" always matches Kabo's own "vs [that manager]" for the same week.
   isHome: boolean;
 };
+
+interface LeaderboardRow {
+  userId: string;
+  name: string;
+  avatar: any;
+  value: string;
+}
+
+interface LeaderboardState {
+  title: string;
+  subtitle: string;
+  rows: LeaderboardRow[];
+}
 
 const RESULT_COLOR: Record<WeekResult["result"], string> = {
   win: "#16a34a",
@@ -225,6 +238,44 @@ export default function LeagueManagers() {
   );
   const results = weeklyResults[selectedId ?? ""] ?? [];
 
+  const [leaderboard, setLeaderboard] = useState<LeaderboardState | null>(null);
+
+  // Every manager's own current-season power-rankings result, from the
+  // same pass that already computed the selected manager's tier - just
+  // sorted and displayed in full instead of picked down to one row.
+  const showPowerLeaderboard = (which: "rank" | "starterRank") => {
+    const rankings = currentExtras?.allRankings ?? [];
+    if (rankings.length === 0) return;
+    const sorted = [...rankings].sort((a, b) => a[which] - b[which]);
+    setLeaderboard({
+      title: which === "rank" ? "Overall Rank" : "Starter Rank",
+      subtitle: which === "rank" ? "Blended power score - strength, record, and assets" : "This season's starting lineup strength alone",
+      rows: sorted.map((r) => ({
+        userId: r.userId,
+        name: scheduleData[r.userId]?.name ?? "Unknown",
+        avatar: scheduleData[r.userId]?.avatar,
+        value: which === "rank" ? `${r.powerScore.toFixed(1)} pwr` : `${r.strengthScore.toFixed(1)} str`,
+      })),
+    });
+  };
+
+  // Every manager's own all-time stat, from the same league-wide crawl
+  // that already ranked the selected manager against everyone else.
+  const showAllTimeLeaderboard = (
+    which: keyof ManagerAllTimeStats["ranks"],
+    title: string,
+    valueFor: (s: ManagerAllTimeStats) => string
+  ) => {
+    const everyone = Object.values(allTimeStats).filter((s) => s.seasonsPlayed > 0);
+    if (everyone.length === 0) return;
+    const sorted = [...everyone].sort((a, b) => a.ranks[which] - b.ranks[which]);
+    setLeaderboard({
+      title,
+      subtitle: "All-time, across every season this league has played",
+      rows: sorted.map((s) => ({ userId: s.userId, name: s.name, avatar: s.avatar, value: valueFor(s) })),
+    });
+  };
+
   if (!leagueID) return null;
 
   if (loading) {
@@ -314,11 +365,13 @@ export default function LeagueManagers() {
                   label="STARTER RANK"
                   rank={currentExtras?.tier?.starterRank}
                   total={managerIds.length}
+                  onPress={() => showPowerLeaderboard("starterRank")}
                 />
                 <RankStatTile
                   label="OVERALL RANK"
                   rank={currentExtras?.tier?.rank}
                   total={managerIds.length}
+                  onPress={() => showPowerLeaderboard("rank")}
                 />
               </View>
             </View>
@@ -338,6 +391,9 @@ export default function LeagueManagers() {
                     value={`${(allStats.winPct * 100).toFixed(1)}%`}
                     rank={allStats.ranks.winPct}
                     total={allStats.leagueSize}
+                    onPress={() =>
+                      showAllTimeLeaderboard("winPct", "Win %", (s) => `${(s.winPct * 100).toFixed(1)}%`)
+                    }
                   />
                   <AllTimeTile
                     label="BEST FINISH"
@@ -349,18 +405,35 @@ export default function LeagueManagers() {
                     value={`${allStats.playoffAppearances} / ${allStats.seasonsPlayed}`}
                     rank={allStats.ranks.playoffAppearances}
                     total={allStats.leagueSize}
+                    onPress={() =>
+                      showAllTimeLeaderboard(
+                        "playoffAppearances",
+                        "Playoff Appearances",
+                        (s) => `${s.playoffAppearances} / ${s.seasonsPlayed}`
+                      )
+                    }
                   />
                   <AllTimeTile
                     label="TRANSACTIONS"
                     value={String(allStats.totalTransactions)}
                     rank={allStats.ranks.transactions}
                     total={allStats.leagueSize}
+                    onPress={() =>
+                      showAllTimeLeaderboard("transactions", "Transactions", (s) => String(s.totalTransactions))
+                    }
                   />
                   <AllTimeTile
                     label="BEST SEASON"
                     value={allStats.bestSeason ? `${allStats.bestSeason.season}: ${allStats.bestSeason.wins}-${allStats.bestSeason.losses}` : "N/A"}
                     rank={allStats.ranks.bestSeason}
                     total={allStats.leagueSize}
+                    onPress={() =>
+                      showAllTimeLeaderboard(
+                        "bestSeason",
+                        "Best Season",
+                        (s) => (s.bestSeason ? `${s.bestSeason.season}: ${s.bestSeason.wins}-${s.bestSeason.losses}` : "N/A")
+                      )
+                    }
                   />
                   <AllTimeTile
                     label="WORST SEASON"
@@ -509,6 +582,16 @@ export default function LeagueManagers() {
         position={detailPlayer?.position ?? ""}
         team={detailPlayer?.team}
       />
+
+      <LeaderboardModal
+        leaderboard={leaderboard}
+        selectedId={selectedId}
+        onClose={() => setLeaderboard(null)}
+        onSelectManager={(userId) => {
+          setSelectedId(userId);
+          setLeaderboard(null);
+        }}
+      />
     </View>
   );
 }
@@ -524,15 +607,19 @@ function StatTile({ label, value }: { label: string; value: string }) {
   );
 }
 
-function RankStatTile({ label, rank, total }: { label: string; rank?: number; total: number }) {
+function RankStatTile({ label, rank, total, onPress }: { label: string; rank?: number; total: number; onPress?: () => void }) {
   const color = rank !== undefined && total > 1 ? rankColor(rank, total) : "#6b7280";
+  const interactive = rank !== undefined && total > 1 && !!onPress;
   return (
-    <View className="items-center">
+    <Pressable onPress={interactive ? onPress : undefined} disabled={!interactive} className="items-center">
       <Text style={{ fontVariant: ["tabular-nums"], color }} className="text-[18px] font-bold">
         {rank !== undefined ? `#${rank}` : "--"}
       </Text>
-      <Text className="text-gray-500 text-[9px] font-bold tracking-wider mt-0.5">{label}</Text>
-    </View>
+      <View className="flex-row items-center gap-1 mt-0.5">
+        <Text className="text-gray-500 text-[9px] font-bold tracking-wider">{label}</Text>
+        {interactive && <Feather name="chevron-right" size={9} color="#6b7280" />}
+      </View>
+    </Pressable>
   );
 }
 
@@ -549,25 +636,96 @@ function AllTimeTile({
   sub,
   rank,
   total,
+  onPress,
 }: {
   label: string;
   value: string;
   sub?: string;
   rank?: number;
   total?: number;
+  onPress?: () => void;
 }) {
+  const interactive = rank !== undefined && total !== undefined && total > 1 && !!onPress;
   return (
-    <View style={{ width: "31.5%" }} className="bg-[#f0eeee] dark:bg-[#141416] rounded-2xl p-3 border border-transparent dark:border-white/10">
+    <Pressable
+      onPress={interactive ? onPress : undefined}
+      disabled={!interactive}
+      style={{ width: "31.5%" }}
+      className="bg-[#f0eeee] dark:bg-[#141416] rounded-2xl p-3 border border-transparent dark:border-white/10"
+    >
       <Text className="text-gray-500 text-[9px] font-bold tracking-wider mb-1.5">{label}</Text>
       <Text numberOfLines={1} className="text-black dark:text-white text-[13px] font-bold">
         {value}
       </Text>
       {sub && <Text className="text-gray-500 text-[10px] mt-0.5">{sub}</Text>}
       {rank !== undefined && total !== undefined && total > 1 && (
-        <Text style={{ color: rankColor(rank, total) }} className="text-[10px] font-bold mt-1.5">
-          #{rank} of {total}
-        </Text>
+        <View className="flex-row items-center gap-1 mt-1.5">
+          <Text style={{ color: rankColor(rank, total) }} className="text-[10px] font-bold">
+            #{rank} of {total}
+          </Text>
+          {interactive && <Feather name="chevron-right" size={10} color={rankColor(rank, total)} />}
+        </View>
       )}
-    </View>
+    </Pressable>
+  );
+}
+
+function LeaderboardModal({
+  leaderboard,
+  selectedId,
+  onClose,
+  onSelectManager,
+}: {
+  leaderboard: LeaderboardState | null;
+  selectedId: string | null;
+  onClose: () => void;
+  onSelectManager: (userId: string) => void;
+}) {
+  return (
+    <Modal visible={!!leaderboard} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable className="flex-1 bg-black/50 justify-end" onPress={onClose}>
+        <Pressable className="bg-white dark:bg-[#141416] rounded-t-3xl p-4" style={{ maxHeight: "75%" }} onPress={(e) => e.stopPropagation()}>
+          <View className="w-10 h-1 rounded-full bg-gray-300 dark:bg-white/20 self-center mb-3" />
+          {leaderboard && (
+            <>
+              <Text className="text-black dark:text-white text-[15px] font-bold">{leaderboard.title}</Text>
+              <Text className="text-gray-500 text-[11px] mt-0.5 mb-3">{leaderboard.subtitle}</Text>
+              <FlatList
+                data={leaderboard.rows}
+                keyExtractor={(row) => row.userId}
+                renderItem={({ item: row, index }) => {
+                  const isSelected = row.userId === selectedId;
+                  return (
+                    <Pressable
+                      onPress={() => onSelectManager(row.userId)}
+                      className={`flex-row items-center gap-3 py-2.5 border-b border-gray-100 dark:border-white/5 ${
+                        isSelected ? "bg-brand/5" : ""
+                      }`}
+                    >
+                      <Text style={{ color: rankColor(index + 1, leaderboard.rows.length) }} className="w-[26px] text-[12px] font-extrabold">
+                        #{index + 1}
+                      </Text>
+                      <Image
+                        source={typeof row.avatar === "string" ? { uri: row.avatar } : row.avatar}
+                        className="w-8 h-8 rounded-full"
+                      />
+                      <Text
+                        numberOfLines={1}
+                        className={`flex-1 text-[13px] ${isSelected ? "text-brand font-bold" : "text-black dark:text-white font-semibold"}`}
+                      >
+                        {row.name}
+                      </Text>
+                      <Text style={{ fontVariant: ["tabular-nums"] }} className="text-gray-500 text-[12px] font-bold">
+                        {row.value}
+                      </Text>
+                    </Pressable>
+                  );
+                }}
+              />
+            </>
+          )}
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
