@@ -85,6 +85,12 @@ export default function More() {
       path: `/league/${leagueID}/tradecalculator`,
     },
     {
+      label: "Trade Finder",
+      description: "Say what you'll give up and what you want back - find a fair deal in the league",
+      icon: <Feather name="search" size={20} color="#af1222" />,
+      path: `/league/${leagueID}/tradefinder`,
+    },
+    {
       label: "Draft Recap",
       description: "Grades, picks, and summaries from your draft",
       icon: <Feather name="clipboard" size={20} color="#af1222" />,
