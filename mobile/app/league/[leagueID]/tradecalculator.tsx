@@ -8,7 +8,8 @@ import PlayerCard from "../../../components/PlayerCard";
 import PlayerDetailModal from "../../../components/PlayerDetailModal";
 import TradeHistory from "../../../components/TradeHistory";
 import { displayName } from "../../../lib/getTopPerformers";
-import { getLeagueValueSettings, LeagueValueSettings, RawPlayerValue, computeAdjustedValue } from "../../../lib/playerValue";
+import { getLeagueValueSettings, LeagueValueSettings, RawPlayerValue } from "../../../lib/playerValue";
+import { buildTradeValueLookup, TradeValueLookup } from "../../../lib/tradeValue";
 import { NON_STARTER_SLOTS } from "../../../lib/startSitAccuracy";
 import {
   computeOptimalLineupAssignment,
@@ -80,6 +81,7 @@ export default function TradeCalculator() {
   const [playersData, setPlayersData] = useState<Record<string, any>>({});
   const [valueSettings, setValueSettings] = useState<LeagueValueSettings | null>(null);
   const [valuesBySleeperId, setValuesBySleeperId] = useState<Record<string, RawPlayerValue>>({});
+  const [valueFor, setValueFor] = useState<TradeValueLookup | null>(null);
   const [allRosters, setAllRosters] = useState<Record<string, { rosterPlayerIds: string[] }>>({});
   const [leagueAvgNeed, setLeagueAvgNeed] = useState<Record<PlayerPos, number> | null>(null);
   const [startingSlots, setStartingSlots] = useState<string[]>([]);
@@ -128,6 +130,12 @@ export default function TradeCalculator() {
         setPlayersData(playersDataRes);
         setValueSettings(settings);
         setValuesBySleeperId(values);
+
+        // Real trade value - dynasty's own KTC dynasty market, or (for
+        // redraft) FantasyCalc's real external redraft market instead of
+        // this app's old derived heuristic. See lib/tradeValue.ts.
+        const lookup = await buildTradeValueLookup(settings, values);
+        if (!cancelled) setValueFor(() => lookup);
 
         const rosterMap: Record<string, { rosterPlayerIds: string[] }> = {};
         rostersRes.data.forEach((r: any) => {
@@ -260,8 +268,7 @@ export default function TradeCalculator() {
   const addPlayer = (fromUserId: string, playerId: string, toUserId: string) => {
     const meta = playersData[playerId];
     if (!meta) return;
-    const raw = valuesBySleeperId[playerId] ?? {};
-    const value = valueSettings ? computeAdjustedValue(raw, valueSettings) : 0;
+    const value = valueFor ? valueFor(playerId) : 0;
     const player: Player = { id: playerId, fn: meta.fn, ln: meta.ln, pos: meta.pos, t: meta.t, value };
     setItems((prev) => [...prev, { playerId, player, fromUserId, toUserId }]);
     setPicker(null);

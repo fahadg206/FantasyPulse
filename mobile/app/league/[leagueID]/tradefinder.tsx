@@ -4,12 +4,13 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import { sleeper, backend } from "../../../lib/api";
 import { getLeagueValueSettings, LeagueValueSettings, RawPlayerValue } from "../../../lib/playerValue";
+import { buildTradeValueLookup, TradeValueLookup } from "../../../lib/tradeValue";
 import { computeTeamNeeds, computeLeagueNeedBaseline, TeamNeedsResult } from "../../../lib/tradeAnalysis";
 import { computeRedraftTeamNeeds, computeLeagueRedraftNeedBaseline, buildSeasonToDatePPG } from "../../../lib/redraftNeeds";
 import { buildLeagueSimData } from "../../../lib/leagueSimData";
 import type { SimTeamInfo } from "../../../lib/leagueSimData";
 import type { PlayerPos } from "../../../lib/draftProspects";
-import { GiveItem, findTradeMatches, TradeCandidate, ResolvedGivePlayer } from "../../../lib/tradeFinder";
+import { GiveItem, findTradeMatches, TradeCandidate } from "../../../lib/tradeFinder";
 import { getTeamColor, getTeamLogo, getPositionColor } from "../../../lib/nflTeams";
 import { usePlayerDetail } from "../../../components/PlayerDetailProvider";
 
@@ -60,26 +61,6 @@ function fairnessLabel(ratio: number): { text: string; color: string } {
   return { text: "Lopsided", color: "#ef4444" };
 }
 
-/** zips the give list (as entered) back up with its resolved players - a "position" item may fail to resolve (no valued player left there), which this surfaces as a null slot rather than silently dropping the row. */
-function mapGiveItemsToResolved(
-  items: KeyedGiveItem[],
-  resolved: ResolvedGivePlayer[]
-): { key: string; item: KeyedGiveItem; player: ResolvedGivePlayer | null }[] {
-  const autoQueueByPos: Record<string, ResolvedGivePlayer[]> = {};
-  for (const r of resolved) {
-    if (r.auto) (autoQueueByPos[r.pos] ??= []).push(r);
-  }
-  return items.map((item) => {
-    if (item.kind === "player") {
-      const player = resolved.find((r) => !r.auto && r.playerId === item.playerId) ?? null;
-      return { key: item.key, item, player };
-    }
-    const queue = autoQueueByPos[item.pos];
-    const player = queue && queue.length > 0 ? queue.shift()! : null;
-    return { key: item.key, item, player };
-  });
-}
-
 export default function TradeFinderScreen() {
   const { leagueID } = useLocalSearchParams<{ leagueID: string }>();
   const router = useRouter();
@@ -88,6 +69,7 @@ export default function TradeFinderScreen() {
   const [teams, setTeams] = useState<TeamOption[]>([]);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [leagueMeta, setLeagueMeta] = useState<LeagueMeta | null>(null);
+  const [valueFor, setValueFor] = useState<TradeValueLookup | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [giveItems, setGiveItems] = useState<KeyedGiveItem[]>([]);
@@ -152,6 +134,12 @@ export default function TradeFinderScreen() {
         }
 
         setLeagueMeta({ settings, playersData: playersDataRes, valuesBySleeperId: values, leagueAvgNeed, seasonToDatePPG, remainingWeeks });
+
+        // Real trade value - dynasty's own KTC dynasty market, or (for
+        // redraft) FantasyCalc's real external redraft market instead of
+        // this app's old derived heuristic. See lib/tradeValue.ts.
+        const lookup = await buildTradeValueLookup(settings, values);
+        if (!cancelled) setValueFor(() => lookup);
       } catch (error) {
         console.error("Error loading trade finder data:", error);
       } finally {
@@ -175,29 +163,28 @@ export default function TradeFinderScreen() {
   const myTeam = teams.find((t) => t.userId === selectedUserId);
 
   const searchResult = useMemo(() => {
-    if (!leagueMeta || !myTeam || !selectedUserId) return null;
+    if (!leagueMeta || !myTeam || !selectedUserId || !valueFor) return null;
     const otherRosters: Record<string, string[]> = {};
     teams.forEach((t) => {
       if (t.userId !== selectedUserId) otherRosters[t.userId] = t.rosterPlayerIds;
     });
     return findTradeMatches({
-      myUserId: selectedUserId,
       giveItems: giveItems.map(({ key, ...rest }) => rest),
       wantPositions,
       myRosterPlayerIds: myTeam.rosterPlayerIds,
       otherRosters,
       playersData: leagueMeta.playersData,
-      valuesBySleeperId: leagueMeta.valuesBySleeperId,
-      leagueValueSettings: leagueMeta.settings,
+      valueFor,
       getTeamNeeds,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leagueMeta, myTeam, selectedUserId, teams, giveItems, wantPositions]);
+  }, [leagueMeta, myTeam, selectedUserId, valueFor, teams, giveItems, wantPositions]);
 
-  const resolvedGiveRows = useMemo(
-    () => mapGiveItemsToResolved(giveItems, searchResult?.give ?? []),
-    [giveItems, searchResult]
-  );
+  // Position give items, in the same order they were added, zipped with
+  // their resolved candidate pool - simple sequential zip since
+  // findTradeMatches builds positionSlots by filtering giveItems for
+  // "position" kind in that same order.
+  const positionGiveItems = giveItems.filter((it): it is KeyedGiveItem & { kind: "position" } => it.kind === "position");
 
   if (!leagueID) return null;
 
@@ -213,11 +200,7 @@ export default function TradeFinderScreen() {
   const toggleWant = (pos: string) =>
     setWantPositions((prev) => (prev.includes(pos) ? prev.filter((p) => p !== pos) : [...prev, pos]));
 
-  // Includes auto-picked players too, not just ones explicitly chosen by
-  // name - without this, tapping "Add a player" right after a "position"
-  // pick auto-resolved to that same player would double it up in the
-  // give list (once auto-picked, once explicit) and double-count its value.
-  const alreadyGivenIds = new Set((searchResult?.give ?? []).map((p) => p.playerId));
+  const alreadyGivenIds = new Set((searchResult?.fixedGive ?? []).map((p) => p.playerId));
 
   return (
     <ScrollView className="flex-1 bg-[#0c0c0e]" contentContainerClassName="p-4 pb-10">
@@ -263,53 +246,74 @@ export default function TradeFinderScreen() {
           <View className="mt-5">
             <View className="flex-row items-center justify-between mb-2">
               <Text className="text-gray-500 text-[11px] font-bold tracking-widest">WHAT YOU'RE OFFERING</Text>
-              {searchResult && searchResult.giveValue > 0 && (
-                <Text className="text-white text-[12px] font-bold">{formatValue(searchResult.giveValue)} value</Text>
+              {searchResult && searchResult.fixedGiveValue > 0 && (
+                <Text className="text-white text-[12px] font-bold">{formatValue(searchResult.fixedGiveValue)}+ value</Text>
               )}
             </View>
 
-            {resolvedGiveRows.length === 0 && (
+            {giveItems.length === 0 && (
               <Text className="text-gray-600 text-[12px] italic mb-2">Nothing added yet - add a player or a position below.</Text>
             )}
             <View className="gap-2 mb-2.5">
-              {resolvedGiveRows.map(({ key, item, player }) => (
-                <View key={key} className="flex-row items-center bg-[#141416] border border-white/10 rounded-xl px-3 py-2.5">
-                  {player ? (
-                    <>
-                      <View style={{ backgroundColor: getTeamColor(player.team) }} className="w-9 h-9 rounded-full items-center justify-center overflow-hidden mr-2.5">
+              {giveItems
+                .filter((it) => it.kind === "player")
+                .map((item) => {
+                  const player = searchResult?.fixedGive.find((p) => p.playerId === (item as any).playerId);
+                  const meta = leagueMeta?.playersData[(item as any).playerId];
+                  return (
+                    <View key={item.key} className="flex-row items-center bg-[#141416] border border-white/10 rounded-xl px-3 py-2.5">
+                      <View style={{ backgroundColor: getTeamColor(meta?.t) }} className="w-9 h-9 rounded-full items-center justify-center overflow-hidden mr-2.5">
                         <Image
-                          source={{ uri: playerPhotoUri(player.playerId, player.pos, player.team) }}
-                          resizeMode={player.pos === "DEF" ? "contain" : "cover"}
-                          style={player.pos === "DEF" ? { width: 22, height: 22 } : { width: 36, height: 36, borderRadius: 18 }}
+                          source={{ uri: playerPhotoUri((item as any).playerId, meta?.pos, meta?.t) }}
+                          resizeMode={meta?.pos === "DEF" ? "contain" : "cover"}
+                          style={meta?.pos === "DEF" ? { width: 22, height: 22 } : { width: 36, height: 36, borderRadius: 18 }}
                         />
                       </View>
                       <View className="flex-1 mr-2">
                         <Text numberOfLines={1} className="text-white text-[13px] font-semibold">
-                          {leagueMeta?.playersData[player.playerId]?.fn} {leagueMeta?.playersData[player.playerId]?.ln}
+                          {meta?.fn} {meta?.ln}
                         </Text>
                         <Text className="text-gray-500 text-[10px] mt-0.5">
-                          {item.kind === "position" ? `Auto-picked · ${player.pos}` : player.pos}
-                          {player.team ? ` · ${player.team}` : ""}
+                          {meta?.pos}
+                          {meta?.t ? ` · ${meta.t}` : ""}
                         </Text>
                       </View>
-                      {player.value > 0 ? (
+                      {player && player.value > 0 ? (
                         <Text className="text-white text-[12px] font-bold mr-2">{formatValue(player.value)}</Text>
                       ) : (
                         <Text className="text-gray-600 text-[10px] font-semibold mr-2 italic">no trade value</Text>
                       )}
-                    </>
-                  ) : (
-                    <View className="flex-1 mr-2">
-                      <Text className="text-gray-500 text-[12px] italic">
-                        {item.kind === "position" ? `No valued ${item.pos} left on your roster` : "Player not found"}
+                      <Pressable onPress={() => removeGiveItem(item.key)} hitSlop={8}>
+                        <Feather name="x" size={15} color="#6b7280" />
+                      </Pressable>
+                    </View>
+                  );
+                })}
+
+              {positionGiveItems.map((item, i) => {
+                const slot = searchResult?.positionSlots[i];
+                const color = getPositionColor(item.pos);
+                return (
+                  <View key={item.key} className="flex-row items-center bg-[#141416] border border-white/10 rounded-xl px-3 py-2.5">
+                    <View style={{ backgroundColor: `${color}22` }} className="w-9 h-9 rounded-full items-center justify-center mr-2.5">
+                      <Text style={{ color }} className="text-[11px] font-extrabold">
+                        {item.pos}
                       </Text>
                     </View>
-                  )}
-                  <Pressable onPress={() => removeGiveItem(key)} hitSlop={8}>
-                    <Feather name="x" size={15} color="#6b7280" />
-                  </Pressable>
-                </View>
-              ))}
+                    <View className="flex-1 mr-2">
+                      <Text className="text-white text-[13px] font-semibold">A {item.pos} from your roster</Text>
+                      <Text className="text-gray-500 text-[10px] mt-0.5">
+                        {slot && slot.pool.length > 0
+                          ? `Which one depends on what you get back - ${slot.pool.length} option${slot.pool.length > 1 ? "s" : ""}`
+                          : "No valued player at this position on your roster"}
+                      </Text>
+                    </View>
+                    <Pressable onPress={() => removeGiveItem(item.key)} hitSlop={8}>
+                      <Feather name="x" size={15} color="#6b7280" />
+                    </Pressable>
+                  </View>
+                );
+              })}
             </View>
 
             <View className="flex-row gap-2">
@@ -356,7 +360,9 @@ export default function TradeFinderScreen() {
           {/* Results */}
           <View className="mt-6">
             <Text className="text-gray-500 text-[11px] font-bold tracking-widest mb-2.5">SUGGESTED TRADES</Text>
-            {resolvedGiveRows.filter((r) => r.player).length === 0 || wantPositions.length === 0 ? (
+            {!searchResult ||
+            (searchResult.fixedGive.length === 0 && searchResult.positionSlots.every((s) => s.pool.length === 0)) ||
+            wantPositions.length === 0 ? (
               <Text className="text-gray-600 text-[12px] italic">
                 Add at least one player or position you're offering, and at least one position you want back.
               </Text>
@@ -393,7 +399,11 @@ export default function TradeFinderScreen() {
       <Modal visible={positionPickerOpen} transparent animationType="fade" onRequestClose={() => setPositionPickerOpen(false)}>
         <Pressable className="flex-1 bg-black/50 items-center justify-center px-6" onPress={() => setPositionPickerOpen(false)}>
           <Pressable className="bg-[#141416] rounded-2xl p-4 w-full" onPress={(e) => e.stopPropagation()}>
-            <Text className="text-white text-[14px] font-bold mb-3">Trade away your best player at...</Text>
+            <Text className="text-white text-[14px] font-bold mb-3">Give up a player at...</Text>
+            <Text className="text-gray-500 text-[11px] mb-3">
+              Which specific player gets offered depends on the trade - a partner offering a mid-tier player back gets a
+              comparable one of yours in return, not your best one every time.
+            </Text>
             <View className="flex-row flex-wrap gap-2">
               {VALUED_POSITIONS.map((pos) => {
                 const color = getPositionColor(pos);
