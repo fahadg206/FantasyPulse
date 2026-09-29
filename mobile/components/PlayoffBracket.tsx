@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { View, Text, Image, ScrollView, ActivityIndicator } from "react-native";
+import { View, Text, Image, ScrollView, ActivityIndicator, Pressable } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import Svg, { Path } from "react-native-svg";
 import { getPlayoffBracket, Bracket, BracketMatch, BracketTeam } from "../lib/getPlayoffBracket";
@@ -73,10 +73,25 @@ function TeamSlot({ team, isWinner }: { team: BracketTeam | null; isWinner: bool
   );
 }
 
-function MatchCard({ match, isChampionship, x, y }: { match: BracketMatch; isChampionship: boolean; x: number; y: number }) {
+function MatchCard({
+  match,
+  isChampionship,
+  x,
+  y,
+  onPress,
+}: {
+  match: BracketMatch;
+  isChampionship: boolean;
+  x: number;
+  y: number;
+  onPress?: (match: BracketMatch) => void;
+}) {
   const [teamA, teamB] = match.teams;
+  const canOpen = !!onPress && teamA?.rosterId !== undefined && teamB?.rosterId !== undefined;
   return (
-    <View
+    <Pressable
+      onPress={canOpen ? () => onPress!(match) : undefined}
+      disabled={!canOpen}
       style={{ position: "absolute", left: x, top: y, width: MATCH_WIDTH, height: MATCH_HEIGHT }}
       className={`bg-[#141416] rounded-xl overflow-hidden ${isChampionship ? "border-2 border-brand" : "border border-white/10"}`}
     >
@@ -88,7 +103,7 @@ function MatchCard({ match, isChampionship, x, y }: { match: BracketMatch; isCha
       <TeamSlot team={teamA} isWinner={!!match.winnerRosterId && teamA?.rosterId === match.winnerRosterId} />
       <View className="h-px bg-white/10" />
       <TeamSlot team={teamB} isWinner={!!match.winnerRosterId && teamB?.rosterId === match.winnerRosterId} />
-    </View>
+    </Pressable>
   );
 }
 
@@ -172,7 +187,15 @@ function RoundLabels({ roundNumbers, totalRounds }: { roundNumbers: number[]; to
   );
 }
 
-function MainBracketTree({ mainMatches, championRosterId }: { mainMatches: BracketMatch[]; championRosterId?: number }) {
+function MainBracketTree({
+  mainMatches,
+  championRosterId,
+  onSelectMatch,
+}: {
+  mainMatches: BracketMatch[];
+  championRosterId?: number;
+  onSelectMatch?: (match: BracketMatch) => void;
+}) {
   const { positions, totalSlots, columnCount } = useMemo(() => layoutMainBracket(mainMatches), [mainMatches]);
   const roundNumbers = useMemo(() => Array.from(new Set(mainMatches.map((m) => m.round))).sort((a, b) => a - b), [mainMatches]);
   const totalRounds = roundNumbers[roundNumbers.length - 1] ?? 1;
@@ -199,7 +222,7 @@ function MainBracketTree({ mainMatches, championRosterId }: { mainMatches: Brack
           )}
         </Svg>
         {all.map(({ match, x, y }) => (
-          <MatchCard key={match.matchId} match={match} isChampionship={match.placement === 1} x={x} y={y} />
+          <MatchCard key={match.matchId} match={match} isChampionship={match.placement === 1} x={x} y={y} onPress={onSelectMatch} />
         ))}
       </View>
     </View>
@@ -207,19 +230,34 @@ function MainBracketTree({ mainMatches, championRosterId }: { mainMatches: Brack
 }
 
 /** placement games (3rd, 5th, ...) are usually just one game each - shown as their own small labeled row rather than woven into the main tree's connector lines. */
-function PlacementRow({ placement, matches }: { placement: number; matches: BracketMatch[] }) {
+function PlacementRow({
+  placement,
+  matches,
+  onSelectMatch,
+}: {
+  placement: number;
+  matches: BracketMatch[];
+  onSelectMatch?: (match: BracketMatch) => void;
+}) {
   return (
     <View className="mt-5">
       <Text className="text-[10px] font-bold tracking-widest text-gray-500 mb-2">{PLACEMENT_LABEL(placement)}</Text>
       <View className="flex-row gap-3">
         {matches.map((m) => {
           const [teamA, teamB] = m.teams;
+          const canOpen = !!onSelectMatch && teamA?.rosterId !== undefined && teamB?.rosterId !== undefined;
           return (
-            <View key={m.matchId} className="bg-[#141416] border border-white/10 rounded-xl overflow-hidden" style={{ width: MATCH_WIDTH }}>
+            <Pressable
+              key={m.matchId}
+              onPress={canOpen ? () => onSelectMatch!(m) : undefined}
+              disabled={!canOpen}
+              className="bg-[#141416] border border-white/10 rounded-xl overflow-hidden"
+              style={{ width: MATCH_WIDTH }}
+            >
               <TeamSlot team={teamA} isWinner={!!m.winnerRosterId && teamA?.rosterId === m.winnerRosterId} />
               <View className="h-px bg-white/10" />
               <TeamSlot team={teamB} isWinner={!!m.winnerRosterId && teamB?.rosterId === m.winnerRosterId} />
-            </View>
+            </Pressable>
           );
         })}
       </View>
@@ -227,7 +265,14 @@ function PlacementRow({ placement, matches }: { placement: number; matches: Brac
   );
 }
 
-export default function PlayoffBracket({ leagueID }: { leagueID: string }) {
+export default function PlayoffBracket({
+  leagueID,
+  onSelectMatch,
+}: {
+  leagueID: string;
+  /** called with the real match a manager tapped (both teams resolved, not a TBD placeholder) and the season's own league id it happened in */
+  onSelectMatch?: (match: BracketMatch, leagueId: string) => void;
+}) {
   const [bracket, setBracket] = useState<Bracket | null | undefined>(undefined);
 
   useEffect(() => {
@@ -285,11 +330,20 @@ export default function PlayoffBracket({ leagueID }: { leagueID: string }) {
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="px-1 py-2">
       <View>
-        <MainBracketTree mainMatches={mainMatches} championRosterId={bracket.championRosterId} />
+        <MainBracketTree
+          mainMatches={mainMatches}
+          championRosterId={bracket.championRosterId}
+          onSelectMatch={onSelectMatch ? (match) => onSelectMatch(match, leagueID) : undefined}
+        />
         {Array.from(placementGroups.entries())
           .sort((a, b) => a[0] - b[0])
           .map(([placement, matches]) => (
-            <PlacementRow key={placement} placement={placement} matches={matches} />
+            <PlacementRow
+              key={placement}
+              placement={placement}
+              matches={matches}
+              onSelectMatch={onSelectMatch ? (match) => onSelectMatch(match, leagueID) : undefined}
+            />
           ))}
       </View>
     </ScrollView>

@@ -41,7 +41,7 @@ type WeekResult = {
 function matchupTierFromSpread(spread: number): SOSTier {
   if (spread >= 15) return "Cakewalk";
   if (spread >= 5) return "Favorite";
-  if (spread > -5) return "Even";
+  if (spread > -5) return "Could Go Either Way";
   if (spread > -15) return "Underdog";
   return "Tough Matchup";
 }
@@ -70,7 +70,7 @@ const RESULT_COLOR: Record<WeekResult["result"], string> = {
 const MATCHUP_TIER_COLOR: Record<SOSTier, string> = {
   "Tough Matchup": "#ef4444",
   Underdog: "#f97316",
-  Even: "#eab308",
+  "Could Go Either Way": "#eab308",
   Favorite: "#4ade80",
   Cakewalk: "#15803d",
 };
@@ -692,7 +692,7 @@ export default function LeagueManagers() {
                           <Text className="text-[12px] text-gray-500">
                             {favoriteName ? (
                               <>
-                                <Text className="text-black dark:text-white font-bold">{favoriteName}</Text> favorite{" "}
+                                <Text className="text-black dark:text-white font-bold">{favoriteName}</Text>{" "}
                                 <Text className="text-black dark:text-white font-bold">{wr.favorite.spread}</Text>
                               </>
                             ) : (

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { View, Text, Image, Pressable, ScrollView, ActivityIndicator } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { Feather } from "@expo/vector-icons";
-import { backend } from "../../../lib/api";
+import { sleeper } from "../../../lib/api";
 import {
   fetchLeagueManagers,
   fetchRivalry,
@@ -12,75 +12,31 @@ import {
   TeamManagersMap,
   RivalUser,
 } from "../../../lib/getRivalry";
+import getMatchupData, { Starter } from "../../../lib/getMatchupData";
+import { getSeasonFinishes, SeasonFinish } from "../../../lib/getSeasonFinish";
 import ManagerPicker from "../../../components/ManagerPicker";
 import HeadToHead from "../../../components/HeadToHead";
-import { displayName } from "../../../lib/getTopPerformers";
-import { getTeamLogo } from "../../../lib/nflTeams";
+import MatchupPlayerGrid from "../../../components/MatchupPlayerGrid";
 
 const helmet = require("../../../assets/images/helmet2.png");
 const matchupsImg = require("../../../assets/images/matchupsImage.png");
 
-const POSITION_COLOR: Record<string, string> = {
-  QB: "#ef4444",
-  WR: "#3b82f6",
-  RB: "#22c55e",
-  TE: "#eab308",
-  K: "#a855f7",
-  DEF: "#94a3b8",
+const FINISH_COLOR: Record<SeasonFinish, string> = {
+  Champion: "#eab308",
+  "Runner-Up": "#cbd5e1",
+  "3rd Place": "#d08a4f",
+  "Made Playoffs": "#4ade80",
+  "Missed Playoffs": "#6b7280",
 };
 
-function PlayerHalf({
-  player,
-  playerId,
-  points,
-  align,
-  winning,
-}: {
-  player: any;
-  playerId: string;
-  points: number;
-  align: "left" | "right";
-  winning: boolean;
-}) {
-  if (!player) {
-    return (
-      <View className={`flex-1 flex-row items-center gap-2 ${align === "right" ? "justify-end" : ""}`}>
-        <Text className="text-gray-600 text-[11px]">Empty / F.A.</Text>
-      </View>
-    );
-  }
-  const isDef = player.pos === "DEF";
-  const photoUri = isDef
-    ? getTeamLogo(player.t) ?? undefined
-    : `https://sleepercdn.com/content/nfl/players/thumb/${playerId}.jpg`;
-
-  const info = (
-    <View className={align === "right" ? "items-end" : "items-start"}>
-      <Text numberOfLines={1} className="text-white text-[12px] font-semibold max-w-[90px]">
-        {displayName(player)}
-      </Text>
-      <Text style={{ color: POSITION_COLOR[player.pos] ?? "#9ca3af" }} className="text-[9px] font-bold">
-        {player.pos}
-      </Text>
-    </View>
-  );
-  const photo = (
-    <Image
-      source={photoUri ? { uri: photoUri } : undefined}
-      resizeMode={isDef ? "contain" : "cover"}
-      className={isDef ? "w-[30px] h-[30px]" : "w-[32px] h-[32px] rounded-full bg-white/10"}
-    />
-  );
-
+function FinishBadge({ finish, align }: { finish: SeasonFinish; align: "left" | "right" }) {
   return (
-    <View className={`flex-1 flex-row items-center gap-2 ${align === "right" ? "flex-row-reverse" : ""}`}>
-      {photo}
-      {info}
-      <Text
-        style={{ fontVariant: ["tabular-nums"], color: winning ? "#22c55e" : "#ffffff" }}
-        className="text-[13px] font-bold w-[34px] text-center"
-      >
-        {points ? points.toFixed(1) : "-"}
+    <View
+      style={{ backgroundColor: `${FINISH_COLOR[finish]}22`, borderColor: `${FINISH_COLOR[finish]}55` }}
+      className={`px-2 py-0.5 rounded-full border ${align === "right" ? "self-end" : "self-start"}`}
+    >
+      <Text style={{ color: FINISH_COLOR[finish] }} className="text-[9px] font-bold">
+        {finish}
       </Text>
     </View>
   );
@@ -134,19 +90,30 @@ export default function RivalryScreen() {
   const [loadingManagers, setLoadingManagers] = useState(true);
   const [loadingRivalry, setLoadingRivalry] = useState(false);
   const [weekIndex, setWeekIndex] = useState(0);
-  const [playersData, setPlayersData] = useState<Record<string, any>>({});
+  const [currentSeason, setCurrentSeason] = useState("");
+
+  interface SlateDetail {
+    starters1: Starter[];
+    starters2: Starter[];
+    bench1: Starter[];
+    bench2: Starter[];
+    slots: string[];
+    finishOne: SeasonFinish | null;
+    finishTwo: SeasonFinish | null;
+  }
+  const [slateDetail, setSlateDetail] = useState<SlateDetail | null>(null);
+  const [loadingSlateDetail, setLoadingSlateDetail] = useState(false);
 
   useEffect(() => {
     if (!leagueID) return;
     fetchLeagueManagers(leagueID)
-      .then(({ users, teamManagersMap }) => {
+      .then(({ users, teamManagersMap, currentSeason }) => {
         setUsers(users);
         setTeamManagersMap(teamManagersMap);
+        setCurrentSeason(currentSeason);
       })
       .catch((e) => console.error("Error loading league managers:", e))
       .finally(() => setLoadingManagers(false));
-
-    backend.fetchPlayers(leagueID).then(setPlayersData).catch(console.error);
   }, [leagueID]);
 
   useEffect(() => {
@@ -158,6 +125,66 @@ export default function RivalryScreen() {
       .catch((e) => console.error("Error loading rivalry:", e))
       .finally(() => setLoadingRivalry(false));
   }, [leagueID, userOne, userTwo, teamManagersMap]);
+
+  // Real per-player detail for whichever meeting is currently on screen -
+  // that season's own real starters/bench (matching the current-week
+  // matchup screen's roster grid, not just a flat list of starters) and,
+  // if it's a past season, each team's real final finish that year.
+  useEffect(() => {
+    const slateNow = rivalry?.matchups[weekIndex];
+    if (!slateNow || !userOne || !userTwo) {
+      setSlateDetail(null);
+      return;
+    }
+    let cancelled = false;
+    setLoadingSlateDetail(true);
+
+    (async () => {
+      try {
+        const [{ updatedScheduleData }, league] = await Promise.all([
+          getMatchupData(slateNow.leagueId, slateNow.week),
+          sleeper.getLeague(slateNow.leagueId).then((r) => r.data),
+        ]);
+        if (cancelled) return;
+
+        const team1 = updatedScheduleData[userOne];
+        const team2 = updatedScheduleData[userTwo];
+        const slots: string[] = (league.roster_positions || []).filter(
+          (p: string) => p !== "BN" && p !== "IR" && p !== "TAXI"
+        );
+
+        let finishOne: SeasonFinish | null = null;
+        let finishTwo: SeasonFinish | null = null;
+        if (slateNow.year !== currentSeason) {
+          const finishes = await getSeasonFinishes(slateNow.leagueId);
+          if (cancelled) return;
+          finishOne = finishes[Number(slateNow.rosterIdOne)] ?? null;
+          finishTwo = finishes[Number(slateNow.rosterIdTwo)] ?? null;
+        }
+        if (cancelled) return;
+
+        setSlateDetail({
+          starters1: (team1?.starters_full_data ?? []).filter((s) => Object.keys(s).length > 0),
+          starters2: (team2?.starters_full_data ?? []).filter((s) => Object.keys(s).length > 0),
+          bench1: (team1?.bench_full_data ?? []).filter((s) => Object.keys(s).length > 0),
+          bench2: (team2?.bench_full_data ?? []).filter((s) => Object.keys(s).length > 0),
+          slots,
+          finishOne,
+          finishTwo,
+        });
+      } catch (error) {
+        console.error("Error loading rivalry matchup detail:", error);
+        if (!cancelled) setSlateDetail(null);
+      } finally {
+        if (!cancelled) setLoadingSlateDetail(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rivalry, weekIndex, userOne, userTwo, currentSeason]);
 
   const managerOptions = useMemo(
     () => Object.values(users).map((u) => ({ id: u.managerID, name: u.userName, avatar: u.avatar })),
@@ -288,25 +315,6 @@ export default function RivalryScreen() {
                 />
               )}
 
-              {highlights.nemesisOne && playersData[highlights.nemesisOne.playerId] && (
-                <StatCard
-                  icon="award"
-                  label={`${(userOneInfo?.userName ?? "").toUpperCase()}'S NEMESIS`}
-                  color="#3b82f6"
-                  value={displayName(playersData[highlights.nemesisOne.playerId])}
-                  sub={`${highlights.nemesisOne.totalPoints.toFixed(1)} pts across ${highlights.nemesisOne.games} games`}
-                />
-              )}
-
-              {highlights.nemesisTwo && playersData[highlights.nemesisTwo.playerId] && (
-                <StatCard
-                  icon="award"
-                  label={`${(userTwoInfo?.userName ?? "").toUpperCase()}'S NEMESIS`}
-                  color="#af1222"
-                  value={displayName(playersData[highlights.nemesisTwo.playerId])}
-                  sub={`${highlights.nemesisTwo.totalPoints.toFixed(1)} pts across ${highlights.nemesisTwo.games} games`}
-                />
-              )}
             </View>
           )}
 
@@ -404,39 +412,42 @@ export default function RivalryScreen() {
                       >
                         {total.toFixed(2) === "0.00" ? "-" : total.toFixed(1)}
                       </Text>
+                      {/* Real final standing for that season, only when it
+                          actually was a past one - the current season has
+                          no finish yet. */}
+                      {sideIdx === 0 && slateDetail?.finishOne && (
+                        <View className="mt-1">
+                          <FinishBadge finish={slateDetail.finishOne} align="left" />
+                        </View>
+                      )}
+                      {sideIdx === 1 && slateDetail?.finishTwo && (
+                        <View className="mt-1">
+                          <FinishBadge finish={slateDetail.finishTwo} align="right" />
+                        </View>
+                      )}
                     </View>
                   );
                 })}
               </View>
 
-              <View className="w-full bg-[#141416] border border-white/10 rounded-2xl overflow-hidden">
-                {slate.matchup[0].starters.map((_, i) => {
-                  const pOne = slate.matchup[0].points[i] ?? 0;
-                  const pTwo = slate.matchup[1].points[i] ?? 0;
-                  return (
-                    <View
-                      key={i}
-                      className={`flex-row items-center px-3 py-2.5 ${
-                        i !== slate.matchup[0].starters.length - 1 ? "border-b border-white/5" : ""
-                      }`}
-                    >
-                      <PlayerHalf
-                        player={playersData[slate.matchup[0].starters[i]]}
-                        playerId={slate.matchup[0].starters[i]}
-                        points={pOne}
-                        align="left"
-                        winning={pOne > pTwo && pOne > 0}
-                      />
-                      <PlayerHalf
-                        player={playersData[slate.matchup[1].starters[i]]}
-                        playerId={slate.matchup[1].starters[i]}
-                        points={pTwo}
-                        align="right"
-                        winning={pTwo > pOne && pTwo > 0}
-                      />
-                    </View>
-                  );
-                })}
+              {/* Same real player-by-player grid the current-week matchup
+                  screen uses (components/MatchupPlayerGrid.tsx) - real
+                  starters and bench for that exact real week, not just a
+                  flat starters list. */}
+              <View className="w-full rounded-2xl overflow-hidden">
+                {loadingSlateDetail || !slateDetail ? (
+                  <View className="py-8 items-center bg-[#141416]">
+                    <ActivityIndicator color="#af1222" />
+                  </View>
+                ) : (
+                  <MatchupPlayerGrid
+                    starters1={slateDetail.starters1}
+                    starters2={slateDetail.starters2}
+                    bench1={slateDetail.bench1}
+                    bench2={slateDetail.bench2}
+                    slots={slateDetail.slots}
+                  />
+                )}
               </View>
             </View>
           )}

@@ -22,12 +22,12 @@ import type { LeagueSimData } from "./leagueSimData";
 // to match the "favorite/underdog" verbiage the League Managers schedule
 // uses for an individual matchup - one vocabulary for "how hard is this"
 // everywhere in the app, not a different word set per screen.
-export type SOSTier = "Tough Matchup" | "Underdog" | "Even" | "Favorite" | "Cakewalk";
+export type SOSTier = "Tough Matchup" | "Underdog" | "Could Go Either Way" | "Favorite" | "Cakewalk";
 
 export const TIER_FOR_SCORE = (score: number): SOSTier => {
   if (score >= 80) return "Tough Matchup";
   if (score >= 60) return "Underdog";
-  if (score >= 40) return "Even";
+  if (score >= 40) return "Could Go Either Way";
   if (score >= 20) return "Favorite";
   return "Cakewalk";
 };

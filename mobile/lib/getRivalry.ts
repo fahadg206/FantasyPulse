@@ -94,6 +94,10 @@ function getRosterId(map: TeamManagersMap, managerId: string, year: string): str
 export interface RivalryMatchup {
   week: number;
   year: string;
+  /** the real Sleeper league id for that season - previous seasons are a different league id via previous_league_id, needed to look up that season's own real roster/bench/bracket data */
+  leagueId: string;
+  rosterIdOne: string;
+  rosterIdTwo: string;
   matchup: { roster_id: string; starters: string[]; points: number[] }[];
   isPlayoff: boolean;
 }
@@ -284,7 +288,15 @@ export async function fetchRivalry(
       else if (isPlayoff) rivalry.playoffTies++;
       else rivalry.ties++;
 
-      rivalry.matchups.push({ week: processed.week, year, matchup: processed.matchup, isPlayoff });
+      rivalry.matchups.push({
+        week: processed.week,
+        year,
+        leagueId: leagueIdForRequest,
+        rosterIdOne,
+        rosterIdTwo,
+        matchup: processed.matchup,
+        isPlayoff,
+      });
     });
 
     currentLeagueId = leagueData.previous_league_id;
@@ -301,22 +313,12 @@ export interface RivalryMoment {
   totalTwo: number;
 }
 
-export interface NemesisPlayer {
-  playerId: string;
-  /** total points this player has put up in games against the OTHER side, across every tracked meeting */
-  totalPoints: number;
-  games: number;
-}
-
 export interface RivalryHighlights {
   /** most recent result(s) in a row, chronologically - null if there's no real history */
   streak: { side: "one" | "two" | "tie"; count: number } | null;
   closestGame: RivalryMoment | null;
   biggestBlowout: (RivalryMoment & { winner: "one" | "two" }) | null;
   highestCombined: RivalryMoment | null;
-  /** the single player who has personally torched the OTHER side the hardest, across every meeting - real cumulative production, not a one-game fluke */
-  nemesisOne: NemesisPlayer | null;
-  nemesisTwo: NemesisPlayer | null;
 }
 
 /**
@@ -349,8 +351,6 @@ export function computeRivalryHighlights(rivalry: Rivalry): RivalryHighlights {
   let closestGame: RivalryMoment | null = null;
   let biggestBlowout: (RivalryMoment & { winner: "one" | "two" }) | null = null;
   let highestCombined: RivalryMoment | null = null;
-  const pointsForOne: Record<string, { total: number; games: number }> = {};
-  const pointsForTwo: Record<string, { total: number; games: number }> = {};
 
   for (const m of rivalry.matchups) {
     const totalOne = m.matchup[0].points.reduce((t, v) => t + parseFloat(String(v)), 0);
@@ -365,39 +365,12 @@ export function computeRivalryHighlights(rivalry: Rivalry): RivalryHighlights {
     if (!highestCombined || totalOne + totalTwo > highestCombined.totalOne + highestCombined.totalTwo) {
       highestCombined = moment;
     }
-
-    m.matchup[0].starters.forEach((playerId, i) => {
-      if (!playerId || playerId === "0") return;
-      const pts = m.matchup[0].points[i] ?? 0;
-      if (!pointsForOne[playerId]) pointsForOne[playerId] = { total: 0, games: 0 };
-      pointsForOne[playerId].total += pts;
-      pointsForOne[playerId].games += 1;
-    });
-    m.matchup[1].starters.forEach((playerId, i) => {
-      if (!playerId || playerId === "0") return;
-      const pts = m.matchup[1].points[i] ?? 0;
-      if (!pointsForTwo[playerId]) pointsForTwo[playerId] = { total: 0, games: 0 };
-      pointsForTwo[playerId].total += pts;
-      pointsForTwo[playerId].games += 1;
-    });
   }
-
-  const topOf = (map: Record<string, { total: number; games: number }>): NemesisPlayer | null => {
-    let best: NemesisPlayer | null = null;
-    for (const playerId in map) {
-      if (!best || map[playerId].total > best.totalPoints) {
-        best = { playerId, totalPoints: map[playerId].total, games: map[playerId].games };
-      }
-    }
-    return best;
-  };
 
   return {
     streak,
     closestGame,
     biggestBlowout,
     highestCombined,
-    nemesisOne: topOf(pointsForOne),
-    nemesisTwo: topOf(pointsForTwo),
   };
 }

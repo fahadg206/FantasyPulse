@@ -12,6 +12,8 @@ export interface BracketMatch {
   matchId: number;
   round: number;
   placement?: number;
+  /** the real NFL week this match was actually played */
+  week: number;
   teams: [BracketTeam | null, BracketTeam | null];
   winnerRosterId?: number;
   /** which earlier match (if any) feeds each slot - [t1's feeder, t2's feeder], undefined for a fresh bye/seed with no predecessor. Drives the visual bracket layout (PlayoffBracket.tsx computes each match's vertical position as the midpoint of its feeders'). */
@@ -118,6 +120,7 @@ export async function getPlayoffBracket(leagueId: string): Promise<Bracket | nul
           matchId: g.m,
           round: g.r,
           placement: g.p,
+          week,
           teams: [resolveTeam(g.t1, g.t1_from, week), resolveTeam(g.t2, g.t2_from, week)],
           winnerRosterId: g.w,
           fromMatchIds: [

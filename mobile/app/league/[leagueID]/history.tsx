@@ -1,11 +1,173 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, Image, ScrollView, ActivityIndicator, Pressable, RefreshControl } from "react-native";
+import { View, Text, Image, ScrollView, ActivityIndicator, Pressable, RefreshControl, Modal } from "react-native";
 import { useLocalSearchParams } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, Feather } from "@expo/vector-icons";
 import { getLeagueHistory, SeasonHistory } from "../../../lib/getLeagueHistory";
 import PlayoffBracket from "../../../components/PlayoffBracket";
+import { BracketMatch } from "../../../lib/getPlayoffBracket";
+import { sleeper } from "../../../lib/api";
+import getMatchupData, { Starter } from "../../../lib/getMatchupData";
+import { getSeasonFinishes, SeasonFinish } from "../../../lib/getSeasonFinish";
+import MatchupPlayerGrid from "../../../components/MatchupPlayerGrid";
 
 const helmet = require("../../../assets/images/helmet2.png");
+
+const FINISH_COLOR: Record<SeasonFinish, string> = {
+  Champion: "#eab308",
+  "Runner-Up": "#cbd5e1",
+  "3rd Place": "#d08a4f",
+  "Made Playoffs": "#4ade80",
+  "Missed Playoffs": "#6b7280",
+};
+
+interface MatchDetail {
+  starters1: Starter[];
+  starters2: Starter[];
+  bench1: Starter[];
+  bench2: Starter[];
+  slots: string[];
+  finishOne: SeasonFinish | null;
+  finishTwo: SeasonFinish | null;
+}
+
+function MatchupDetailModal({
+  match,
+  leagueId,
+  season,
+  isPastSeason,
+  onClose,
+}: {
+  match: BracketMatch | null;
+  leagueId: string | null;
+  season: string | null;
+  /** only a completed past season has a real final finish - this year's still-in-progress bracket doesn't yet */
+  isPastSeason: boolean;
+  onClose: () => void;
+}) {
+  const [detail, setDetail] = useState<MatchDetail | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [teamOne, teamTwo] = match?.teams ?? [null, null];
+
+  useEffect(() => {
+    if (!match || !leagueId) {
+      setDetail(null);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+
+    (async () => {
+      try {
+        const [{ updatedScheduleData }, league] = await Promise.all([
+          getMatchupData(leagueId, match.week),
+          sleeper.getLeague(leagueId).then((r) => r.data),
+        ]);
+        if (cancelled) return;
+
+        const findByRosterId = (rosterId?: number) =>
+          rosterId === undefined
+            ? undefined
+            : Object.values(updatedScheduleData).find((t) => Number(t.roster_id) === rosterId);
+        const team1Data = findByRosterId(teamOne?.rosterId);
+        const team2Data = findByRosterId(teamTwo?.rosterId);
+        const slots: string[] = (league.roster_positions || []).filter(
+          (p: string) => p !== "BN" && p !== "IR" && p !== "TAXI"
+        );
+
+        const finishes = isPastSeason ? await getSeasonFinishes(leagueId) : {};
+        if (cancelled) return;
+
+        setDetail({
+          starters1: (team1Data?.starters_full_data ?? []).filter((s) => Object.keys(s).length > 0),
+          starters2: (team2Data?.starters_full_data ?? []).filter((s) => Object.keys(s).length > 0),
+          bench1: (team1Data?.bench_full_data ?? []).filter((s) => Object.keys(s).length > 0),
+          bench2: (team2Data?.bench_full_data ?? []).filter((s) => Object.keys(s).length > 0),
+          slots,
+          finishOne: teamOne?.rosterId !== undefined ? (finishes[teamOne.rosterId] ?? null) : null,
+          finishTwo: teamTwo?.rosterId !== undefined ? (finishes[teamTwo.rosterId] ?? null) : null,
+        });
+      } catch (error) {
+        console.error("Error loading bracket matchup detail:", error);
+        if (!cancelled) setDetail(null);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [match, leagueId, isPastSeason]);
+
+  return (
+    <Modal visible={!!match} animationType="slide" onRequestClose={onClose}>
+      <View className="flex-1 bg-[#0c0c0e]">
+        <View className="flex-row items-center justify-between px-4 pt-14 pb-3">
+          <Text className="text-white text-[15px] font-bold">
+            {season} Season · Week {match?.week}
+          </Text>
+          <Pressable onPress={onClose} hitSlop={10}>
+            <Feather name="x" size={20} color="#fff" />
+          </Pressable>
+        </View>
+
+        <ScrollView showsVerticalScrollIndicator={false}>
+          <View className="flex-row justify-around px-4 pb-5">
+            {[teamOne, teamTwo].map((team, i) => {
+              const isWinner = !!match?.winnerRosterId && team?.rosterId === match.winnerRosterId;
+              const finish = i === 0 ? detail?.finishOne : detail?.finishTwo;
+              return (
+                <View key={i} className="items-center">
+                  <Image
+                    source={team?.avatar ? { uri: team.avatar } : helmet}
+                    style={isWinner ? { borderWidth: 2, borderColor: "#22c55e" } : undefined}
+                    className="w-[44px] h-[44px] rounded-full mb-1"
+                  />
+                  <Text numberOfLines={1} className="text-[12px] font-bold text-white max-w-[120px] text-center">
+                    {team?.name ?? "Unknown"}
+                  </Text>
+                  {team?.points !== undefined && (
+                    <Text
+                      style={{ fontVariant: ["tabular-nums"], color: isWinner ? "#22c55e" : "#fff" }}
+                      className="text-[18px] font-bold mt-0.5"
+                    >
+                      {team.points.toFixed(1)}
+                    </Text>
+                  )}
+                  {finish && (
+                    <View
+                      style={{ backgroundColor: `${FINISH_COLOR[finish]}22`, borderColor: `${FINISH_COLOR[finish]}55` }}
+                      className="px-2 py-0.5 rounded-full border mt-1.5"
+                    >
+                      <Text style={{ color: FINISH_COLOR[finish] }} className="text-[9px] font-bold">
+                        {finish}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              );
+            })}
+          </View>
+
+          {loading || !detail ? (
+            <View className="py-10 items-center">
+              <ActivityIndicator color="#af1222" />
+            </View>
+          ) : (
+            <MatchupPlayerGrid
+              starters1={detail.starters1}
+              starters2={detail.starters2}
+              bench1={detail.bench1}
+              bench2={detail.bench2}
+              slots={detail.slots}
+            />
+          )}
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
 
 const FINISH_MEDAL: Record<string, { icon: keyof typeof Ionicons.glyphMap; color: string }> = {
   champion: { icon: "trophy", color: "#eab308" },
@@ -64,6 +226,7 @@ export default function LeagueHistoryScreen() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
+  const [selectedMatch, setSelectedMatch] = useState<{ match: BracketMatch; leagueId: string } | null>(null);
 
   useEffect(() => {
     if (!leagueID) return;
@@ -147,7 +310,9 @@ export default function LeagueHistoryScreen() {
       )}
 
       <View className="bg-[#0c0c0e] -mx-4 px-4 mb-6">
-        {selectedLeagueId && <PlayoffBracket leagueID={selectedLeagueId} />}
+        {selectedLeagueId && (
+          <PlayoffBracket leagueID={selectedLeagueId} onSelectMatch={(match, leagueId) => setSelectedMatch({ match, leagueId })} />
+        )}
       </View>
 
       <Text className="text-[13px] font-bold tracking-wider text-gray-500 mb-3">CHAMPIONS TIMELINE</Text>
@@ -169,6 +334,14 @@ export default function LeagueHistoryScreen() {
           />
         ))
       )}
+
+      <MatchupDetailModal
+        match={selectedMatch?.match ?? null}
+        leagueId={selectedMatch?.leagueId ?? null}
+        season={seasonOptions.find((o) => o.leagueId === selectedMatch?.leagueId)?.label ?? null}
+        isPastSeason={!!selectedMatch && selectedMatch.leagueId !== leagueID}
+        onClose={() => setSelectedMatch(null)}
+      />
     </ScrollView>
   );
 }

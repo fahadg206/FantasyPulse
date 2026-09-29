@@ -12,7 +12,7 @@ const helmet = require("../../../assets/images/helmet2.png");
 const TIER_META: Record<SOSTier, { color: string; bg: string }> = {
   "Tough Matchup": { color: "#ef4444", bg: "bg-red-500/15" },
   Underdog: { color: "#f97316", bg: "bg-orange-500/15" },
-  Even: { color: "#eab308", bg: "bg-yellow-500/15" },
+  "Could Go Either Way": { color: "#eab308", bg: "bg-yellow-500/15" },
   Favorite: { color: "#4ade80", bg: "bg-green-400/15" },
   Cakewalk: { color: "#15803d", bg: "bg-green-800/20" },
 };
