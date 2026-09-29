@@ -407,16 +407,16 @@ export default function LeagueManagers() {
                   onPress={() => showPowerLeaderboard("starterRank")}
                 />
                 <RankStatTile
-                  label="OVERALL RANK"
-                  rank={currentExtras?.tier?.rank}
-                  total={managerIds.length}
-                  onPress={() => showPowerLeaderboard("rank")}
-                />
-                <RankStatTile
                   label="BENCH RANK"
                   rank={benchRankByUser[selectedId ?? ""]}
                   total={managerIds.length}
                   onPress={showBenchLeaderboard}
+                />
+                <RankStatTile
+                  label="OVERALL RANK"
+                  rank={currentExtras?.tier?.rank}
+                  total={managerIds.length}
+                  onPress={() => showPowerLeaderboard("rank")}
                 />
               </View>
             </View>
