@@ -22,6 +22,17 @@ export interface TradeGrade {
   /** 0 = dead even; how far the biggest side's value sits above the average side's value, as a fraction of that average */
   marginRatio: number;
   verdict: { text: string; color: string };
+  /** A-F, same marginRatio bar as verdict just read as a single letter - "—" when there's nothing to grade off of */
+  letterGrade: string;
+}
+
+function letterGradeFor(marginRatio: number, hasValue: boolean): string {
+  if (!hasValue) return "—";
+  if (marginRatio <= 0.08) return "A";
+  if (marginRatio <= 0.2) return "B";
+  if (marginRatio <= 0.3) return "C";
+  if (marginRatio <= 0.5) return "D";
+  return "F";
 }
 
 function sideAssetsFor(event: TradeEvent): { team: TxTeam; assets: TxAsset[] }[] {
@@ -43,7 +54,7 @@ export function gradeTrade(event: TradeEvent, valueFor: TradeValueLookup): Trade
 
   const totalValue = sides.reduce((s, side) => s + side.value, 0);
   if (sides.length < 2 || totalValue === 0) {
-    return { sides, winner: null, marginRatio: 0, verdict: { text: "No valued players", color: "#6b7280" } };
+    return { sides, winner: null, marginRatio: 0, verdict: { text: "No valued players", color: "#6b7280" }, letterGrade: "—" };
   }
 
   const sorted = [...sides].sort((a, b) => b.value - a.value);
@@ -65,5 +76,5 @@ export function gradeTrade(event: TradeEvent, valueFor: TradeValueLookup): Trade
     winner = sorted[0].team;
   }
 
-  return { sides, winner, marginRatio, verdict };
+  return { sides, winner, marginRatio, verdict, letterGrade: letterGradeFor(marginRatio, true) };
 }

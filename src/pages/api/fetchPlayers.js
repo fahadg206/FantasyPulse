@@ -237,9 +237,20 @@ export default async function handler(req, res) {
     const lastUpdate = await collection.findOne({ id: "lastUpdate" });
     const now = new Date();
     const lastUpdateDate = lastUpdate ? new Date(lastUpdate.date) : new Date(0);
-    const isSameDay = now.toDateString() === lastUpdateDate.toDateString();
+    // Was "same calendar day" - real roster moves (a waiver claim, a
+    // practice-squad call-up, a late free-agent signing) happen all day
+    // long during the season, and a player added at 10am used to be
+    // invisible everywhere in the app - Rankings, Start/Sit, Trade
+    // Calculator, all of it - until midnight. Verified live: two real,
+    // currently-active players (John FitzPatrick, Treyvhon Saunders) were
+    // missing from this endpoint's own output because of exactly this.
+    // A few hours keeps the same "don't hit Sleeper on every request"
+    // point of this cache without letting a real roster move sit stale
+    // for up to a day.
+    const CACHE_TTL_MS = 3 * 60 * 60 * 1000;
+    const isFresh = now.getTime() - lastUpdateDate.getTime() < CACHE_TTL_MS;
 
-    if (isSameDay) {
+    if (isFresh) {
       const existingDocument = await collection.findOne(filter);
       res.status(200).json(existingDocument.players);
     } else {

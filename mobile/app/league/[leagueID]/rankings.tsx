@@ -28,7 +28,6 @@ interface LeagueMeta {
   leagueValueSettings: LeagueValueSettings;
   playersData: Record<string, any>;
   valuesBySleeperId?: Record<string, RawPlayerValue>;
-  maxWeek: number;
 }
 
 // Sleeper's own "LV"/"OAK" alias (see fetchPlayers.js) points both ids at
@@ -65,7 +64,6 @@ export default function WeeklyRankingsScreen() {
         if (cancelled) return;
 
         const currentWeek = nflState.season_type === "post" ? 18 : nflState.display_week || 1;
-        const maxWeek = (league.settings?.playoff_week_start ?? 15) + 3; // real regular season + real playoffs, same bound Trade Calculator's win-impact projection uses
         setWeek(currentWeek);
 
         let valuesBySleeperId: Record<string, RawPlayerValue> | undefined;
@@ -74,7 +72,7 @@ export default function WeeklyRankingsScreen() {
           if (cancelled) return;
         }
 
-        setLeagueMeta({ season: league.season, isDynasty: settings.isDynasty, leagueValueSettings: settings, playersData, valuesBySleeperId, maxWeek });
+        setLeagueMeta({ season: league.season, isDynasty: settings.isDynasty, leagueValueSettings: settings, playersData, valuesBySleeperId });
       } catch (error) {
         console.error("Error loading league data for rankings:", error);
       } finally {
@@ -157,29 +155,7 @@ export default function WeeklyRankingsScreen() {
   return (
     <View className="flex-1 bg-[#0c0c0e]">
       <View className="px-4 pt-4 pb-3">
-        <View className="flex-row items-center justify-between">
-          <Text className="text-[11px] font-bold tracking-widest text-brand">WEEK {week} RANKINGS</Text>
-          <View className="flex-row items-center gap-1">
-            <Pressable
-              onPress={() => setWeek((w) => Math.max(1, w - 1))}
-              disabled={week <= 1}
-              hitSlop={8}
-              style={{ opacity: week <= 1 ? 0.3 : 1 }}
-              className="w-6 h-6 rounded-full bg-white/10 items-center justify-center"
-            >
-              <Feather name="chevron-left" size={13} color="#fff" />
-            </Pressable>
-            <Pressable
-              onPress={() => setWeek((w) => Math.min(leagueMeta?.maxWeek ?? 18, w + 1))}
-              disabled={week >= (leagueMeta?.maxWeek ?? 18)}
-              hitSlop={8}
-              style={{ opacity: week >= (leagueMeta?.maxWeek ?? 18) ? 0.3 : 1 }}
-              className="w-6 h-6 rounded-full bg-white/10 items-center justify-center"
-            >
-              <Feather name="chevron-right" size={13} color="#fff" />
-            </Pressable>
-          </View>
-        </View>
+        <Text className="text-[11px] font-bold tracking-widest text-brand">WEEK {week} RANKINGS</Text>
         <Text className="text-white text-[21px] font-bold mt-0.5">Player Rankings</Text>
         <Text className="text-gray-500 text-[12px] mt-1.5">
           Sleeper and ESPN are real Week {week} rankings; KTC and FantasyCalc reflect current{" "}

@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { View, Text, Image, ActivityIndicator } from "react-native";
+import { View, Text, Image, Pressable, ActivityIndicator } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { getTeamLogo } from "../lib/nflTeams";
-import { buildLeagueTransactions, buildAllSeasonsTradesBetween, TradeEvent, TxAsset } from "../lib/leagueTransactions";
+import { buildLeagueTransactions, buildAllSeasonsTradesBetween, TradeEvent, TxAsset, TxTeam } from "../lib/leagueTransactions";
+import type { TradeGrade } from "../lib/tradeGrade";
 
 const POSITION_COLOR: Record<string, string> = {
   QB: "#ef4444",
@@ -48,10 +49,23 @@ function TradeAssetChip({ asset }: { asset: TxAsset }) {
   );
 }
 
-function TeamAvatar({ name, avatar }: { name: string; avatar?: string }) {
+function TeamAvatar({ name, avatar, isWinner }: { name: string; avatar?: string; isWinner?: boolean }) {
   return (
     <View className="flex-row items-center gap-1.5">
-      {avatar && <Image source={{ uri: avatar }} className="w-[22px] h-[22px] rounded-full" />}
+      {avatar && (
+        <View>
+          <Image
+            source={{ uri: avatar }}
+            style={isWinner ? { borderWidth: 2, borderColor: "#22c55e" } : undefined}
+            className="w-[22px] h-[22px] rounded-full"
+          />
+          {isWinner && (
+            <View className="absolute -bottom-[1px] -right-[1px] w-[11px] h-[11px] rounded-full bg-[#22c55e] items-center justify-center border border-white dark:border-[#1a1414]">
+              <Feather name="check" size={7} color="#fff" />
+            </View>
+          )}
+        </View>
+      )}
       <Text numberOfLines={1} className="text-black dark:text-white font-bold text-[13px]">
         {name}
       </Text>
@@ -59,16 +73,31 @@ function TeamAvatar({ name, avatar }: { name: string; avatar?: string }) {
   );
 }
 
-function TradeHistoryCard({ event }: { event: TradeEvent }) {
+function LetterGradeBadge({ grade }: { grade: TradeGrade }) {
+  return (
+    <View style={{ backgroundColor: `${grade.verdict.color}22`, borderColor: grade.verdict.color }} className="px-2 py-0.5 rounded-md border">
+      <Text style={{ color: grade.verdict.color }} className="text-[11px] font-extrabold">
+        {grade.letterGrade}
+      </Text>
+    </View>
+  );
+}
+
+export function TradeHistoryCard({ event, grade, onPress }: { event: TradeEvent; grade?: TradeGrade; onPress?: () => void }) {
+  const isWinner = (team: TxTeam) => !!grade?.winner?.userId && grade.winner.userId === team.userId;
+
   if (event.kind === "trade2") {
     return (
-      <View className="bg-[#f0eeee] dark:bg-[#1a1414] rounded-2xl p-4 mb-3">
+      <Pressable onPress={onPress} className="bg-[#f0eeee] dark:bg-[#1a1414] rounded-2xl p-4 mb-3">
         <View className="flex-row items-center justify-between mb-1">
-          <TeamAvatar name={event.teamA.name} avatar={event.teamA.avatar} />
+          <TeamAvatar name={event.teamA.name} avatar={event.teamA.avatar} isWinner={isWinner(event.teamA)} />
           <Feather name="repeat" size={14} color="#af1222" />
-          <TeamAvatar name={event.teamB.name} avatar={event.teamB.avatar} />
+          <TeamAvatar name={event.teamB.name} avatar={event.teamB.avatar} isWinner={isWinner(event.teamB)} />
         </View>
-        <Text className="text-gray-500 text-[10px] mb-3 text-center">{formatDate(event.timestamp)}</Text>
+        <View className="flex-row items-center justify-center gap-2 mb-3">
+          <Text className="text-gray-500 text-[10px]">{formatDate(event.timestamp)}</Text>
+          {grade && <LetterGradeBadge grade={grade} />}
+        </View>
         <View className="flex-row">
           <View className="flex-1 gap-2">
             <Text className="text-[9px] font-bold tracking-wide text-gray-500">
@@ -88,30 +117,40 @@ function TradeHistoryCard({ event }: { event: TradeEvent }) {
             ))}
           </View>
         </View>
-      </View>
+      </Pressable>
     );
   }
 
   const parts = event.parts;
   return (
-    <View className="bg-[#f0eeee] dark:bg-[#1a1414] rounded-2xl p-4 mb-3">
-      <Text numberOfLines={1} className="text-black dark:text-white font-bold text-[13px] mb-1">
-        {parts.map((p) => p.team.name).join(" ⇄ ")}
-      </Text>
+    <Pressable onPress={onPress} className="bg-[#f0eeee] dark:bg-[#1a1414] rounded-2xl p-4 mb-3">
+      <View className="flex-row items-center justify-between mb-1">
+        <Text numberOfLines={1} className="text-black dark:text-white font-bold text-[13px] flex-1 mr-2">
+          {parts.map((p) => p.team.name).join(" ⇄ ")}
+        </Text>
+        {grade && <LetterGradeBadge grade={grade} />}
+      </View>
       <Text className="text-gray-500 text-[10px] mb-3">{formatDate(event.timestamp)}</Text>
       <View className="gap-3">
         {parts.map((part, i) => (
           <View key={i} className="gap-2">
-            <Text className="text-[9px] font-bold tracking-wide text-gray-500">
-              {part.team.name.toUpperCase()} RECEIVES
-            </Text>
+            <View className="flex-row items-center gap-1.5">
+              {isWinner(part.team) && (
+                <View className="w-3.5 h-3.5 rounded-full bg-[#22c55e] items-center justify-center">
+                  <Feather name="check" size={8} color="#fff" />
+                </View>
+              )}
+              <Text className="text-[9px] font-bold tracking-wide text-gray-500">
+                {part.team.name.toUpperCase()} RECEIVES
+              </Text>
+            </View>
             {part.receives.map((a, j) => (
               <TradeAssetChip key={j} asset={a} />
             ))}
           </View>
         ))}
       </View>
-    </View>
+    </Pressable>
   );
 }
 
