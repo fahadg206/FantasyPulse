@@ -236,6 +236,10 @@ export default function LeagueManagers() {
     () => (selectedManager?.starters_full_data ?? []).filter((s) => Object.keys(s).length > 0),
     [selectedManager]
   );
+  const bench = useMemo(
+    () => (selectedManager?.bench_full_data ?? []).filter((s) => Object.keys(s).length > 0),
+    [selectedManager]
+  );
   const results = weeklyResults[selectedId ?? ""] ?? [];
 
   const [leaderboard, setLeaderboard] = useState<LeaderboardState | null>(null);
@@ -255,6 +259,41 @@ export default function LeagueManagers() {
         name: scheduleData[r.userId]?.name ?? "Unknown",
         avatar: scheduleData[r.userId]?.avatar,
         value: which === "rank" ? `${r.powerScore.toFixed(1)} pwr` : `${r.strengthScore.toFixed(1)} str`,
+      })),
+    });
+  };
+
+  // Real bench depth per manager, right now - sum of each bench player's
+  // real weekly projection (not actual points, which read 0 for everyone
+  // before kickoff and wouldn't rank anything meaningfully).
+  const benchProjByUser = useMemo(() => {
+    const totals: Record<string, number> = {};
+    for (const userId of managerIds) {
+      totals[userId] = (scheduleData[userId]?.bench_full_data ?? []).reduce((s, p) => s + parseFloat(p.proj || "0"), 0);
+    }
+    return totals;
+  }, [managerIds, scheduleData]);
+
+  const benchRankByUser = useMemo(() => {
+    const sorted = [...managerIds].sort((a, b) => (benchProjByUser[b] ?? 0) - (benchProjByUser[a] ?? 0));
+    const rankMap: Record<string, number> = {};
+    sorted.forEach((id, i) => {
+      rankMap[id] = i + 1;
+    });
+    return rankMap;
+  }, [managerIds, benchProjByUser]);
+
+  const showBenchLeaderboard = () => {
+    if (managerIds.length === 0) return;
+    const sorted = [...managerIds].sort((a, b) => (benchProjByUser[b] ?? 0) - (benchProjByUser[a] ?? 0));
+    setLeaderboard({
+      title: "Bench Rank",
+      subtitle: "Real projected points sitting on the bench this week",
+      rows: sorted.map((id) => ({
+        userId: id,
+        name: scheduleData[id]?.name ?? "Unknown",
+        avatar: scheduleData[id]?.avatar,
+        value: `${(benchProjByUser[id] ?? 0).toFixed(1)} pts`,
       })),
     });
   };
@@ -359,7 +398,7 @@ export default function LeagueManagers() {
                 )}
               </View>
 
-              <View className="flex-row mt-4 gap-6">
+              <View className="flex-row mt-4 gap-4">
                 <StatTile label="RECORD" value={`${selectedManager.wins ?? 0}-${selectedManager.losses ?? 0}`} />
                 <RankStatTile
                   label="STARTER RANK"
@@ -372,6 +411,12 @@ export default function LeagueManagers() {
                   rank={currentExtras?.tier?.rank}
                   total={managerIds.length}
                   onPress={() => showPowerLeaderboard("rank")}
+                />
+                <RankStatTile
+                  label="BENCH RANK"
+                  rank={benchRankByUser[selectedId ?? ""]}
+                  total={managerIds.length}
+                  onPress={showBenchLeaderboard}
                 />
               </View>
             </View>
@@ -526,6 +571,27 @@ export default function LeagueManagers() {
                   </View>
                 ))}
               </View>
+
+              {bench.length > 0 && (
+                <>
+                  <Text className="font-bold mb-2.5 text-black dark:text-white text-[15px]">Bench</Text>
+                  <View className="flex-row flex-wrap gap-2 mb-7">
+                    {bench.map((s: Starter, i) => (
+                      <View key={i} className="w-[31%]">
+                        <PlayerCard
+                          variant="tile"
+                          playerId={s.id}
+                          name={displayName(s)}
+                          position={s.pos ?? ""}
+                          team={s.team}
+                          bottomSlot={<Text className="text-white/80 text-[9px] mt-0.5">{s.points ?? 0} pts</Text>}
+                          onExpand={() => setDetailPlayer({ playerId: s.id, name: displayName(s), position: s.pos ?? "", team: s.team })}
+                        />
+                      </View>
+                    ))}
+                  </View>
+                </>
+              )}
 
               <Text className="font-bold mb-2.5 text-black dark:text-white text-[15px]">Schedule</Text>
               <View className="mb-6 rounded-xl border border-gray-100 dark:border-white/10 overflow-hidden">
