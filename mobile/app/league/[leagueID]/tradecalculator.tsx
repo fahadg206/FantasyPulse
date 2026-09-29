@@ -374,6 +374,42 @@ export default function TradeCalculator() {
         )}
       </View>
 
+      {hasAnyItems && (
+        <View className="bg-[#141416] border border-white/10 rounded-2xl p-4 mt-3">
+          <Text className="text-gray-500 text-[10px] font-bold tracking-widest mb-3">TRADE VALUATION</Text>
+          <View className="flex-row gap-3">
+            {activeTeamIds.map((userId) => {
+              const user = users.find((u) => u.id === userId);
+              const netValue = netValueByTeam[userId] ?? 0;
+              return (
+                <View key={userId} className="flex-1 items-center">
+                  <Image source={user?.avatar ? { uri: user.avatar } : helmet} className="w-9 h-9 rounded-full mb-1" />
+                  <Text numberOfLines={1} className="text-white text-[11px] font-bold text-center">
+                    {user?.name}
+                  </Text>
+                  <Text
+                    style={{ fontVariant: ["tabular-nums"], color: netValue >= 0 ? "#22c55e" : "#ef4444" }}
+                    className="text-[15px] font-extrabold mt-0.5"
+                  >
+                    {netValue >= 0 ? "+" : ""}
+                    {formatValue(netValue)}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+          <View
+            style={{ backgroundColor: `${verdict.color}18`, borderColor: verdict.color }}
+            className="self-center mt-3 px-4 py-1.5 rounded-full border"
+          >
+            <Text style={{ color: verdict.color }} className="font-bold text-[13px]">
+              {verdict.text === "Highway robbery" && winnerName ? `Highway robbery for ${winnerName}` : verdict.text}
+              {verdict.text !== "Highway robbery" && winnerName ? ` · Favors ${winnerName}` : ""}
+            </Text>
+          </View>
+        </View>
+      )}
+
       {activeTeamIds.length >= 2 && leagueAvgNeed && valueSettings && (
         <View className="gap-3 mt-3">
           {activeTeamIds.map((userId, i) => {
@@ -550,18 +586,6 @@ export default function TradeCalculator() {
               </View>
             );
           })}
-
-          {hasAnyItems && (
-            <View
-              style={{ backgroundColor: `${verdict.color}18`, borderColor: verdict.color }}
-              className="self-center px-4 py-1.5 rounded-full border"
-            >
-              <Text style={{ color: verdict.color }} className="font-bold text-[13px]">
-                {verdict.text}
-                {winnerName ? ` · Favors ${winnerName}` : ""}
-              </Text>
-            </View>
-          )}
         </View>
       )}
 

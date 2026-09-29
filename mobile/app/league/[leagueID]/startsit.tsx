@@ -5,7 +5,7 @@ import { Feather } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { sleeper, backend } from "../../../lib/api";
 import { getLeagueValueSettings, RawPlayerValue, LeagueValueSettings } from "../../../lib/playerValue";
-import { buildStartSitBoard, scoreArbitraryPlayers, StartSitBoard, StartSitPlayer } from "../../../lib/startSit";
+import { buildStartSitBoard, scoreArbitraryPlayers, StartSitBoard, StartSitPlayer, formatRank, getSourceLogo } from "../../../lib/startSit";
 import { getTeamColor, getTeamLogo, getPositionColor } from "../../../lib/nflTeams";
 import { usePlayerDetail } from "../../../components/PlayerDetailProvider";
 
@@ -40,11 +40,6 @@ function getPlayerPhotoUri(playerId: string, pos: string | undefined, team: stri
   return `https://sleepercdn.com/content/nfl/players/thumb/${playerId}.jpg`;
 }
 
-/** "#4" -> "QB4" - a positional rank reads the same way real rankings pages label it. */
-function formatRank(pos: string, rank: number | null): string {
-  return rank === null ? "—" : `${pos}${Math.round(rank)}`;
-}
-
 // Sleeper's real roster_positions slot names run long ("SUPER_FLEX",
 // "WRRB_FLEX") - shortened here so the lineup row has room to breathe.
 const SLOT_LABELS: Record<string, string> = {
@@ -56,20 +51,6 @@ const SLOT_LABELS: Record<string, string> = {
 };
 function formatSlotLabel(slot: string): string {
   return SLOT_LABELS[slot] ?? slot;
-}
-
-// Real favicons for each ranking source, via Google's favicon service - a
-// small recognizable mark instead of a text label, so a chip stays legible
-// at a glance no matter how many sources a player has.
-const SOURCE_DOMAINS: Record<string, string> = {
-  Sleeper: "sleeper.com",
-  ESPN: "espn.com",
-  KTC: "keeptradecut.com",
-  FantasyCalc: "fantasycalc.com",
-};
-function getSourceLogo(label: string): string | null {
-  const domain = SOURCE_DOMAINS[label];
-  return domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=64` : null;
 }
 
 export default function StartSitScreen() {

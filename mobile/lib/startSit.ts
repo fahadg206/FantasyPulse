@@ -80,7 +80,7 @@ async function buildScoringIndex(ctx: ScoringContext): Promise<ScoringIndex> {
 
   const [espnAllPlayers, espnIndex, fantasyCalcIndex, opponentByTeam] = await Promise.all([
     getAllPlayersData().catch(() => ({}) as Record<string, { espn_id?: number }>),
-    getEspnWeeklyData(season, week).catch(() => ({ byId: new Map(), byName: new Map() })),
+    getEspnWeeklyData(season, week).catch(() => ({ byId: new Map(), byName: new Map(), byMascot: new Map() })),
     getFantasyCalcIndex(leagueValueSettings.isDynasty, leagueValueSettings.isSuperflex).catch(() => new Map()),
     cachedFetch(`nflOpponents:${season}:${week}`, OPPONENTS_TTL_MS, () => getLiveGameDetailsByTeam(week, season)).catch(
       () => ({}) as Record<string, { opponentAbbr?: string; isHome: boolean }>
@@ -146,9 +146,17 @@ function scorePlayer(pid: string, playersData: Record<string, any>, idx: Scoring
   // Sleeper's own espn_id cross-reference is the fast, exact path, but
   // it's genuinely missing for plenty of current relevant players
   // (confirmed live) - falling back to a normalized name match against
-  // the same ESPN response is what actually gets real coverage.
+  // the same ESPN response is what actually gets real coverage. Defenses
+  // need a third path: ESPN publishes them as "Cowboys D/ST" (mascot
+  // only) while this app's own DEF entries are "Dallas Cowboys" (city +
+  // mascot), so a full-name match never lines up - verified live that
+  // ESPN really does carry real D/ST rankings, matching on the mascot
+  // alone (p.ln, already just "Cowboys" for a DEF entry) is what connects them.
   const espnId = idx.espnAllPlayers[pid]?.espn_id;
-  const espnEntry = (espnId !== undefined ? idx.espnIndex.byId.get(espnId) : undefined) ?? idx.espnIndex.byName.get(normalizePlayerName(name));
+  const espnEntry =
+    (espnId !== undefined ? idx.espnIndex.byId.get(espnId) : undefined) ??
+    idx.espnIndex.byName.get(normalizePlayerName(name)) ??
+    (pos === "DEF" ? idx.espnIndex.byMascot.get(normalizePlayerName(p?.ln ?? "")) : undefined);
   if (espnEntry?.rank !== undefined) sources.push({ label: "ESPN", rank: espnEntry.rank });
 
   // KTC - dynasty leagues only, where a trade-value market actually means something.
@@ -259,4 +267,23 @@ export async function scoreArbitraryPlayers(params: {
     }
     return { ...scored, dynastyValue };
   });
+}
+
+/** "#4" -> "QB4" - a positional rank reads the same way real rankings pages label it. */
+export function formatRank(pos: string, rank: number | null): string {
+  return rank === null ? "—" : `${pos}${Math.round(rank)}`;
+}
+
+// Real favicons for each ranking source, via Google's favicon service - a
+// small recognizable mark instead of a text label, so a chip stays legible
+// at a glance no matter how many sources a player has.
+const SOURCE_DOMAINS: Record<string, string> = {
+  Sleeper: "sleeper.com",
+  ESPN: "espn.com",
+  KTC: "keeptradecut.com",
+  FantasyCalc: "fantasycalc.com",
+};
+export function getSourceLogo(label: string): string | null {
+  const domain = SOURCE_DOMAINS[label];
+  return domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=64` : null;
 }

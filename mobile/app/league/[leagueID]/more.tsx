@@ -73,6 +73,12 @@ export default function More() {
       path: `/league/${leagueID}/strengthofschedule`,
     },
     {
+      label: "Rankings",
+      description: "Every player, every position, ranked by the same real expert consensus",
+      icon: <Ionicons name="podium" size={20} color="#af1222" />,
+      path: `/league/${leagueID}/rankings`,
+    },
+    {
       label: "Start / Sit",
       description: "Real expert consensus rankings and your best lineup, one tap away",
       icon: <Ionicons name="swap-vertical" size={20} color="#af1222" />,

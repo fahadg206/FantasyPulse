@@ -40,6 +40,13 @@ export interface EspnRankingsIndex {
   byId: Map<number, EspnPlayerWeek>;
   /** keyed by normalized full name - not every real player has Sleeper's espn_id field populated (confirmed live: it's missing for plenty of current, relevant players), so this is the fallback that actually gets real coverage */
   byName: Map<string, EspnPlayerWeek>;
+  /** keyed by normalized mascot alone ("cowboys", "falcons") - defenses need their own fallback: ESPN publishes them as "Cowboys D/ST" (mascot only) while this app's own DEF entries are "Dallas Cowboys" (city + mascot), so a plain full-name match never lines up. Verified live: ESPN really does carry real D/ST rankings, this is what actually connects them. */
+  byMascot: Map<string, EspnPlayerWeek>;
+}
+
+/** strips a trailing " D/ST" (ESPN's defense naming) down to just the mascot, e.g. "Falcons D/ST" -> "falcons". */
+function mascotOnly(name: string): string {
+  return normalizePlayerName(name.replace(/\s*d\/?st\.?$/i, ""));
 }
 
 export async function getEspnWeeklyData(season: string | number, week: number): Promise<EspnRankingsIndex> {
@@ -47,11 +54,15 @@ export async function getEspnWeeklyData(season: string | number, week: number): 
 
   const byId = new Map<number, EspnPlayerWeek>();
   const byName = new Map<string, EspnPlayerWeek>();
+  const byMascot = new Map<string, EspnPlayerWeek>();
   for (const idStr in raw) {
     const entry = raw[idStr];
     const parsed: EspnPlayerWeek = { name: entry.name, rank: entry.rank, outlook: entry.outlook };
     byId.set(Number(idStr), parsed);
-    if (entry.name) byName.set(normalizePlayerName(entry.name), parsed);
+    if (entry.name) {
+      byName.set(normalizePlayerName(entry.name), parsed);
+      if (/d\/?st\.?$/i.test(entry.name.trim())) byMascot.set(mascotOnly(entry.name), parsed);
+    }
   }
-  return { byId, byName };
+  return { byId, byName, byMascot };
 }
