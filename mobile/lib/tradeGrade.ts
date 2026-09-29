@@ -24,16 +24,29 @@ export interface TradeGrade {
   verdict: { text: string; color: string };
   /** A-F, same marginRatio bar as verdict just read as a single letter - "—" when there's nothing to grade off of */
   letterGrade: string;
+  /** a plain-language read of who benefited - "" when it's close enough to just call fair, "Slightly favors X" for a real but modest lean, "X won this trade" for a clear one, "X robbed Y" for the worst tier */
+  summary: string;
 }
 
-function letterGradeFor(marginRatio: number, hasValue: boolean): string {
-  if (!hasValue) return "—";
-  if (marginRatio <= 0.08) return "A";
-  if (marginRatio <= 0.2) return "B";
-  if (marginRatio <= 0.3) return "C";
-  if (marginRatio <= 0.5) return "D";
-  return "F";
-}
+// One tier list drives the verdict text, the letter grade, and the
+// verbal summary together, so "B" always means "Slightly favors" and
+// nothing can drift out of sync between them. Real trades most people
+// agree to land in the top two or three tiers - these bars run looser
+// than a school grading curve on purpose, a genuinely even-ish trade
+// should read as fair, not just "not technically robbery."
+const TIERS: {
+  max: number;
+  letter: string;
+  text: string;
+  color: string;
+  summary: (winner: string, loser: string) => string;
+}[] = [
+  { max: 0.1, letter: "A", text: "Fair trade", color: "#22c55e", summary: () => "" },
+  { max: 0.25, letter: "B", text: "Slightly lopsided", color: "#84cc16", summary: (w) => `Slightly favors ${w}` },
+  { max: 0.45, letter: "C", text: "Unfair", color: "#eab308", summary: (w) => `${w} won this trade` },
+  { max: 0.7, letter: "D", text: "Lopsided", color: "#f97316", summary: (w) => `${w} won this trade` },
+  { max: Infinity, letter: "F", text: "Highway robbery", color: "#ef4444", summary: (w, l) => `${w} robbed ${l}` },
+];
 
 function sideAssetsFor(event: TradeEvent): { team: TxTeam; assets: TxAsset[] }[] {
   if (event.kind === "trade2") {
@@ -54,27 +67,30 @@ export function gradeTrade(event: TradeEvent, valueFor: TradeValueLookup): Trade
 
   const totalValue = sides.reduce((s, side) => s + side.value, 0);
   if (sides.length < 2 || totalValue === 0) {
-    return { sides, winner: null, marginRatio: 0, verdict: { text: "No valued players", color: "#6b7280" }, letterGrade: "—" };
+    return {
+      sides,
+      winner: null,
+      marginRatio: 0,
+      verdict: { text: "No valued players", color: "#6b7280" },
+      letterGrade: "—",
+      summary: "",
+    };
   }
 
   const sorted = [...sides].sort((a, b) => b.value - a.value);
   const avgSideValue = totalValue / sides.length;
   const marginRatio = avgSideValue > 0 ? (sorted[0].value - sorted[1].value) / avgSideValue : 0;
 
-  let verdict: { text: string; color: string };
-  let winner: TxTeam | null = null;
-  if (marginRatio <= 0.08) {
-    verdict = { text: "Fair trade", color: "#22c55e" };
-  } else if (marginRatio <= 0.2) {
-    verdict = { text: "Slightly lopsided", color: "#eab308" };
-    winner = sorted[0].team;
-  } else if (marginRatio <= 0.4) {
-    verdict = { text: "Unfair", color: "#f97316" };
-    winner = sorted[0].team;
-  } else {
-    verdict = { text: "Lopsided", color: "#ef4444" };
-    winner = sorted[0].team;
-  }
+  const tier = TIERS.find((t) => marginRatio <= t.max)!;
+  const winner = tier.letter === "A" ? null : sorted[0].team;
+  const loser = sorted[sorted.length - 1].team;
 
-  return { sides, winner, marginRatio, verdict, letterGrade: letterGradeFor(marginRatio, true) };
+  return {
+    sides,
+    winner,
+    marginRatio,
+    verdict: { text: tier.text, color: tier.color },
+    letterGrade: tier.letter,
+    summary: winner ? tier.summary(winner.name, loser.name) : "",
+  };
 }

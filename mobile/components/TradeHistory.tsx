@@ -94,6 +94,15 @@ export function TradeHistoryCard({ event, grade, onPress }: { event: TradeEvent;
           <Feather name="repeat" size={14} color="#af1222" />
           <TeamAvatar name={event.teamB.name} avatar={event.teamB.avatar} isWinner={isWinner(event.teamB)} />
         </View>
+        {grade?.summary && (
+          <View className="flex-row items-center justify-center gap-1.5 mb-1.5">
+            {isWinner(event.teamA) && <Feather name="arrow-left" size={12} color={grade.verdict.color} />}
+            <Text style={{ color: grade.verdict.color }} className="text-[11px] font-bold text-center">
+              {grade.summary}
+            </Text>
+            {isWinner(event.teamB) && <Feather name="arrow-right" size={12} color={grade.verdict.color} />}
+          </View>
+        )}
         <View className="flex-row items-center justify-center gap-2 mb-3">
           <Text className="text-gray-500 text-[10px]">{formatDate(event.timestamp)}</Text>
           {grade && <LetterGradeBadge grade={grade} />}
@@ -130,6 +139,11 @@ export function TradeHistoryCard({ event, grade, onPress }: { event: TradeEvent;
         </Text>
         {grade && <LetterGradeBadge grade={grade} />}
       </View>
+      {grade?.summary && (
+        <Text style={{ color: grade.verdict.color }} className="text-[11px] font-bold mb-1.5">
+          {grade.summary}
+        </Text>
+      )}
       <Text className="text-gray-500 text-[10px] mb-3">{formatDate(event.timestamp)}</Text>
       <View className="gap-3">
         {parts.map((part, i) => (
