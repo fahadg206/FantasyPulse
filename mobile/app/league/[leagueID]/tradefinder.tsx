@@ -381,6 +381,7 @@ export default function TradeFinderScreen({ hideHeader }: { hideHeader?: boolean
                     key={c.partnerUserId}
                     candidate={c}
                     partner={teams.find((t) => t.userId === c.partnerUserId)}
+                    myTeamName={myTeam?.name}
                     playersData={leagueMeta?.playersData ?? {}}
                     onPressPartner={() => router.push(`/profile/manager/${c.partnerUserId}`)}
                     onPressPlayer={(playerId, pos, team) => playerDetail?.openPlayer({ playerId, name: `${leagueMeta?.playersData[playerId]?.fn ?? ""} ${leagueMeta?.playersData[playerId]?.ln ?? ""}`.trim(), position: pos, team })}
@@ -519,20 +520,24 @@ function PlayerPickerModal({
 function TradeCandidateCard({
   candidate,
   partner,
+  myTeamName,
   playersData,
   onPressPartner,
   onPressPlayer,
 }: {
   candidate: TradeCandidate;
   partner?: TeamOption;
+  myTeamName?: string;
   playersData: Record<string, any>;
   onPressPartner: () => void;
   onPressPlayer: (playerId: string, pos: string, team?: string) => void;
 }) {
   const fairness = fairnessLabel(candidate.fairnessRatio);
   // Only named once the gap is real, not just inside "Fair trade" noise -
-  // the same bar fairnessLabel already draws that line at.
-  const favors = candidate.fairnessRatio <= 0.05 ? null : candidate.netValue > 0 ? "you" : partner?.name ?? "them";
+  // the same bar fairnessLabel already draws that line at. Named by the
+  // real team, never "you" - reads the same whether you're the one
+  // looking or a leaguemate scrolling through your finder results.
+  const favors = candidate.fairnessRatio <= 0.05 ? null : candidate.netValue > 0 ? (myTeamName ?? "you") : (partner?.name ?? "them");
 
   const PlayerRow = ({ playerId, pos, value, team }: { playerId: string; pos: string; value: number; team?: string }) => (
     <Pressable onPress={() => onPressPlayer(playerId, pos, team)} className="flex-row items-center gap-2.5 bg-[#0c0c0e] rounded-xl px-2.5 py-2 flex-1">

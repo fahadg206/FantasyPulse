@@ -646,7 +646,7 @@ export default function LeagueManagers() {
               <View className="mb-6 rounded-xl border border-gray-100 dark:border-white/10 overflow-hidden">
                 {results.map((wr, i) => {
                   const expanded = expandedWeek === wr.week;
-                  const favoriteName = wr.favorite?.name === selectedManager?.name ? "You" : wr.favorite?.name;
+                  const favoriteName = wr.favorite?.name;
                   return (
                     <View key={wr.week} className={i !== results.length - 1 ? "border-b border-gray-100 dark:border-white/10" : ""}>
                       <Pressable
