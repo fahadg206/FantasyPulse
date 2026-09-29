@@ -98,6 +98,11 @@ export default function TradeCalculator({ hideHeader }: { hideHeader?: boolean }
   const [picker, setPicker] = useState<{ forTeam: string; chosenPlayerId?: string } | null>(null);
   const [detailPlayer, setDetailPlayer] = useState<{ playerId?: string; name: string; position: string; team?: string } | null>(null);
   const [expandedLineup, setExpandedLineup] = useState<Record<string, boolean>>({});
+  // Collapsing a team card down to just its header is the way to stop
+  // scrolling past a team you're done with instead of past its full
+  // roster picker every time - defaults open so nothing looks different
+  // on first load.
+  const [collapsedTeams, setCollapsedTeams] = useState<Record<string, boolean>>({});
 
   // --- win-impact, fetched lazily + recomputed on trade edits ---
   const [simData, setSimData] = useState<LeagueSimData | null>(null);
@@ -317,6 +322,11 @@ export default function TradeCalculator({ hideHeader }: { hideHeader?: boolean }
   const maxAbsNet = Math.max(0, ...activeTeamIds.map((id) => Math.abs(netValueByTeam[id] ?? 0)));
   const verdict = fairnessVerdict(maxAbsNet);
   const hasAnyItems = items.length > 0;
+  // A one-sided offer isn't a trade yet - the valuation only means
+  // something once every team actually has something on the table.
+  const everyTeamHasItems =
+    activeTeamIds.length >= 2 &&
+    activeTeamIds.every((id) => items.some((it) => it.fromUserId === id || it.toUserId === id));
   // Only named once the gap is real, not just inside "Fair trade" noise -
   // the same bar fairnessVerdict already draws that line at.
   const winnerUserId =
@@ -376,7 +386,7 @@ export default function TradeCalculator({ hideHeader }: { hideHeader?: boolean }
         )}
       </View>
 
-      {hasAnyItems && (
+      {everyTeamHasItems && (
         <View className="bg-[#141416] border border-white/10 rounded-2xl p-4 mt-3">
           <Text className="text-gray-500 text-[10px] font-bold tracking-widest mb-3">TRADE VALUATION</Text>
           <View className="flex-row gap-3">
@@ -438,24 +448,32 @@ export default function TradeCalculator({ hideHeader }: { hideHeader?: boolean }
               startingSlots
             );
 
+            const collapsed = !!collapsedTeams[userId];
+
             return (
               <View key={userId} style={{ borderColor: `${accent}33` }} className="bg-[#141416] border rounded-2xl overflow-hidden">
-                <Pressable
-                  onPress={() => router.push(`/profile/manager/${userId}`)}
-                  className="flex-row items-center gap-3 px-4 pt-4 pb-3"
-                >
-                  <Image source={user?.avatar ? { uri: user.avatar } : helmet} className="w-[40px] h-[40px] rounded-full" />
-                  <View className="flex-1">
-                    <Text numberOfLines={1} className="text-white text-[15px] font-bold">
-                      {user?.name}
-                    </Text>
-                    <Text className="text-[11px] mt-0.5" style={{ color: netValue >= 0 ? "#22c55e" : "#ef4444" }}>
-                      {incoming.length > 0 || outgoing.length > 0
-                        ? `${incoming.length > 0 ? `+${incoming.length}` : "0"} players · Value ${netValue >= 0 ? "+" : ""}${formatValue(netValue)}`
-                        : "No changes yet"}
-                    </Text>
-                  </View>
-                </Pressable>
+                <View className="flex-row items-center gap-3 px-4 pt-4 pb-3">
+                  <Pressable onPress={() => router.push(`/profile/manager/${userId}`)} className="flex-row items-center gap-3 flex-1">
+                    <Image source={user?.avatar ? { uri: user.avatar } : helmet} className="w-[40px] h-[40px] rounded-full" />
+                    <View className="flex-1">
+                      <Text numberOfLines={1} className="text-white text-[15px] font-bold">
+                        {user?.name}
+                      </Text>
+                      <Text className="text-[11px] mt-0.5" style={{ color: netValue >= 0 ? "#22c55e" : "#ef4444" }}>
+                        {incoming.length > 0 || outgoing.length > 0
+                          ? `${incoming.length > 0 ? `+${incoming.length}` : "0"} players · Value ${netValue >= 0 ? "+" : ""}${formatValue(netValue)}`
+                          : "No changes yet"}
+                      </Text>
+                    </View>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setCollapsedTeams((p) => ({ ...p, [userId]: !p[userId] }))}
+                    hitSlop={8}
+                    className="w-7 h-7 rounded-full bg-white/5 items-center justify-center"
+                  >
+                    <Feather name={collapsed ? "chevron-down" : "chevron-up"} size={14} color="#9ca3af" />
+                  </Pressable>
+                </View>
 
                 {notableNeeds.length > 0 && (
                   <View className="flex-row items-center gap-1.5 px-4 pb-3">
@@ -465,6 +483,9 @@ export default function TradeCalculator({ hideHeader }: { hideHeader?: boolean }
                     </Text>
                   </View>
                 )}
+
+                {!collapsed && (
+                  <>
 
                 <View className="px-4 pb-3">
                   <Pressable
@@ -584,6 +605,8 @@ export default function TradeCalculator({ hideHeader }: { hideHeader?: boolean }
                       </View>
                     )}
                   </>
+                )}
+                </>
                 )}
               </View>
             );

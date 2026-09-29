@@ -73,16 +73,6 @@ function TeamAvatar({ name, avatar, isWinner }: { name: string; avatar?: string;
   );
 }
 
-function LetterGradeBadge({ grade }: { grade: TradeGrade }) {
-  return (
-    <View style={{ backgroundColor: `${grade.verdict.color}22`, borderColor: grade.verdict.color }} className="px-2 py-0.5 rounded-md border">
-      <Text style={{ color: grade.verdict.color }} className="text-[11px] font-extrabold">
-        {grade.letterGrade}
-      </Text>
-    </View>
-  );
-}
-
 export function TradeHistoryCard({ event, grade, onPress }: { event: TradeEvent; grade?: TradeGrade; onPress?: () => void }) {
   const isWinner = (team: TxTeam) => !!grade?.winner?.userId && grade.winner.userId === team.userId;
 
@@ -103,10 +93,7 @@ export function TradeHistoryCard({ event, grade, onPress }: { event: TradeEvent;
             {isWinner(event.teamB) && <Feather name="arrow-right" size={12} color={grade.verdict.color} />}
           </View>
         )}
-        <View className="flex-row items-center justify-center gap-2 mb-3">
-          <Text className="text-gray-500 text-[10px]">{formatDate(event.timestamp)}</Text>
-          {grade && <LetterGradeBadge grade={grade} />}
-        </View>
+        <Text className="text-gray-500 text-[10px] text-center mb-3">{formatDate(event.timestamp)}</Text>
         <View className="flex-row">
           <View className="flex-1 gap-2">
             <Text className="text-[9px] font-bold tracking-wide text-gray-500">
@@ -133,12 +120,9 @@ export function TradeHistoryCard({ event, grade, onPress }: { event: TradeEvent;
   const parts = event.parts;
   return (
     <Pressable onPress={onPress} className="bg-[#f0eeee] dark:bg-[#1a1414] rounded-2xl p-4 mb-3">
-      <View className="flex-row items-center justify-between mb-1">
-        <Text numberOfLines={1} className="text-black dark:text-white font-bold text-[13px] flex-1 mr-2">
-          {parts.map((p) => p.team.name).join(" ⇄ ")}
-        </Text>
-        {grade && <LetterGradeBadge grade={grade} />}
-      </View>
+      <Text numberOfLines={1} className="text-black dark:text-white font-bold text-[13px] mb-1">
+        {parts.map((p) => p.team.name).join(" ⇄ ")}
+      </Text>
       {grade?.summary && (
         <Text style={{ color: grade.verdict.color }} className="text-[11px] font-bold mb-1.5">
           {grade.summary}
