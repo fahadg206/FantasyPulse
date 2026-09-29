@@ -4,16 +4,16 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { sleeper } from "../../../lib/api";
 import { buildLeagueSimData } from "../../../lib/leagueSimData";
-import { computeStrengthOfSchedule, TeamSOS, WeeklyOpponent, PlayerCard, SOSTier } from "../../../lib/strengthOfSchedule";
+import { computeStrengthOfSchedule, TeamSOS, WeeklyOpponent, PlayerCard, SOSTier, TIER_FOR_SCORE } from "../../../lib/strengthOfSchedule";
 import { ensureScheduleStorylinePost } from "../../../lib/boogieAnalyst";
 
 const helmet = require("../../../assets/images/helmet2.png");
 
 const TIER_META: Record<SOSTier, { color: string; bg: string }> = {
-  Brutal: { color: "#ef4444", bg: "bg-red-500/15" },
-  Tough: { color: "#f97316", bg: "bg-orange-500/15" },
-  Balanced: { color: "#eab308", bg: "bg-yellow-500/15" },
-  Favorable: { color: "#4ade80", bg: "bg-green-400/15" },
+  "Tough Matchup": { color: "#ef4444", bg: "bg-red-500/15" },
+  Underdog: { color: "#f97316", bg: "bg-orange-500/15" },
+  Even: { color: "#eab308", bg: "bg-yellow-500/15" },
+  Favorite: { color: "#4ade80", bg: "bg-green-400/15" },
   Cakewalk: { color: "#15803d", bg: "bg-green-800/20" },
 };
 
@@ -42,14 +42,6 @@ function scheduleRankLabel(rank: number, total: number): string {
   if (rank * 2 <= total) return rank === 1 ? "Hardest" : `${rank}${ordinalSuffix(rank)} Hardest`;
   const fromEasy = total - rank + 1;
   return fromEasy === 1 ? "Easiest" : `${fromEasy}${ordinalSuffix(fromEasy)} Easiest`;
-}
-
-function tierForStrength(strength: number): SOSTier {
-  if (strength >= 80) return "Brutal";
-  if (strength >= 60) return "Tough";
-  if (strength >= 40) return "Balanced";
-  if (strength >= 20) return "Favorable";
-  return "Cakewalk";
 }
 
 function StreakBadge({ streak }: { streak: string }) {
@@ -86,7 +78,7 @@ function PlayerRow({ player }: { player: PlayerCard }) {
 }
 
 function WeekCell({ opp, onPress }: { opp: WeeklyOpponent; week: number; onPress: (e: any) => void }) {
-  const meta = TIER_META[tierForStrength(opp.strength)];
+  const meta = TIER_META[TIER_FOR_SCORE(opp.strength)];
   return (
     <Pressable onPress={onPress} className="items-center" style={{ width: 26 }}>
       <View style={{ backgroundColor: meta.color }} className="w-full h-6 rounded-md opacity-80" />
@@ -97,7 +89,7 @@ function WeekCell({ opp, onPress }: { opp: WeeklyOpponent; week: number; onPress
 
 /** the popup a single week's heatmap cell opens: who you actually play that week, and where they stand. */
 function WeekOpponentModal({ opp, onClose, onViewProfile }: { opp: WeeklyOpponent | null; onClose: () => void; onViewProfile: (userId: string) => void }) {
-  const meta = opp ? TIER_META[tierForStrength(opp.strength)] : null;
+  const meta = opp ? TIER_META[TIER_FOR_SCORE(opp.strength)] : null;
   return (
     <Modal visible={!!opp} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable className="flex-1 bg-black/60 justify-end" onPress={onClose}>
@@ -121,7 +113,7 @@ function WeekOpponentModal({ opp, onClose, onViewProfile }: { opp: WeeklyOpponen
                   <StreakBadge streak={opp.streak} />
                   <View className={`px-2 py-0.5 rounded-full ${meta.bg}`}>
                     <Text style={{ color: meta.color }} className="text-[11px] font-bold">
-                      {tierForStrength(opp.strength)}
+                      {TIER_FOR_SCORE(opp.strength)}
                     </Text>
                   </View>
                 </View>
@@ -289,7 +281,7 @@ function TeamAnalyticsModal({
                   <Text className="text-gray-500 text-[10px] font-bold tracking-widest mb-1">REMAINING SCHEDULE</Text>
                   <View className="bg-[#0c0c0e] rounded-xl px-3">
                     {team.remaining.map((r, i) => {
-                      const rowMeta = TIER_META[tierForStrength(r.strength)];
+                      const rowMeta = TIER_META[TIER_FOR_SCORE(r.strength)];
                       return (
                         <Pressable
                           key={r.week}

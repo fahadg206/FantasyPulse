@@ -11,6 +11,7 @@ import { getManagerHistory, ManagerAllTimeStats } from "../../../lib/getManagerH
 import { getCurrentSeasonExtras, CurrentSeasonExtras } from "../../../lib/getCurrentSeasonExtras";
 import { getLeagueValueSettings } from "../../../lib/playerValue";
 import { PowerRankingTier } from "../../../lib/powerRankings";
+import { SOSTier } from "../../../lib/strengthOfSchedule";
 import {
   getNflGameStatusByTeam,
   computeFantasyTeamGameState,
@@ -30,7 +31,20 @@ type WeekResult = {
   // always "vs" and the higher is always "@", so e.g. one manager's "@
   // Kabo" always matches Kabo's own "vs [that manager]" for the same week.
   isHome: boolean;
+  /** real projected-starters spread for this matchup - undefined only when neither side has any real projection data at all for that week */
+  favorite?: { name?: string; spread: string };
+  /** same real verbiage the Strength of Schedule page uses, off this one matchup's real projected spread instead of a season-long percentile */
+  tier?: SOSTier;
 };
+
+/** points-spread version of the same 5-tier vocabulary Strength of Schedule uses for its opponent-strength percentile - here it's "how many real projected points am I favored/underdog by" for one specific matchup. */
+function matchupTierFromSpread(spread: number): SOSTier {
+  if (spread >= 15) return "Cakewalk";
+  if (spread >= 5) return "Favorite";
+  if (spread > -5) return "Even";
+  if (spread > -15) return "Underdog";
+  return "Tough Matchup";
+}
 
 interface LeaderboardRow {
   userId: string;
@@ -49,6 +63,16 @@ const RESULT_COLOR: Record<WeekResult["result"], string> = {
   win: "#16a34a",
   loss: "#af1222",
   pending: "#9ca3af",
+};
+
+// Same real colors the Strength of Schedule page uses for this exact
+// vocabulary - one look for "how hard is this" everywhere it shows up.
+const MATCHUP_TIER_COLOR: Record<SOSTier, string> = {
+  "Tough Matchup": "#ef4444",
+  Underdog: "#f97316",
+  Even: "#eab308",
+  Favorite: "#4ade80",
+  Cakewalk: "#15803d",
 };
 
 const TIER_STYLE: Record<PowerRankingTier, { bg: string; text: string }> = {
@@ -165,6 +189,24 @@ export default function LeagueManagers() {
             const myPts = parseFloat(me.team_points || "0");
             const oppPts = parseFloat(opp?.team_points || "0");
             const pending = !isWeekFinal(weekSchedule, id, w);
+
+            // Same real projected-margin math the Schedule page's spread
+            // callout already uses - each side's real starters' weekly
+            // projections, summed.
+            let myProj = 0;
+            let oppProj = 0;
+            for (const s of me.starters_full_data ?? []) {
+              const p = s.proj !== undefined ? parseFloat(s.proj) : undefined;
+              if (p !== undefined && !Number.isNaN(p)) myProj += p;
+            }
+            for (const s of opp?.starters_full_data ?? []) {
+              const p = s.proj !== undefined ? parseFloat(s.proj) : undefined;
+              if (p !== undefined && !Number.isNaN(p)) oppProj += p;
+            }
+            const hasProjection = myProj > 0 || oppProj > 0;
+            const diff = myProj - oppProj;
+            const tied = Math.round(myProj) === Math.round(oppProj);
+
             results[id].push({
               week: w,
               opponentName: opp?.name ?? "TBD",
@@ -173,6 +215,12 @@ export default function LeagueManagers() {
               oppPoints: oppPts,
               result: pending ? "pending" : myPts > oppPts ? "win" : "loss",
               isHome: parseInt(me.roster_id ?? "0") < parseInt(opp?.roster_id ?? "0"),
+              favorite: hasProjection
+                ? tied
+                  ? { name: undefined, spread: "PICK'EM" }
+                  : { name: diff > 0 ? me.name : opp?.name, spread: `-${Math.round(Math.abs(diff))}` }
+                : undefined,
+              tier: hasProjection ? matchupTierFromSpread(diff) : undefined,
             });
           }
         });
@@ -243,6 +291,7 @@ export default function LeagueManagers() {
   const results = weeklyResults[selectedId ?? ""] ?? [];
 
   const [leaderboard, setLeaderboard] = useState<LeaderboardState | null>(null);
+  const [expandedWeek, setExpandedWeek] = useState<number | null>(null);
 
   // Every manager's own current-season power-rankings result, from the
   // same pass that already computed the selected manager's tier - just
@@ -595,44 +644,71 @@ export default function LeagueManagers() {
 
               <Text className="font-bold mb-2.5 text-black dark:text-white text-[15px]">Schedule</Text>
               <View className="mb-6 rounded-xl border border-gray-100 dark:border-white/10 overflow-hidden">
-                {results.map((wr, i) => (
-                  <View
-                    key={wr.week}
-                    className={`flex-row items-center px-3 py-2.5 bg-white dark:bg-[#121212] ${
-                      i !== results.length - 1 ? "border-b border-gray-100 dark:border-white/10" : ""
-                    }`}
-                  >
-                    <Text className="w-[38px] text-[11px] font-bold text-gray-400">WK {wr.week}</Text>
-                    <Image
-                      source={typeof wr.opponentAvatar === "string" ? { uri: wr.opponentAvatar } : wr.opponentAvatar}
-                      className="w-[26px] h-[26px] rounded-full mr-2"
-                    />
-                    <Text numberOfLines={1} className="flex-1 text-[13px] text-black dark:text-white">
-                      <Text className="text-gray-400 font-normal">{wr.isHome ? "vs " : "@ "}</Text>
-                      {wr.opponentName}
-                    </Text>
-                    {wr.result === "pending" ? (
-                      <Text className="text-[11px] text-gray-400">--</Text>
-                    ) : (
-                      <>
-                        <Text
-                          style={{ fontVariant: ["tabular-nums"] }}
-                          className="text-[12px] text-gray-500 mr-2"
-                        >
-                          {wr.myPoints.toFixed(1)}-{wr.oppPoints.toFixed(1)}
+                {results.map((wr, i) => {
+                  const expanded = expandedWeek === wr.week;
+                  const favoriteName = wr.favorite?.name === selectedManager?.name ? "You" : wr.favorite?.name;
+                  return (
+                    <View key={wr.week} className={i !== results.length - 1 ? "border-b border-gray-100 dark:border-white/10" : ""}>
+                      <Pressable
+                        onPress={() => setExpandedWeek((w) => (w === wr.week ? null : wr.week))}
+                        className="flex-row items-center px-3 py-2.5 bg-white dark:bg-[#121212]"
+                      >
+                        <Text className="w-[38px] text-[11px] font-bold text-gray-400">WK {wr.week}</Text>
+                        <Image
+                          source={typeof wr.opponentAvatar === "string" ? { uri: wr.opponentAvatar } : wr.opponentAvatar}
+                          className="w-[26px] h-[26px] rounded-full mr-2"
+                        />
+                        <Text numberOfLines={1} className="flex-1 text-[13px] text-black dark:text-white">
+                          <Text className="text-gray-400 font-normal">{wr.isHome ? "vs " : "@ "}</Text>
+                          {wr.opponentName}
                         </Text>
-                        <View
-                          style={{ backgroundColor: RESULT_COLOR[wr.result] }}
-                          className="w-[20px] h-[20px] rounded-full items-center justify-center"
-                        >
-                          <Text className="text-white text-[10px] font-bold">
-                            {wr.result === "win" ? "W" : "L"}
+                        {wr.result === "pending" ? (
+                          <Text className="text-[11px] text-gray-400">--</Text>
+                        ) : (
+                          <>
+                            <Text
+                              style={{ fontVariant: ["tabular-nums"] }}
+                              className="text-[12px] text-gray-500 mr-2"
+                            >
+                              {wr.myPoints.toFixed(1)}-{wr.oppPoints.toFixed(1)}
+                            </Text>
+                            <View
+                              style={{ backgroundColor: RESULT_COLOR[wr.result] }}
+                              className="w-[20px] h-[20px] rounded-full items-center justify-center"
+                            >
+                              <Text className="text-white text-[10px] font-bold">
+                                {wr.result === "win" ? "W" : "L"}
+                              </Text>
+                            </View>
+                          </>
+                        )}
+                        {wr.favorite && (
+                          <Feather name={expanded ? "chevron-up" : "chevron-down"} size={14} color="#9ca3af" style={{ marginLeft: 8 }} />
+                        )}
+                      </Pressable>
+
+                      {expanded && wr.favorite && wr.tier && (
+                        <View className="px-3 pb-3 bg-white dark:bg-[#121212] flex-row items-center gap-2">
+                          <Text className="text-[12px] text-gray-500">
+                            {favoriteName ? (
+                              <>
+                                <Text className="text-black dark:text-white font-bold">{favoriteName}</Text> favorite{" "}
+                                <Text className="text-black dark:text-white font-bold">{wr.favorite.spread}</Text>
+                              </>
+                            ) : (
+                              "Pick'em"
+                            )}
                           </Text>
+                          <View style={{ backgroundColor: `${MATCHUP_TIER_COLOR[wr.tier]}22` }} className="px-2 py-0.5 rounded-md">
+                            <Text style={{ color: MATCHUP_TIER_COLOR[wr.tier] }} className="text-[10px] font-bold">
+                              {wr.tier}
+                            </Text>
+                          </View>
                         </View>
-                      </>
-                    )}
-                  </View>
-                ))}
+                      )}
+                    </View>
+                  );
+                })}
               </View>
             </View>
           </>

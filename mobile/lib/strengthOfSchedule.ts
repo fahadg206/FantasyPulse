@@ -18,13 +18,17 @@
 import { percentileRank } from "./powerRankings";
 import type { LeagueSimData } from "./leagueSimData";
 
-export type SOSTier = "Brutal" | "Tough" | "Balanced" | "Favorable" | "Cakewalk";
+// Same real 0-100 opponent-strength percentile bar as before, just relabeled
+// to match the "favorite/underdog" verbiage the League Managers schedule
+// uses for an individual matchup - one vocabulary for "how hard is this"
+// everywhere in the app, not a different word set per screen.
+export type SOSTier = "Tough Matchup" | "Underdog" | "Even" | "Favorite" | "Cakewalk";
 
 export const TIER_FOR_SCORE = (score: number): SOSTier => {
-  if (score >= 80) return "Brutal";
-  if (score >= 60) return "Tough";
-  if (score >= 40) return "Balanced";
-  if (score >= 20) return "Favorable";
+  if (score >= 80) return "Tough Matchup";
+  if (score >= 60) return "Underdog";
+  if (score >= 40) return "Even";
+  if (score >= 20) return "Favorite";
   return "Cakewalk";
 };
 
