@@ -317,6 +317,13 @@ export default function TradeCalculator() {
   const maxAbsNet = Math.max(0, ...activeTeamIds.map((id) => Math.abs(netValueByTeam[id] ?? 0)));
   const verdict = fairnessVerdict(maxAbsNet);
   const hasAnyItems = items.length > 0;
+  // Only named once the gap is real, not just inside "Fair trade" noise -
+  // the same bar fairnessVerdict already draws that line at.
+  const winnerUserId =
+    maxAbsNet > 1000 && activeTeamIds.length > 0
+      ? activeTeamIds.reduce((best, id) => ((netValueByTeam[id] ?? 0) > (netValueByTeam[best] ?? -Infinity) ? id : best), activeTeamIds[0])
+      : null;
+  const winnerName = winnerUserId ? users.find((u) => u.id === winnerUserId)?.name : undefined;
 
   return (
     <>
@@ -551,6 +558,7 @@ export default function TradeCalculator() {
             >
               <Text style={{ color: verdict.color }} className="font-bold text-[13px]">
                 {verdict.text}
+                {winnerName ? ` · Favors ${winnerName}` : ""}
               </Text>
             </View>
           )}

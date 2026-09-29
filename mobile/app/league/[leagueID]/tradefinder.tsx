@@ -526,6 +526,9 @@ function TradeCandidateCard({
   onPressPlayer: (playerId: string, pos: string, team?: string) => void;
 }) {
   const fairness = fairnessLabel(candidate.fairnessRatio);
+  // Only named once the gap is real, not just inside "Fair trade" noise -
+  // the same bar fairnessLabel already draws that line at.
+  const favors = candidate.fairnessRatio <= 0.05 ? null : candidate.netValue > 0 ? "you" : partner?.name ?? "them";
 
   const PlayerRow = ({ playerId, pos, value, team }: { playerId: string; pos: string; value: number; team?: string }) => (
     <Pressable onPress={() => onPressPlayer(playerId, pos, team)} className="flex-row items-center gap-2.5 bg-[#0c0c0e] rounded-xl px-2.5 py-2 flex-1">
@@ -560,6 +563,7 @@ function TradeCandidateCard({
         <View style={{ backgroundColor: `${fairness.color}22` }} className="px-2.5 py-1 rounded-full">
           <Text style={{ color: fairness.color }} className="text-[10px] font-extrabold">
             {fairness.text}
+            {favors ? ` · Favors ${favors}` : ""}
           </Text>
         </View>
       </Pressable>
