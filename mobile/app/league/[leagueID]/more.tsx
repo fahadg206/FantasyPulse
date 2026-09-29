@@ -55,10 +55,10 @@ export default function More() {
       path: `/league/${leagueID}/leaguemanagers`,
     },
     {
-      label: "Trades",
-      description: "Every trade this season - tap one to comment",
+      label: "Trade Center",
+      description: "This season's trades, the calculator, and the finder - all in one place",
       icon: <Feather name="repeat" size={20} color="#af1222" />,
-      path: `/league/${leagueID}/trades`,
+      path: `/league/${leagueID}/tradecenter`,
     },
     {
       label: "Rivalry",
@@ -83,18 +83,6 @@ export default function More() {
       description: "Real expert consensus rankings and your best lineup, one tap away",
       icon: <Ionicons name="swap-vertical" size={20} color="#af1222" />,
       path: `/league/${leagueID}/startsit`,
-    },
-    {
-      label: "Trade Calculator",
-      description: "Check if a trade is fair before you make it",
-      icon: <Feather name="repeat" size={20} color="#af1222" />,
-      path: `/league/${leagueID}/tradecalculator`,
-    },
-    {
-      label: "Trade Finder",
-      description: "Say what you'll give up and what you want back - find a fair deal in the league",
-      icon: <Feather name="search" size={20} color="#af1222" />,
-      path: `/league/${leagueID}/tradefinder`,
     },
     {
       label: "Draft Recap",

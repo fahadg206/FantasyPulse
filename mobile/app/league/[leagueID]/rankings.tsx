@@ -22,6 +22,21 @@ function playerPhotoUri(playerId: string, pos: string | undefined, team: string 
   return `https://sleepercdn.com/content/nfl/players/thumb/${playerId}.jpg`;
 }
 
+interface LeagueMeta {
+  season: string;
+  isDynasty: boolean;
+  leagueValueSettings: LeagueValueSettings;
+  playersData: Record<string, any>;
+  valuesBySleeperId?: Record<string, RawPlayerValue>;
+  maxWeek: number;
+}
+
+// Sleeper's own "LV"/"OAK" alias (see fetchPlayers.js) points both ids at
+// the literal same defense - without this, that one real team shows up
+// as two identical rows and inflates the whole DEF group's Sleeper-derived
+// ranks by one phantom "player".
+const SKIP_PLAYER_IDS = new Set(["OAK"]);
+
 export default function WeeklyRankingsScreen() {
   const { leagueID } = useLocalSearchParams<{ leagueID: string }>();
   const playerDetail = usePlayerDetail();
@@ -29,9 +44,12 @@ export default function WeeklyRankingsScreen() {
   const [week, setWeek] = useState(1);
   const [pos, setPos] = useState("QB");
   const [query, setQuery] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loadingMeta, setLoadingMeta] = useState(true);
+  const [loadingWeek, setLoadingWeek] = useState(true);
+  const [leagueMeta, setLeagueMeta] = useState<LeagueMeta | null>(null);
   const [rankingsByPos, setRankingsByPos] = useState<Record<string, StartSitPlayer[]>>({});
 
+  // League-wide data + the real current fantasy week, once.
   useEffect(() => {
     if (!leagueID) return;
     let cancelled = false;
@@ -47,6 +65,7 @@ export default function WeeklyRankingsScreen() {
         if (cancelled) return;
 
         const currentWeek = nflState.season_type === "post" ? 18 : nflState.display_week || 1;
+        const maxWeek = (league.settings?.playoff_week_start ?? 15) + 3; // real regular season + real playoffs, same bound Trade Calculator's win-impact projection uses
         setWeek(currentWeek);
 
         let valuesBySleeperId: Record<string, RawPlayerValue> | undefined;
@@ -55,20 +74,42 @@ export default function WeeklyRankingsScreen() {
           if (cancelled) return;
         }
 
-        // Score every real fantasy-relevant player in the league once, up
-        // front - the same real Sleeper/ESPN/KTC/FantasyCalc consensus
-        // engine Start/Sit uses, just run over the whole player pool
-        // instead of one roster, so flipping position tabs afterward is
-        // instant (no rescoring, just filtering what's already in memory).
-        const allIds = Object.keys(playersData);
+        setLeagueMeta({ season: league.season, isDynasty: settings.isDynasty, leagueValueSettings: settings, playersData, valuesBySleeperId, maxWeek });
+      } catch (error) {
+        console.error("Error loading league data for rankings:", error);
+      } finally {
+        if (!cancelled) setLoadingMeta(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [leagueID]);
+
+  // Score every real fantasy-relevant player in the league once per week -
+  // the same real Sleeper/ESPN/KTC/FantasyCalc consensus engine Start/Sit
+  // uses, just run over the whole player pool instead of one roster, so
+  // flipping position tabs afterward is instant (no rescoring, just
+  // filtering what's already in memory). Re-runs whenever the selected
+  // week changes - Sleeper's projections and ESPN's rankings are real
+  // per-week numbers, not just a label swap.
+  useEffect(() => {
+    if (!leagueMeta) return;
+    let cancelled = false;
+    setLoadingWeek(true);
+
+    (async () => {
+      try {
+        const allIds = Object.keys(leagueMeta.playersData).filter((id) => !SKIP_PLAYER_IDS.has(id));
         const scored = await scoreArbitraryPlayers({
           playerIds: allIds,
-          week: currentWeek,
-          season: league.season,
-          playersData,
-          isDynasty: settings.isDynasty,
-          leagueValueSettings: settings,
-          valuesBySleeperId,
+          week,
+          season: leagueMeta.season,
+          playersData: leagueMeta.playersData,
+          isDynasty: leagueMeta.isDynasty,
+          leagueValueSettings: leagueMeta.leagueValueSettings,
+          valuesBySleeperId: leagueMeta.valuesBySleeperId,
         });
         if (cancelled) return;
 
@@ -89,15 +130,16 @@ export default function WeeklyRankingsScreen() {
       } catch (error) {
         console.error("Error loading weekly rankings:", error);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setLoadingWeek(false);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [leagueID]);
+  }, [leagueMeta, week]);
 
+  const loading = loadingMeta || loadingWeek;
   const list = rankingsByPos[pos] ?? [];
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -115,10 +157,34 @@ export default function WeeklyRankingsScreen() {
   return (
     <View className="flex-1 bg-[#0c0c0e]">
       <View className="px-4 pt-4 pb-3">
-        <Text className="text-[11px] font-bold tracking-widest text-brand mb-1">WEEK {week} RANKINGS</Text>
-        <Text className="text-white text-[21px] font-bold">Player Rankings</Text>
+        <View className="flex-row items-center justify-between">
+          <Text className="text-[11px] font-bold tracking-widest text-brand">WEEK {week} RANKINGS</Text>
+          <View className="flex-row items-center gap-1">
+            <Pressable
+              onPress={() => setWeek((w) => Math.max(1, w - 1))}
+              disabled={week <= 1}
+              hitSlop={8}
+              style={{ opacity: week <= 1 ? 0.3 : 1 }}
+              className="w-6 h-6 rounded-full bg-white/10 items-center justify-center"
+            >
+              <Feather name="chevron-left" size={13} color="#fff" />
+            </Pressable>
+            <Pressable
+              onPress={() => setWeek((w) => Math.min(leagueMeta?.maxWeek ?? 18, w + 1))}
+              disabled={week >= (leagueMeta?.maxWeek ?? 18)}
+              hitSlop={8}
+              style={{ opacity: week >= (leagueMeta?.maxWeek ?? 18) ? 0.3 : 1 }}
+              className="w-6 h-6 rounded-full bg-white/10 items-center justify-center"
+            >
+              <Feather name="chevron-right" size={13} color="#fff" />
+            </Pressable>
+          </View>
+        </View>
+        <Text className="text-white text-[21px] font-bold mt-0.5">Player Rankings</Text>
         <Text className="text-gray-500 text-[12px] mt-1.5">
-          Sleeper, ESPN, KTC, and FantasyCalc, averaged into one consensus rank for every real player in the league.
+          Sleeper and ESPN are real Week {week} rankings; KTC and FantasyCalc reflect current{" "}
+          {leagueMeta?.isDynasty ? "dynasty" : "redraft"} trade value, not this week's matchup - all four averaged into
+          one consensus rank.
         </Text>
       </View>
 
@@ -173,40 +239,46 @@ export default function WeeklyRankingsScreen() {
           <FlatList
             data={filtered}
             keyExtractor={(p) => p.playerId}
-            renderItem={({ item: p, index }) => (
-              <Pressable
-                onPress={() => playerDetail?.openPlayer({ playerId: p.playerId, name: p.name, position: p.pos, team: p.team })}
-                className="flex-row items-center px-4 py-2.5 border-b border-white/5"
-              >
-                <Text style={{ fontVariant: ["tabular-nums"] }} className="text-white text-[13px] font-bold w-[26px]">
-                  {index + 1}
-                </Text>
-                <View style={{ backgroundColor: getTeamColor(p.team) }} className="w-8 h-8 rounded-full items-center justify-center overflow-hidden mr-2.5">
-                  <Image
-                    source={{ uri: playerPhotoUri(p.playerId, p.pos, p.team) }}
-                    resizeMode={p.pos === "DEF" ? "contain" : "cover"}
-                    style={p.pos === "DEF" ? { width: 20, height: 20 } : { width: 32, height: 32, borderRadius: 16 }}
-                  />
-                </View>
-                <View className="flex-1 mr-1">
-                  <Text numberOfLines={1} className="text-white text-[13px] font-semibold">
-                    {p.name}
+            renderItem={({ item: p, index }) => {
+              const logo = getTeamLogo(p.team);
+              return (
+                <Pressable
+                  onPress={() => playerDetail?.openPlayer({ playerId: p.playerId, name: p.name, position: p.pos, team: p.team })}
+                  className={`flex-row items-center px-4 py-2.5 border-b border-white/5 ${index % 2 === 1 ? "bg-brand/5" : ""}`}
+                >
+                  <Text style={{ fontVariant: ["tabular-nums"] }} className="text-white text-[13px] font-bold w-[26px]">
+                    {index + 1}
                   </Text>
-                  <Text className="text-gray-500 text-[10px] mt-0.5">
-                    {p.team}
-                    {p.opponent ? ` (${p.opponent.isHome ? "vs" : "@"} ${p.opponent.team})` : ""}
-                  </Text>
-                </View>
-                {sourceColumns.map((label) => {
-                  const source = p.sources.find((s) => s.label === label);
-                  return (
-                    <Text key={label} style={{ fontVariant: ["tabular-nums"] }} className="text-gray-300 text-[12px] font-semibold w-[38px] text-center">
-                      {source ? Math.round(source.rank) : "—"}
+                  <View style={{ backgroundColor: getTeamColor(p.team) }} className="w-8 h-8 rounded-full items-center justify-center overflow-hidden mr-2.5">
+                    {logo && p.pos !== "DEF" && (
+                      <Image source={{ uri: logo }} resizeMode="contain" style={{ position: "absolute", width: 26, height: 26, opacity: 0.4 }} />
+                    )}
+                    <Image
+                      source={{ uri: playerPhotoUri(p.playerId, p.pos, p.team) }}
+                      resizeMode={p.pos === "DEF" ? "contain" : "cover"}
+                      style={p.pos === "DEF" ? { width: 20, height: 20 } : { width: 32, height: 32, borderRadius: 16 }}
+                    />
+                  </View>
+                  <View className="flex-1 mr-1">
+                    <Text numberOfLines={1} className="text-white text-[13px] font-semibold">
+                      {p.name}
                     </Text>
-                  );
-                })}
-              </Pressable>
-            )}
+                    <Text className="text-gray-500 text-[10px] mt-0.5">
+                      {p.team}
+                      {p.opponent ? ` (${p.opponent.isHome ? "vs" : "@"} ${p.opponent.team})` : ""}
+                    </Text>
+                  </View>
+                  {sourceColumns.map((label) => {
+                    const source = p.sources.find((s) => s.label === label);
+                    return (
+                      <Text key={label} style={{ fontVariant: ["tabular-nums"] }} className="text-gray-300 text-[12px] font-semibold w-[38px] text-center">
+                        {source ? Math.round(source.rank) : "—"}
+                      </Text>
+                    );
+                  })}
+                </Pressable>
+              );
+            }}
             ListEmptyComponent={
               <Text className="text-gray-500 text-[13px] text-center py-10">No players found.</Text>
             }

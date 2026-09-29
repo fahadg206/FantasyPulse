@@ -190,8 +190,7 @@ export default function Dashboard() {
     { label: "Managers", icon: "people", family: "ion", path: `/league/${leagueID}/leaguemanagers` },
     { label: "Rivalry", icon: "pulse", family: "ion", path: `/league/${leagueID}/rivalry` },
     { label: "Strength of Schedule", icon: "flame", family: "ion", path: `/league/${leagueID}/strengthofschedule` },
-    { label: "Trades", icon: "repeat", family: "feather", path: `/league/${leagueID}/tradecalculator` },
-    { label: "Trade Finder", icon: "search", family: "feather", path: `/league/${leagueID}/tradefinder` },
+    { label: "Trade Center", icon: "repeat", family: "feather", path: `/league/${leagueID}/tradecenter` },
     { label: "Draft", icon: "clipboard", family: "feather", path: `/league/${leagueID}/draft` },
     { label: "History", icon: "trophy", family: "ion", path: `/league/${leagueID}/history` },
   ];

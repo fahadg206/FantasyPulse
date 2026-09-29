@@ -72,7 +72,7 @@ function fairnessVerdict(maxAbsNet: number) {
   return { text: "Highway robbery", color: "#ef4444" };
 }
 
-export default function TradeCalculator() {
+export default function TradeCalculator({ hideHeader }: { hideHeader?: boolean } = {}) {
   const { leagueID } = useLocalSearchParams<{ leagueID: string }>();
   const router = useRouter();
 
@@ -328,20 +328,22 @@ export default function TradeCalculator() {
   return (
     <>
     <ScrollView className="flex-1 bg-[#0c0c0e]" contentContainerClassName="p-4 pb-10">
-      <View className="mb-1">
-        <Text className="text-[11px] font-bold tracking-widest text-brand">TRADE CALCULATOR</Text>
-        <Text className="text-white text-[21px] font-bold mt-0.5">Build a Trade</Text>
-        <Text className="text-gray-500 text-[12px] mt-1">
-          Real trade values, real projected lineup + win impact, and each team&apos;s real needs - up to 3 teams.
-        </Text>
-        {valueSettings && (
-          <Text className="text-gray-600 text-[11px] mt-1.5">
-            {valueSettings.isDynasty
-              ? "Needs are based on long-term dynasty value at each position vs. the league's own bar."
-              : "Needs are based on real season-to-date scoring blended with rest-of-season projections - no long-term value to lean on in redraft."}
+      {!hideHeader && (
+        <View className="mb-1">
+          <Text className="text-[11px] font-bold tracking-widest text-brand">TRADE CALCULATOR</Text>
+          <Text className="text-white text-[21px] font-bold mt-0.5">Build a Trade</Text>
+          <Text className="text-gray-500 text-[12px] mt-1">
+            Real trade values, real projected lineup + win impact, and each team&apos;s real needs - up to 3 teams.
           </Text>
-        )}
-      </View>
+        </View>
+      )}
+      {valueSettings && (
+        <Text className="text-gray-600 text-[11px] mb-1">
+          {valueSettings.isDynasty
+            ? "Needs are based on long-term dynasty value at each position vs. the league's own bar."
+            : "Needs are based on real season-to-date scoring blended with rest-of-season projections - no long-term value to lean on in redraft."}
+        </Text>
+      )}
 
       <View className="flex-row flex-wrap gap-2.5 mt-4 mb-2">
         {teamIds.map((id, slot) => (

@@ -61,7 +61,7 @@ function fairnessLabel(ratio: number): { text: string; color: string } {
   return { text: "Lopsided", color: "#ef4444" };
 }
 
-export default function TradeFinderScreen() {
+export default function TradeFinderScreen({ hideHeader }: { hideHeader?: boolean } = {}) {
   const { leagueID } = useLocalSearchParams<{ leagueID: string }>();
   const router = useRouter();
   const playerDetail = usePlayerDetail();
@@ -204,12 +204,16 @@ export default function TradeFinderScreen() {
 
   return (
     <ScrollView className="flex-1 bg-[#0c0c0e]" contentContainerClassName="p-4 pb-10">
-      <Text className="text-[11px] font-bold tracking-widest text-brand mb-1">TRADE FINDER</Text>
-      <Text className="text-white text-[21px] font-bold">Find a Fair Trade</Text>
-      <Text className="text-gray-500 text-[12px] mt-1.5">
-        Tell it what you'll give up and what you want back - it searches every other real roster in the league for the
-        fairest real match, using real trade value and each team's own real needs.
-      </Text>
+      {!hideHeader && (
+        <>
+          <Text className="text-[11px] font-bold tracking-widest text-brand mb-1">TRADE FINDER</Text>
+          <Text className="text-white text-[21px] font-bold">Find a Fair Trade</Text>
+          <Text className="text-gray-500 text-[12px] mt-1.5">
+            Tell it what you'll give up and what you want back - it searches every other real roster in the league for
+            the fairest real match, using real trade value and each team's own real needs.
+          </Text>
+        </>
+      )}
 
       {loading ? (
         <ActivityIndicator color="#af1222" className="mt-8" />

@@ -146,7 +146,7 @@ function TradeCard({ event, leagueId, valueFor }: { event: TradeEvent; leagueId:
   );
 }
 
-export default function Trades() {
+export default function Trades({ hideHeader }: { hideHeader?: boolean } = {}) {
   const { leagueID } = useLocalSearchParams<{ leagueID: string }>();
   const [trades, setTrades] = useState<TradeEvent[]>([]);
   const [valueFor, setValueFor] = useState<TradeValueLookup | null>(null);
@@ -185,10 +185,12 @@ export default function Trades() {
 
   return (
     <View className="flex-1 bg-[#0c0c0e]">
-      <View className="px-4 pt-4 pb-3 border-b border-white/10">
-        <Text className="text-white text-[17px] font-bold">Trades</Text>
-        <Text className="text-gray-500 text-[12px] mt-0.5">This season - tap a trade to grade it, or to comment</Text>
-      </View>
+      {!hideHeader && (
+        <View className="px-4 pt-4 pb-3 border-b border-white/10">
+          <Text className="text-white text-[17px] font-bold">Trades</Text>
+          <Text className="text-gray-500 text-[12px] mt-0.5">This season - tap a trade to grade it, or to comment</Text>
+        </View>
+      )}
 
       {loading ? (
         <View className="flex-1 items-center justify-center">
