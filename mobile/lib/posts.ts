@@ -51,12 +51,18 @@ export interface AnalystCardRow {
   statLabel?: string;
   /** bolder/white treatment for the row that's the story's protagonist - the leader, the winner, the team getting the good end of it */
   highlight?: boolean;
+  /** overrides the stat's color outright (e.g. green for "easiest schedule", red for "hardest") - takes priority over highlight's plain white/gray when set */
+  statColor?: string;
 }
 
 export interface AnalystCard {
   eyebrow: string;
   rows: AnalystCardRow[];
   footer?: string;
+  /** Feather icon name shown next to the eyebrow - lets different Boogie storylines (trade rumor vs bust of the week vs postgame presser) read as visually distinct card types at a glance instead of one identical template. Optional so every existing post type keeps rendering exactly as before. */
+  icon?: string;
+  /** overrides the card's brand-red accent (eyebrow text + left edge) - same reasoning as icon above. */
+  accentColor?: string;
 }
 
 // The embedded card shown when a post is quoting another one, styled the

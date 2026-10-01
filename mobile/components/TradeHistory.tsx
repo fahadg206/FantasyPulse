@@ -3,7 +3,10 @@ import { View, Text, Image, Pressable, ActivityIndicator } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { getTeamLogo } from "../lib/nflTeams";
 import { buildLeagueTransactions, buildAllSeasonsTradesBetween, TradeEvent, TxAsset, TxTeam } from "../lib/leagueTransactions";
-import type { TradeGrade } from "../lib/tradeGrade";
+import { gradeTrade, TradeGrade } from "../lib/tradeGrade";
+import { getLeagueValueSettings } from "../lib/playerValue";
+import { backend } from "../lib/api";
+import { buildTradeValueLookup, TradeValueLookup } from "../lib/tradeValue";
 
 const POSITION_COLOR: Record<string, string> = {
   QB: "#ef4444",
@@ -84,11 +87,11 @@ export function TradeHistoryCard({ event, grade, onPress }: { event: TradeEvent;
           <Feather name="repeat" size={14} color="#af1222" />
           <TeamAvatar name={event.teamB.name} avatar={event.teamB.avatar} isWinner={isWinner(event.teamB)} />
         </View>
-        {grade?.summary && (
+        {grade && (
           <View className="flex-row items-center justify-center gap-1.5 mb-1.5">
             {isWinner(event.teamA) && <Feather name="arrow-left" size={12} color={grade.verdict.color} />}
             <Text style={{ color: grade.verdict.color }} className="text-[11px] font-bold text-center">
-              {grade.summary}
+              {grade.summary || grade.verdict.text}
             </Text>
             {isWinner(event.teamB) && <Feather name="arrow-right" size={12} color={grade.verdict.color} />}
           </View>
@@ -123,9 +126,9 @@ export function TradeHistoryCard({ event, grade, onPress }: { event: TradeEvent;
       <Text numberOfLines={1} className="text-black dark:text-white font-bold text-[13px] mb-1">
         {parts.map((p) => p.team.name).join(" ⇄ ")}
       </Text>
-      {grade?.summary && (
+      {grade && (
         <Text style={{ color: grade.verdict.color }} className="text-[11px] font-bold mb-1.5">
-          {grade.summary}
+          {grade.summary || grade.verdict.text}
         </Text>
       )}
       <Text className="text-gray-500 text-[10px] mb-3">{formatDate(event.timestamp)}</Text>
@@ -165,6 +168,7 @@ export default function TradeHistory({
   userIds?: [string, string];
 }) {
   const [trades, setTrades] = useState<TradeEvent[] | null>(null);
+  const [valueFor, setValueFor] = useState<TradeValueLookup | null>(null);
   const userIdsKey = userIds?.join(",");
 
   useEffect(() => {
@@ -186,6 +190,17 @@ export default function TradeHistory({
         if (!cancelled) setTrades([]);
       });
 
+    // Real trade value - the same dynasty-KTC/redraft-FantasyCalc lookup
+    // Trade Calculator, Trade Finder, and the Trades tab all grade off of -
+    // without this, every card here rendered with no winner/verdict at all,
+    // since TradeHistoryCard only shows one when a grade is actually passed.
+    Promise.all([getLeagueValueSettings(leagueID), backend.fetchAllPlayerValues()])
+      .then(([settings, values]) => buildTradeValueLookup(settings, values))
+      .then((lookup) => {
+        if (!cancelled) setValueFor(() => lookup);
+      })
+      .catch((error) => console.error("Error loading trade values:", error));
+
     return () => {
       cancelled = true;
     };
@@ -206,7 +221,7 @@ export default function TradeHistory({
       ) : trades.length === 0 ? (
         <Text className="text-gray-500 text-[13px]">{emptyMessage}</Text>
       ) : (
-        trades.map((t, i) => <TradeHistoryCard key={i} event={t} />)
+        trades.map((t, i) => <TradeHistoryCard key={i} event={t} grade={valueFor ? gradeTrade(t, valueFor) : undefined} />)
       )}
     </View>
   );

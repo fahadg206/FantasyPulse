@@ -12,6 +12,7 @@ import ArticleCarousel from "../../../components/ArticleCarousel";
 import FeedPreview from "../../../components/FeedPreview";
 import HomePoll from "../../../components/HomePoll";
 import TransactionsTicker from "../../../components/TransactionsTicker";
+import InjuryReport from "../../../components/InjuryReport";
 import TrendingPlayers from "../../../components/TrendingPlayers";
 import { announceLeagueTransactions } from "../../../lib/announceTransactions";
 import { ensureBoogieAnalystPosts } from "../../../lib/boogieAnalyst";
@@ -182,16 +183,24 @@ export default function Dashboard() {
 
   if (!leagueID) return null;
 
+  // Led with the deepest/most interactive tools first (the ones worth
+  // discovering), utility lookups after, season-wrap History last - not
+  // alphabetical or build order. Team Breakdown and Power Rankings weren't
+  // linked from anywhere on the Dashboard before this (Power Rankings
+  // wasn't linked from ANY nav at all - a real, orphaned screen).
   const links: QuickLink[] = [
-    { label: "Rankings", icon: "podium", family: "ion", path: `/league/${leagueID}/rankings` },
-    { label: "Start / Sit", icon: "swap-vertical", family: "ion", path: `/league/${leagueID}/startsit` },
-    { label: "Standings", icon: "list", family: "ion", path: `/league/${leagueID}/standings` },
-    { label: "Schedule", icon: "calendar", family: "feather", path: `/league/${leagueID}/schedule` },
+    { label: "Team Breakdown", icon: "analytics", family: "ion", path: `/league/${leagueID}/teambreakdown` },
+    { label: "Trade Center", icon: "repeat", family: "feather", path: `/league/${leagueID}/tradecenter` },
+    { label: "Power Rankings", icon: "bar-chart", family: "ion", path: `/league/${leagueID}/powerrankings` },
+    { label: "Strength of Schedule", icon: "flame", family: "ion", path: `/league/${leagueID}/strengthofschedule` },
+    { label: "Luck Index", icon: "shuffle", family: "ion", path: `/league/${leagueID}/luckindex` },
     { label: "Managers", icon: "people", family: "ion", path: `/league/${leagueID}/leaguemanagers` },
     { label: "Rivalry", icon: "pulse", family: "ion", path: `/league/${leagueID}/rivalry` },
-    { label: "Strength of Schedule", icon: "flame", family: "ion", path: `/league/${leagueID}/strengthofschedule` },
-    { label: "Trade Center", icon: "repeat", family: "feather", path: `/league/${leagueID}/tradecenter` },
+    { label: "Standings", icon: "list", family: "ion", path: `/league/${leagueID}/standings` },
+    { label: "Schedule", icon: "calendar", family: "feather", path: `/league/${leagueID}/schedule` },
     { label: "Draft", icon: "clipboard", family: "feather", path: `/league/${leagueID}/draft` },
+    { label: "Rankings", icon: "podium", family: "ion", path: `/league/${leagueID}/rankings` },
+    { label: "Start / Sit", icon: "swap-vertical", family: "ion", path: `/league/${leagueID}/startsit` },
     { label: "History", icon: "trophy", family: "ion", path: `/league/${leagueID}/history` },
   ];
 
@@ -264,6 +273,8 @@ export default function Dashboard() {
           )}
         </PulseCard>
       </ScrollView>
+
+      <InjuryReport key={refreshTick} leagueID={leagueID} />
 
       <TransactionsTicker key={refreshTick} leagueID={leagueID} />
 

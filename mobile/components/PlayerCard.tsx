@@ -2,6 +2,7 @@ import { View, Text, Image, Pressable } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { getTeamColor, getTeamLogo } from "../lib/nflTeams";
 import { usePlayerDetail } from "./PlayerDetailProvider";
+import { injuryBadge } from "../lib/playerBio";
 
 type Props = {
   playerId?: string;
@@ -14,7 +15,10 @@ type Props = {
   bottomSlot?: React.ReactNode;
   /** shows a small tappable info affordance that opens the full player detail (game log, season trend) - its own nested Pressable with stopPropagation, so it's safe to add even where the whole card already has its own tap behavior (add/remove from a trade, etc.) */
   onExpand?: () => void;
+  /** real Sleeper injury designation (Questionable/Doubtful/Out/IR/...) - renders a small colored badge next to the name when present. Optional so every existing caller keeps rendering exactly as before until it starts passing one. */
+  injuryStatus?: string;
 };
+
 
 // Mirrors the web app's player-card treatment: the team's primary color fills
 // the whole card, with the team logo bled large and faded behind the photo -
@@ -29,12 +33,14 @@ export default function PlayerCard({
   rightSlot,
   bottomSlot,
   onExpand,
+  injuryStatus,
 }: Props) {
   const color = getTeamColor(team);
   const logo = getTeamLogo(team);
   const photoUri =
     photoUriOverride ??
     (position === "DEF" ? logo ?? undefined : `https://sleepercdn.com/content/nfl/players/thumb/${playerId}.jpg`);
+  const injury = injuryBadge(injuryStatus);
 
   // Falls back to the app-wide player detail modal (see
   // PlayerDetailProvider, mounted once per league) whenever a caller
@@ -62,6 +68,11 @@ export default function PlayerCard({
     return (
       <View style={{ backgroundColor: color }} className="rounded-xl overflow-hidden">
         {expandButton("top-1.5 right-1.5")}
+        {injury && (
+          <View style={{ backgroundColor: injury.color }} className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded z-10">
+            <Text className="text-white text-[8px] font-extrabold">{injury.label}</Text>
+          </View>
+        )}
         {logo && (
           <Image
             source={{ uri: logo }}
@@ -105,9 +116,16 @@ export default function PlayerCard({
           resizeMode={position === "DEF" ? "contain" : "cover"}
         />
         <View className="flex-1 ml-3">
-          <Text numberOfLines={1} className="text-white font-bold text-[13px]">
-            {name}
-          </Text>
+          <View className="flex-row items-center gap-1.5">
+            <Text numberOfLines={1} className="text-white font-bold text-[13px]">
+              {name}
+            </Text>
+            {injury && (
+              <View style={{ backgroundColor: injury.color }} className="px-1.5 py-0.5 rounded">
+                <Text className="text-white text-[8px] font-extrabold">{injury.label}</Text>
+              </View>
+            )}
+          </View>
           <Text className="text-white/85 text-[11px] font-medium">
             {position}
             {team ? ` - ${team}` : ""}

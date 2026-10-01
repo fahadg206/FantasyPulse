@@ -553,11 +553,18 @@ function QuotedPostCard({ quoted, className }: { quoted: NonNullable<Post["quote
 
 function AnalystCardView({ card, onPress }: { card: Post["analystCard"]; onPress?: () => void }) {
   if (!card) return null;
+  const accent = card.accentColor || "#af1222";
 
   const content = (
-    <View className="mt-2.5 rounded-2xl border border-white/10 bg-white/5 overflow-hidden">
-      <View className="flex-row items-center justify-between px-3.5 pt-3">
-        <Text className="text-[10px] font-bold tracking-widest text-brand">{card.eyebrow}</Text>
+    <View
+      style={{ borderLeftColor: accent, borderLeftWidth: 3 }}
+      className="mt-2.5 rounded-2xl border border-white/10 bg-white/5 overflow-hidden"
+    >
+      <View className="flex-row items-center gap-1.5 px-3.5 pt-3">
+        {!!card.icon && <Feather name={card.icon as keyof typeof Feather.glyphMap} size={11} color={accent} />}
+        <Text style={{ color: accent }} className="text-[10px] font-bold tracking-widest">
+          {card.eyebrow}
+        </Text>
       </View>
       <View className="px-3.5 py-3 gap-2.5">
         {card.rows.map((row, i) => (
@@ -590,8 +597,8 @@ function AnalystCardRow({ row }: { row: NonNullable<Post["analystCard"]>["rows"]
       </View>
       <View className="items-end">
         <Text
-          style={{ fontVariant: ["tabular-nums"] }}
-          className={`text-[15px] ${row.highlight ? "text-white font-extrabold" : "text-gray-400 font-bold"}`}
+          style={row.statColor ? { color: row.statColor, fontVariant: ["tabular-nums"] } : { fontVariant: ["tabular-nums"] }}
+          className={`text-[15px] ${row.statColor ? "font-extrabold" : row.highlight ? "text-white font-extrabold" : "text-gray-400 font-bold"}`}
         >
           {row.stat}
         </Text>

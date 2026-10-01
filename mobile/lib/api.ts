@@ -126,6 +126,12 @@ export const backend = {
   fetchAllPlayerValues: (): Promise<Record<string, any>> =>
     fetch(`${APP_ORIGIN}/api/fetchAllPlayerValues`).then((r) => r.json()),
 
+  // bulk normalized-name-keyed KTC draft-pick value dump ("2027 Early 1st"
+  // etc) - draft picks aren't real players so they have no Sleeper ID and
+  // don't come back from fetchAllPlayerValues. See lib/draftPicks.ts.
+  fetchDraftPickValues: (): Promise<Record<string, any>> =>
+    fetch(`${APP_ORIGIN}/api/fetchDraftPickValues`).then((r) => r.json()),
+
   // real NFL scoring plays + turnovers for a matchup's starters, with each
   // play's fantasy point impact - same endpoint the web schedule page's
   // matchup feed uses

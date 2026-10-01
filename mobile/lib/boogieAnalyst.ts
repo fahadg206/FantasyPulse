@@ -16,14 +16,16 @@ import { getLeagueValueSettings, computeAdjustedValue, LeagueValueSettings, RawP
 import { rankTeams, determinePlayoffTeams, runMonteCarlo, basePointsFor } from "./whatIfSimulation";
 import { computePowerRankings, PowerRankingResult } from "./powerRankings";
 import { optimalLineupPoints } from "./startSitAccuracy";
-import { computeTeamNeeds, computeLeagueNeedBaseline } from "./tradeAnalysis";
-import { buildSeasonToDatePPG, computeRedraftTeamNeeds, computeLeagueRedraftNeedBaseline } from "./redraftNeeds";
+import { computeTeamNeeds, computeLeagueNeedBaseline, TeamNeedsResult } from "./tradeAnalysis";
+import { buildSeasonToDatePPG, computeRedraftTeamNeeds, computeLeagueRedraftNeedBaseline, redraftPlayerScore } from "./redraftNeeds";
 import type { PlayerPos } from "./draftProspects";
 import { getManagerHistory } from "./getManagerHistory";
 import { ensureSystemPost, postExists } from "./posts";
 import type { AnalystCard } from "./posts";
 import { tradeLabel } from "./announceTransactions";
-import type { TradeEvent, TickerEvent, AddDropEvent, TxAsset } from "./leagueTransactions";
+import type { TradeEvent, TickerEvent, AddDropEvent } from "./leagueTransactions";
+import { buildTradeValueLookup, TradeValueLookup } from "./tradeValue";
+import { gradeTrade, TradeGrade } from "./tradeGrade";
 
 function pick<T>(options: T[]): T {
   return options[Math.floor(Math.random() * options.length)];
@@ -126,8 +128,21 @@ export async function ensureScheduleStorylinePost(leagueId: string, sim: LeagueS
     const analystCard: AnalystCard = {
       eyebrow: "STRENGTH OF SCHEDULE",
       rows: [
-        { name: easiest.name, avatar: easiest.avatar, stat: String(easiest.sosScore), statLabel: "#1 EASIEST", highlight: true },
-        { name: hardest.name, avatar: hardest.avatar, stat: String(hardest.sosScore), statLabel: "#1 HARDEST" },
+        {
+          name: `${easiest.name} (${easiest.wins}-${easiest.losses})`,
+          avatar: easiest.avatar,
+          stat: "EASIEST",
+          statColor: "#22c55e",
+          statLabel: `#1 of ${sos.length}`,
+          highlight: true,
+        },
+        {
+          name: `${hardest.name} (${hardest.wins}-${hardest.losses})`,
+          avatar: hardest.avatar,
+          stat: "HARDEST",
+          statColor: "#ef4444",
+          statLabel: `#1 of ${sos.length}`,
+        },
       ],
       footer: `${gamesLeft} weeks left`,
     };
@@ -148,80 +163,67 @@ export async function ensureScheduleStorylinePost(leagueId: string, sim: LeagueS
 
 // ---------------------------------------------------------------------
 // Trade grade - a follow-up "expert take" on a trade that already went
-// down, using the exact same KTC-based value engine the Trade Calculator
-// grades hypothetical trades with (see getLeagueValueSettings/
-// computeAdjustedValue), so a completed trade and a proposed one are
-// judged by the same yardstick.
+// down. This calls the exact same gradeTrade() engine (lib/tradeGrade.ts)
+// that the Trade Center's real History screen grades every trade with -
+// it used to run its own separate value/margin/winner math here, which
+// could (and did) land on a different winner or fairness call than the
+// real trade card for the same trade. One engine, one verdict, everywhere
+// it's shown.
 // ---------------------------------------------------------------------
 
 type TwoTeamTrade = Extract<TradeEvent, { kind: "trade2" }>;
 
-function assetValueTotal(
-  assets: TxAsset[],
-  valuesBySleeperId: Record<string, RawPlayerValue>,
-  settings: LeagueValueSettings
-): { total: number; priced: number } {
-  let total = 0;
-  let priced = 0;
-  for (const asset of assets) {
-    if (asset.isPick || !asset.id) continue; // picks have no KTC market value to price against
-    const raw = valuesBySleeperId[asset.id];
-    if (!raw) continue;
-    total += computeAdjustedValue(raw, settings);
-    priced += 1;
-  }
-  return { total, priced };
-}
-
-function tradeGradeText(teamA: string, teamB: string, netToA: number, totalValue: number): string {
-  const pct = totalValue > 0 ? Math.abs(netToA) / totalValue : 0;
-
-  if (pct < 0.08) {
+function tradeGradeText(teamAName: string, teamBName: string, grade: TradeGrade): string {
+  if (!grade.winner) {
     return pick([
-      `📈 Grading that ${teamA}-${teamB} deal: dead even by value. Both sides walk away fine here.`,
-      `📈 Ran the numbers on ${teamA} and ${teamB}'s trade — a fair swap, no real winner.`,
-      `📈 That ${teamA} / ${teamB} trade grades out even. Nicely balanced deal.`,
+      `📈 Grading that ${teamAName}-${teamBName} deal: dead even by value. Both sides walk away fine here.`,
+      `📈 Ran the numbers on ${teamAName} and ${teamBName}'s trade — a fair swap, no real winner.`,
+      `📈 That ${teamAName} / ${teamBName} trade grades out even. Nicely balanced deal.`,
     ]);
   }
 
-  const winner = netToA > 0 ? teamA : teamB;
-  const loser = netToA > 0 ? teamB : teamA;
-  const magnitude = pct < 0.2 ? "a slight edge to" : pct < 0.35 ? "a real edge to" : "a lopsided win for";
+  const winner = grade.winner.name;
+  const loser = grade.sides.find((s) => s.team.userId !== grade.winner!.userId)?.team.name ?? (winner === teamAName ? teamBName : teamAName);
+  const magnitude =
+    grade.verdict.text === "Highway robbery" ? "a lopsided win for" : grade.verdict.text === "Slightly lopsided" ? "a slight edge to" : "a real edge to";
 
   return pick([
-    `📈 Grading that ${teamA}-${teamB} trade: ${magnitude} ${winner}. ${loser} paid a bit more than they got back here.`,
+    `📈 Grading that ${teamAName}-${teamBName} trade: ${magnitude} ${winner}. ${loser} paid a bit more than they got back here.`,
     `📈 Crunched the numbers on this one — leans ${winner}'s way. ${loser} will want that value back down the line.`,
-    `📈 My early read on ${teamA} / ${teamB}: ${winner} comes out ahead on paper. Time will tell on the field.`,
+    `📈 My early read on ${teamAName} / ${teamBName}: ${winner} comes out ahead on paper. Time will tell on the field.`,
   ]);
 }
 
-async function ensureOneTradeGrade(
-  leagueId: string,
-  event: TwoTeamTrade,
-  settings: LeagueValueSettings,
-  valuesBySleeperId: Record<string, RawPlayerValue>
-): Promise<void> {
-  const givesVal = assetValueTotal(event.aGives, valuesBySleeperId, settings);
-  const getsVal = assetValueTotal(event.aGets, valuesBySleeperId, settings);
-  // An all-picks (or otherwise unpriced) deal has nothing real to grade off - skip rather than guess.
-  if (givesVal.priced === 0 && getsVal.priced === 0) return;
+async function ensureOneTradeGrade(leagueId: string, event: TwoTeamTrade, valueFor: TradeValueLookup): Promise<void> {
+  const grade = gradeTrade(event, valueFor);
+  // Nothing priced (all-picks or otherwise unvalued deal) - nothing real to grade off of.
+  if (grade.verdict.text === "No valued players") return;
 
-  const netToA = getsVal.total - givesVal.total;
-  const totalValue = givesVal.total + getsVal.total;
-  const pct = totalValue > 0 ? Math.abs(netToA) / totalValue : 0;
-
+  const [sideA, sideB] = grade.sides;
   const analystCard: AnalystCard = {
     eyebrow: "TRADE GRADE",
     rows: [
-      { name: event.teamA.name, avatar: event.teamA.avatar, stat: `${netToA >= 0 ? "+" : "-"}${formatValue(Math.abs(netToA))}`, statLabel: "VALUE", highlight: netToA >= 0 },
-      { name: event.teamB.name, avatar: event.teamB.avatar, stat: `${netToA <= 0 ? "+" : "-"}${formatValue(Math.abs(netToA))}`, statLabel: "VALUE", highlight: netToA < 0 },
+      {
+        name: sideA.team.name,
+        avatar: sideA.team.avatar,
+        stat: formatValue(sideA.value),
+        statLabel: "VALUE",
+        highlight: !!grade.winner && grade.winner.userId === sideA.team.userId,
+      },
+      {
+        name: sideB.team.name,
+        avatar: sideB.team.avatar,
+        stat: formatValue(sideB.value),
+        statLabel: "VALUE",
+        highlight: !!grade.winner && grade.winner.userId === sideB.team.userId,
+      },
     ],
-    footer: pct < 0.08 ? "Fair trade - no real winner" : `${Math.round(pct * 100)}% value swing`,
+    footer: grade.summary || grade.verdict.text,
   };
 
   await ensureSystemPost({
     id: `tradegrade_${leagueId}_${event.id}`,
-    text: tradeGradeText(event.teamA.name, event.teamB.name, netToA, totalValue),
+    text: tradeGradeText(event.teamA.name, event.teamB.name, grade),
     analystCard,
     leagueId,
     targetType: "trade",
@@ -232,15 +234,15 @@ async function ensureOneTradeGrade(
   });
 }
 
-/** grades every real 2-team trade this league has had, using the same value engine the Trade Calculator uses for proposed trades. 3-team+ trades are skipped - there's no clean single "winner" to call in a 3-way deal. */
+/** grades every real 2-team trade this league has had, using the same shared trade-grading engine (lib/tradeGrade.ts) the Trade Center's History screen and the Trade Calculator both use. 3-team+ trades are skipped - there's no clean single "winner" to call in a 3-way deal. */
 export async function ensureTradeGradePosts(leagueId: string, tradeEvents: TradeEvent[]): Promise<void> {
   const twoTeamTrades = tradeEvents.filter((e): e is TwoTeamTrade => e.kind === "trade2");
   if (twoTeamTrades.length === 0) return;
 
-  let settings: LeagueValueSettings;
-  let valuesBySleeperId: Record<string, RawPlayerValue>;
+  let valueFor: TradeValueLookup;
   try {
-    [settings, valuesBySleeperId] = await Promise.all([getLeagueValueSettings(leagueId), backend.fetchAllPlayerValues()]);
+    const [settings, valuesBySleeperId] = await Promise.all([getLeagueValueSettings(leagueId), backend.fetchAllPlayerValues()]);
+    valueFor = await buildTradeValueLookup(settings, valuesBySleeperId);
   } catch (error) {
     console.error("Error loading player values for trade grading:", error);
     return;
@@ -248,9 +250,7 @@ export async function ensureTradeGradePosts(leagueId: string, tradeEvents: Trade
 
   await Promise.all(
     twoTeamTrades.map((event) =>
-      ensureOneTradeGrade(leagueId, event, settings, valuesBySleeperId).catch((error) =>
-        console.error("Error posting trade grade:", error)
-      )
+      ensureOneTradeGrade(leagueId, event, valueFor).catch((error) => console.error("Error posting trade grade:", error))
     )
   );
 }
@@ -1051,6 +1051,409 @@ export async function ensureHotSeatPost(leagueId: string, sim: LeagueSimData, se
 }
 
 // ---------------------------------------------------------------------
+// Trade Rumor - a real, grounded "hearing so-and-so could use..." post:
+// the team with the league's most extreme real need, paired with whichever
+// OTHER team is genuinely loaded at that exact position (same real
+// KTC-value/season-PPG bar ensureTeamNeedsPost already grades every
+// roster against). This is speculation dressed as insider chatter, not an
+// actual proposed trade - Trade Finder already does real matched trades
+// for a manager who opts into that search; this is Boogie noticing a real
+// mismatch out loud.
+// ---------------------------------------------------------------------
+
+function tradeRumorText(needTeam: string, pos: string, surplusTeam: string, playerName: string): string {
+  return pick([
+    `👀 Rumor mill: ${needTeam} has been searching for help at ${pos} all year - and ${surplusTeam} happens to be sitting on real depth there with ${playerName}. A call might make sense for both sides.`,
+    `👀 Hearing ${needTeam} could use an upgrade at ${pos}. Interesting that ${surplusTeam} is loaded at the position, headlined by ${playerName}. Just saying.`,
+    `👀 If I'm ${needTeam}, I'm at least checking in with ${surplusTeam} about ${playerName} - ${pos} has been a real hole all season.`,
+  ]);
+}
+
+/** posts once per week - the single most extreme real need-vs-surplus mismatch leaguewide, dynasty or redraft aware (same branch ensureTeamNeedsPost uses). Requires both a real need (score >= 0.3) AND a real standout on the other side (>=1.4x the league's own bar at that position) - most weeks, most leagues, nothing clears that bar and this simply doesn't post, which is the point. */
+export async function ensureTradeRumorPost(leagueId: string, sim: LeagueSimData, currentWeek: number): Promise<void> {
+  const postId = `traderumor_${leagueId}_wk${currentWeek}`;
+  try {
+    if (await postExists(postId)) return;
+
+    const settings = await getLeagueValueSettings(leagueId);
+    const playersData = await backend.fetchPlayers(leagueId);
+
+    type Candidate = { needTeam: string; pos: PlayerPos; needScore: number; surplusTeam: string; playerName: string; surplusRatio: number };
+    let best: Candidate | null = null;
+
+    const bestPlayerAt = (rosterIds: string[], pos: PlayerPos, valueOf: (id: string) => number) => {
+      let top: { id: string; v: number } | null = null;
+      for (const id of rosterIds) {
+        if (playersData?.[id]?.pos !== pos) continue;
+        const v = valueOf(id);
+        if (!top || v > top.v) top = { id, v };
+      }
+      return top;
+    };
+
+    const evaluate = (needs: TeamNeedsResult, needUserId: string, leagueAvg: Record<PlayerPos, number>, valueOf: (id: string) => number) => {
+      if (needs.biggest.score < 0.3) return;
+      const pos = needs.biggest.pos;
+      if (leagueAvg[pos] <= 0) return;
+      for (const surplusUserId of sim.teamIds) {
+        if (surplusUserId === needUserId) continue;
+        const top = bestPlayerAt(sim.managerInfo[surplusUserId].rosterPlayerIds, pos, valueOf);
+        if (!top) continue;
+        const surplusRatio = top.v / leagueAvg[pos];
+        if (surplusRatio < 1.4) continue;
+        if (!best || needs.biggest.score * surplusRatio > best.needScore * best.surplusRatio) {
+          const meta = playersData[top.id];
+          best = {
+            needTeam: needUserId,
+            pos,
+            needScore: needs.biggest.score,
+            surplusTeam: surplusUserId,
+            playerName: `${meta?.fn ?? ""} ${meta?.ln ?? ""}`.trim() || "a real difference-maker",
+            surplusRatio,
+          };
+        }
+      }
+    };
+
+    if (settings.isDynasty) {
+      const valuesBySleeperId = await backend.fetchAllPlayerValues();
+      const leagueAvg = computeLeagueNeedBaseline(sim.managerInfo, playersData, valuesBySleeperId, settings);
+      const valueOf = (id: string) => (valuesBySleeperId[id] ? computeAdjustedValue(valuesBySleeperId[id], settings) : 0);
+      for (const needUserId of sim.teamIds) {
+        const needs = computeTeamNeeds(sim.managerInfo[needUserId].rosterPlayerIds, playersData, valuesBySleeperId, settings, leagueAvg);
+        evaluate(needs, needUserId, leagueAvg, valueOf);
+      }
+    } else {
+      const playedWeeks = sim.weekNumbers.filter((w) => w < currentWeek);
+      const remainingWeeks = sim.weekNumbers.filter((w) => w >= currentWeek);
+      const seasonToDatePPG = buildSeasonToDatePPG(sim.matchupData, playedWeeks);
+      const leagueAvg = computeLeagueRedraftNeedBaseline(sim.managerInfo, playersData, seasonToDatePPG, remainingWeeks);
+      const valueOf = (id: string) => redraftPlayerScore(id, seasonToDatePPG, remainingWeeks, playersData);
+      for (const needUserId of sim.teamIds) {
+        const needs = computeRedraftTeamNeeds(sim.managerInfo[needUserId].rosterPlayerIds, playersData, seasonToDatePPG, remainingWeeks, leagueAvg);
+        evaluate(needs, needUserId, leagueAvg, valueOf);
+      }
+    }
+
+    if (!best) return;
+    const found = best as Candidate;
+
+    const analystCard: AnalystCard = {
+      eyebrow: "TRADE RUMOR",
+      icon: "shuffle",
+      accentColor: "#a855f7",
+      rows: [
+        { name: nameOf(sim, found.needTeam), avatar: sim.managerInfo[found.needTeam]?.avatar, stat: found.pos, statLabel: "REAL NEED", highlight: true },
+        { name: found.playerName, avatar: sim.managerInfo[found.surplusTeam]?.avatar, stat: nameOf(sim, found.surplusTeam), statLabel: "COULD FILL IT" },
+      ],
+      footer: "Speculation, not a real offer",
+    };
+
+    await ensureSystemPost({
+      id: postId,
+      text: tradeRumorText(nameOf(sim, found.needTeam), found.pos, nameOf(sim, found.surplusTeam), found.playerName),
+      analystCard,
+      leagueId,
+      targetType: "analysis",
+      targetId: `traderumor:wk${currentWeek}`,
+      targetLabel: "Trade Rumor",
+    });
+  } catch (error) {
+    console.error("Error posting trade rumor:", error);
+  }
+}
+
+// ---------------------------------------------------------------------
+// Bust of the Week - the real starter (not a bench afterthought - a
+// projection of 5+ points, someone who was actually started) with the
+// biggest real shortfall between what they were projected for and what
+// they actually scored, off the same real starters/starters_points Sleeper
+// box score bench regret already reads from.
+// ---------------------------------------------------------------------
+
+function bustOfTheWeekText(playerName: string, pos: string, teamName: string, week: number, proj: number, actual: number): string {
+  return pick([
+    `😬 Bust of the Week: ${playerName} (${pos}) was projected for ${proj.toFixed(1)} in Week ${week} for ${teamName} - delivered just ${actual.toFixed(1)}. Rough one.`,
+    `😬 Week ${week}'s biggest letdown: ${teamName} started ${playerName} at a ${proj.toFixed(1)}-point projection and got ${actual.toFixed(1)} back. That one stings.`,
+    `😬 ${playerName} had a real projection of ${proj.toFixed(1)} in Week ${week} and came up with ${actual.toFixed(1)} for ${teamName}. Tough week to have him in the lineup.`,
+  ]);
+}
+
+/** posts once per week (about the week that just finished), only when the shortfall is real - an 8+ point gap between a real projection and what they actually delivered, among players who were actually started (not bench). Most weeks this clears the bar somewhere in a real league. */
+export async function ensureBustOfTheWeekPost(leagueId: string, sim: LeagueSimData, currentWeek: number): Promise<void> {
+  const targetWeek = currentWeek - 1;
+  if (targetWeek < 1) return;
+  const postId = `bustoftheweek_${leagueId}_wk${targetWeek}`;
+  try {
+    if (await postExists(postId)) return;
+
+    const playersData = await backend.fetchPlayers(leagueId);
+    type Bust = { userId: string; playerId: string; proj: number; actual: number; shortfall: number };
+    const candidates: Bust[] = [];
+
+    for (const userId of sim.teamIds) {
+      const week = sim.matchupData[targetWeek]?.[userId];
+      const starters: string[] = week?.starters || [];
+      const startersPoints: number[] = week?.starters_points || [];
+      for (let i = 0; i < starters.length; i++) {
+        const playerId = starters[i];
+        if (!playerId || playerId === "0") continue;
+        const proj = parseFloat(playersData?.[playerId]?.wi?.[targetWeek.toString()]?.p ?? "0");
+        if (proj < 5) continue; // only players who were actually expected to matter
+        const actual = startersPoints[i] ?? 0;
+        candidates.push({ userId, playerId, proj, actual, shortfall: proj - actual });
+      }
+    }
+
+    let worst: Bust | null = null;
+    for (const c of candidates) {
+      if (!worst || c.shortfall > worst.shortfall) worst = c;
+    }
+
+    if (!worst || worst.shortfall < 8) return;
+    const found = worst;
+
+    const meta = playersData[found.playerId];
+    const playerName = `${meta?.fn ?? ""} ${meta?.ln ?? ""}`.trim() || "That player";
+    const teamName = nameOf(sim, found.userId);
+
+    const analystCard: AnalystCard = {
+      eyebrow: "BUST OF THE WEEK",
+      icon: "thumbs-down",
+      accentColor: "#f97316",
+      rows: [
+        {
+          name: playerName,
+          avatar: `https://sleepercdn.com/content/nfl/players/thumb/${found.playerId}.jpg`,
+          stat: found.actual.toFixed(1),
+          statLabel: `PROJ ${found.proj.toFixed(1)}`,
+          highlight: true,
+        },
+      ],
+      footer: `${teamName} · Week ${targetWeek}`,
+    };
+
+    await ensureSystemPost({
+      id: postId,
+      text: bustOfTheWeekText(playerName, meta?.pos ?? "", teamName, targetWeek, found.proj, found.actual),
+      analystCard,
+      leagueId,
+      targetType: "analysis",
+      targetId: `bustoftheweek:wk${targetWeek}`,
+      targetLabel: "Bust of the Week",
+    });
+  } catch (error) {
+    console.error("Error posting bust of the week:", error);
+  }
+}
+
+// ---------------------------------------------------------------------
+// Postgame Presser - real bulletin-board material: fake winner/loser
+// quotes attributed to the two real managers in the week's biggest real
+// blowout, framed as a press conference. The quotes are flavor text (like
+// every other pick()'d line in this file), but the matchup, teams, and
+// margin behind them are entirely real.
+// ---------------------------------------------------------------------
+
+// Every real press conference has a type - the trash-talker, the humble
+// pro, the ice-cold villain, the guy still hyped in the locker room. Each
+// persona below is a full quote generator; one is picked at random for the
+// winner and one (independently) for the loser, so two different posts
+// about two different blowouts read like two different people talking, not
+// the same three lines on rotation.
+const WINNER_PERSONAS: ((name: string, oppName: string, margin: number) => string)[] = [
+  (name, oppName, margin) => `"${oppName} wasn't ready, and honestly? Might not ever be." - ${name}, talking his team up after a ${margin.toFixed(1)}-point beatdown.`,
+  (name, oppName) => `"Just trusted the process and let the guys play. Nothing fancy." - ${name}, staying humble after the win over ${oppName}.`,
+  (name, oppName) => `"Nothing personal, ${oppName}. Somebody had to lose." - ${name}, not exactly sounding sorry about it.`,
+  (name) => `"LET'S GOOOO! That's what I'm talking about!" - ${name}, still riding the high in the group chat.`,
+  (name, oppName) => `"We found the mismatch and we exploited it all week. That's the game." - ${name}, breaking it down like a coordinator, not a fantasy manager.`,
+  (name, oppName, margin) => `"Respectfully? That wasn't close." - ${name}, with a ${margin.toFixed(1)}-point receipt to back it up.`,
+  (name, oppName) => `"I don't make the schedule, I just show up and win." - ${name}, shrugging off the rout on ${oppName}.`,
+  (name) => `"Somebody screenshot this. We might not be this good again." - ${name}, self-aware but not complaining.`,
+];
+const LOSER_PERSONAS: ((name: string, winnerName: string, margin: number) => string)[] = [
+  (name, winnerName) => `"Circle this one. We're coming back stronger." - ${name}, already looking past the loss to ${winnerName}.`,
+  (name, winnerName, margin) => `"Bad matchup, bad luck, bad week - nothing to see here." - ${name}, not thrilled about the ${margin.toFixed(1)}-point loss.`,
+  (name, winnerName) => `"Credit where it's due - ${winnerName} had the better team this week." - ${name}, tipping the cap.`,
+  (name) => `"I'd like to publicly apologize to my bench for not playing them." - ${name}, taking it in stride.`,
+  (name, winnerName) => `"The box score doesn't tell the whole story." - ${name}, insisting it was closer than it looked. It was not.`,
+  (name, winnerName, margin) => `"We'll remember this one." - ${name}, filing the ${margin.toFixed(1)}-point loss to ${winnerName} away for later.`,
+  (name) => `"No comment." - ${name}, declining to elaborate further on a rough week.`,
+  (name, winnerName) => `"Everybody's got a plan until ${winnerName} shows up on the schedule." - ${name}, with a rare moment of honesty.`,
+];
+function presserWinnerQuote(name: string, oppName: string, margin: number): string {
+  return pick(WINNER_PERSONAS)(name, oppName, margin);
+}
+function presserLoserQuote(name: string, winnerName: string, margin: number): string {
+  return pick(LOSER_PERSONAS)(name, winnerName, margin);
+}
+
+/** posts once per week (about the week that just finished) - the single biggest real margin of victory, dressed up as a postgame press conference. Requires a real 25+ point margin to qualify as a "blowout" worth the bit. */
+export async function ensurePostgamePresserPost(leagueId: string, sim: LeagueSimData, currentWeek: number): Promise<void> {
+  const targetWeek = currentWeek - 1;
+  if (targetWeek < 1) return;
+  const postId = `presser_${leagueId}_wk${targetWeek}`;
+  try {
+    if (await postExists(postId)) return;
+
+    const seen = new Set<string>();
+    let biggest: { winnerId: string; loserId: string; winnerPts: number; loserPts: number; margin: number } | null = null;
+
+    for (const userId of sim.teamIds) {
+      if (seen.has(userId)) continue;
+      const oppId = findOpponent(sim, targetWeek, userId);
+      if (!oppId || seen.has(oppId)) continue;
+      seen.add(userId);
+      seen.add(oppId);
+
+      const ptsA = parseFloat(sim.matchupData[targetWeek]?.[userId]?.team_points || "0");
+      const ptsB = parseFloat(sim.matchupData[targetWeek]?.[oppId]?.team_points || "0");
+      if (ptsA === 0 && ptsB === 0) continue;
+
+      const margin = Math.abs(ptsA - ptsB);
+      if (!biggest || margin > biggest.margin) {
+        const winnerId = ptsA >= ptsB ? userId : oppId;
+        const loserId = winnerId === userId ? oppId : userId;
+        biggest = { winnerId, loserId, winnerPts: Math.max(ptsA, ptsB), loserPts: Math.min(ptsA, ptsB), margin };
+      }
+    }
+
+    if (!biggest || biggest.margin < 25) return;
+    const found = biggest as { winnerId: string; loserId: string; winnerPts: number; loserPts: number; margin: number };
+
+    const winnerName = nameOf(sim, found.winnerId);
+    const loserName = nameOf(sim, found.loserId);
+
+    const analystCard: AnalystCard = {
+      eyebrow: "POSTGAME PRESSER",
+      icon: "mic",
+      accentColor: "#3b82f6",
+      rows: [
+        { name: winnerName, avatar: sim.managerInfo[found.winnerId]?.avatar, stat: found.winnerPts.toFixed(1), statLabel: "FINAL", highlight: true },
+        { name: loserName, avatar: sim.managerInfo[found.loserId]?.avatar, stat: found.loserPts.toFixed(1), statLabel: "FINAL" },
+      ],
+      footer: `Week ${targetWeek} · margin of ${found.margin.toFixed(1)}`,
+    };
+
+    const intro = pick([
+      `🎙️ Postgame: ${winnerName} put a beating on ${loserName}, ${found.winnerPts.toFixed(1)}-${found.loserPts.toFixed(1)}.`,
+      `🎙️ Postgame: ${winnerName} sent a message to the rest of the league, dropping ${loserName} ${found.winnerPts.toFixed(1)}-${found.loserPts.toFixed(1)}.`,
+      `🎙️ Postgame: ${loserName} never showed up. ${winnerName} wins it ${found.winnerPts.toFixed(1)}-${found.loserPts.toFixed(1)}.`,
+      `🎙️ Postgame: ${winnerName} had zero mercy on ${loserName} this week, ${found.winnerPts.toFixed(1)}-${found.loserPts.toFixed(1)}.`,
+    ]);
+
+    await ensureSystemPost({
+      id: postId,
+      text: `${intro}\n\n${presserWinnerQuote(winnerName, loserName, found.margin)}\n\n${presserLoserQuote(loserName, winnerName, found.margin)}`,
+      analystCard,
+      leagueId,
+      targetType: "analysis",
+      targetId: `presser:wk${targetWeek}`,
+      targetLabel: "Postgame Presser",
+    });
+  } catch (error) {
+    console.error("Error posting postgame presser:", error);
+  }
+}
+
+// ---------------------------------------------------------------------
+// Week in Review - a real multi-storyline recap (top scorer, closest
+// game, biggest blowout) in one digest, the "actual analysis" wrap-up
+// piece rather than a single-stat headline - everything else in this file
+// picks ONE story; this is deliberately the one that covers several at
+// once.
+// ---------------------------------------------------------------------
+
+function weekInReviewText(
+  week: number,
+  topName: string,
+  topPts: number,
+  closestA: string,
+  closestB: string,
+  margin: number,
+  blowoutW: string,
+  blowoutL: string,
+  blowoutMargin: number
+): string {
+  return pick([
+    `📰 Week ${week} in review: ${topName} led the league with ${topPts.toFixed(1)}. ${closestA} escaped ${closestB} by just ${margin.toFixed(1)}, while ${blowoutW} put a ${blowoutMargin.toFixed(1)}-point beating on ${blowoutL}.`,
+    `📰 Wrapping up Week ${week}: ${topName} topped the scoreboard at ${topPts.toFixed(1)}. Nail-biter of the week was ${closestA} over ${closestB} (${margin.toFixed(1)}), and ${blowoutW} made a statement, routing ${blowoutL} by ${blowoutMargin.toFixed(1)}.`,
+  ]);
+}
+
+/** posts once per week (about the week that just finished) - a real, multi-part recap off the same team_points every other week-recap post here reads from. */
+export async function ensureWeekInReviewPost(leagueId: string, sim: LeagueSimData, currentWeek: number): Promise<void> {
+  const targetWeek = currentWeek - 1;
+  if (targetWeek < 1) return;
+  const postId = `weekreview_${leagueId}_wk${targetWeek}`;
+  try {
+    if (await postExists(postId)) return;
+
+    let topScorer: { userId: string; pts: number } | null = null;
+    const games: { aId: string; bId: string; aPts: number; bPts: number; margin: number }[] = [];
+    const seen = new Set<string>();
+
+    for (const userId of sim.teamIds) {
+      const pts = parseFloat(sim.matchupData[targetWeek]?.[userId]?.team_points || "0");
+      if (pts > 0 && (!topScorer || pts > topScorer.pts)) topScorer = { userId, pts };
+
+      if (seen.has(userId)) continue;
+      const oppId = findOpponent(sim, targetWeek, userId);
+      if (!oppId || seen.has(oppId)) continue;
+      seen.add(userId);
+      seen.add(oppId);
+
+      const bPts = parseFloat(sim.matchupData[targetWeek]?.[oppId]?.team_points || "0");
+      if (pts === 0 && bPts === 0) continue;
+      games.push({ aId: userId, bId: oppId, aPts: pts, bPts, margin: Math.abs(pts - bPts) });
+    }
+
+    if (!topScorer || games.length === 0) return;
+    const found = topScorer as { userId: string; pts: number };
+
+    const closest = games.reduce((a, b) => (b.margin < a.margin ? b : a));
+    const blowout = games.reduce((a, b) => (b.margin > a.margin ? b : a));
+    const closestWinnerId = closest.aPts >= closest.bPts ? closest.aId : closest.bId;
+    const closestLoserId = closestWinnerId === closest.aId ? closest.bId : closest.aId;
+    const blowoutWinnerId = blowout.aPts >= blowout.bPts ? blowout.aId : blowout.bId;
+    const blowoutLoserId = blowoutWinnerId === blowout.aId ? blowout.bId : blowout.aId;
+
+    const analystCard: AnalystCard = {
+      eyebrow: `WEEK ${targetWeek} IN REVIEW`,
+      icon: "bar-chart-2",
+      accentColor: "#eab308",
+      rows: [
+        { name: nameOf(sim, found.userId), avatar: sim.managerInfo[found.userId]?.avatar, stat: found.pts.toFixed(1), statLabel: "TOP SCORE", highlight: true },
+        { name: `${nameOf(sim, closestWinnerId)} d. ${nameOf(sim, closestLoserId)}`, stat: closest.margin.toFixed(1), statLabel: "CLOSEST GAME" },
+        { name: `${nameOf(sim, blowoutWinnerId)} d. ${nameOf(sim, blowoutLoserId)}`, stat: blowout.margin.toFixed(1), statLabel: "BIGGEST BLOWOUT" },
+      ],
+    };
+
+    await ensureSystemPost({
+      id: postId,
+      text: weekInReviewText(
+        targetWeek,
+        nameOf(sim, found.userId),
+        found.pts,
+        nameOf(sim, closestWinnerId),
+        nameOf(sim, closestLoserId),
+        closest.margin,
+        nameOf(sim, blowoutWinnerId),
+        nameOf(sim, blowoutLoserId),
+        blowout.margin
+      ),
+      analystCard,
+      leagueId,
+      targetType: "analysis",
+      targetId: `weekreview:wk${targetWeek}`,
+      targetLabel: "Week in Review",
+    });
+  } catch (error) {
+    console.error("Error posting week in review:", error);
+  }
+}
+
+// ---------------------------------------------------------------------
 // Orchestrator - builds one shared LeagueSimData for the whole analyst
 // pass instead of each post type fetching its own copy.
 // ---------------------------------------------------------------------
@@ -1073,6 +1476,10 @@ export async function ensureBoogieAnalystPosts(leagueId: string, events: TickerE
       ensureWaiverHeadlinerPost(leagueId, events, week),
       ensureTeamNeedsPost(leagueId, sim, week),
       ensureKeyMatchupsPost(leagueId, sim, week),
+      ensureTradeRumorPost(leagueId, sim, week),
+      ensureBustOfTheWeekPost(leagueId, sim, week),
+      ensurePostgamePresserPost(leagueId, sim, week),
+      ensureWeekInReviewPost(leagueId, sim, week),
       ...(season ? [ensureHotSeatPost(leagueId, sim, String(season))] : []),
     ]);
   } catch (error) {

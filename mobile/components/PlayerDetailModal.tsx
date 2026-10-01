@@ -6,9 +6,9 @@ import { Feather, Ionicons } from "@expo/vector-icons";
 import { getTeamColor, getTeamLogo, getPositionColor } from "../lib/nflTeams";
 import { sleeper, backend } from "../lib/api";
 import { getPlayerGameLog, getPlayerCareerStats, GameLogEntry, SeasonTotals } from "../lib/playerBoxScore";
-import { getPlayerBio, formatHeight, PlayerBio } from "../lib/playerBio";
+import { getPlayerBio, formatHeight, injuryBadge, PlayerBio } from "../lib/playerBio";
 import { buildPlayerTransactionHistory } from "../lib/leagueTransactions";
-import type { TickerEvent, TradeEvent } from "../lib/leagueTransactions";
+import type { TickerEvent, TradeEvent, PlayerDraftPickInfo } from "../lib/leagueTransactions";
 
 interface Props {
   visible: boolean;
@@ -118,12 +118,14 @@ export default function PlayerDetailModal({ visible, onClose, leagueID, playerId
 
   const [historyLoading, setHistoryLoading] = useState(false);
   const [txHistory, setTxHistory] = useState<TickerEvent[] | null>(null);
+  const [draftPick, setDraftPick] = useState<PlayerDraftPickInfo | null>(null);
   const [career, setCareer] = useState<SeasonTotals[] | null>(null);
 
   useEffect(() => {
     if (!visible) return;
     setTab("summary");
     setTxHistory(null);
+    setDraftPick(null);
     setCareer(null);
   }, [visible, playerId]);
 
@@ -201,11 +203,12 @@ export default function PlayerDetailModal({ visible, onClose, leagueID, playerId
     setHistoryLoading(true);
 
     Promise.all([
-      buildPlayerTransactionHistory(leagueID, playerId).catch(() => []),
+      buildPlayerTransactionHistory(leagueID, playerId).catch(() => ({ events: [], draftPick: null })),
       season ? getPlayerCareerStats(playerId, season, scoringSettings).catch(() => []) : Promise.resolve([]),
-    ]).then(([tx, careerStats]) => {
+    ]).then(([history, careerStats]) => {
       if (cancelled) return;
-      setTxHistory(tx);
+      setTxHistory(history.events);
+      setDraftPick(history.draftPick);
       setCareer(careerStats);
       setHistoryLoading(false);
     });
@@ -272,6 +275,14 @@ export default function PlayerDetailModal({ visible, onClose, leagueID, playerId
                     {team ?? "FA"}
                     {bio?.number ? ` · #${bio.number}` : ""}
                   </Text>
+                  {(() => {
+                    const injury = injuryBadge(bio?.injury_status);
+                    return injury ? (
+                      <View style={{ backgroundColor: injury.color }} className="px-2 py-0.5 rounded-md">
+                        <Text className="text-white text-[11px] font-extrabold">{injury.label}</Text>
+                      </View>
+                    ) : null;
+                  })()}
                 </View>
               </View>
             </View>
@@ -473,6 +484,30 @@ export default function PlayerDetailModal({ visible, onClose, leagueID, playerId
                     </View>
                   ) : (
                     <>
+                      <Text className="text-gray-500 text-[10px] font-bold tracking-widest mb-2">DRAFTED</Text>
+                      <View style={{ borderColor: `${positionColor}33` }} className="bg-[#141416] border rounded-2xl px-3.5 py-3 mb-5 flex-row items-center gap-3">
+                        {draftPick ? (
+                          <>
+                            <Image
+                              source={draftPick.teamAvatar ? { uri: draftPick.teamAvatar } : undefined}
+                              className="w-9 h-9 rounded-full bg-white/10"
+                            />
+                            <View className="flex-1">
+                              <Text className="text-white text-[13px] font-bold">
+                                {draftPick.season} Draft · Round {draftPick.round}, Pick {draftPick.pickInRound}
+                              </Text>
+                              <Text className="text-gray-500 text-[11px] mt-0.5">
+                                Pick #{draftPick.overallPick} overall · by {draftPick.teamName}
+                              </Text>
+                            </View>
+                          </>
+                        ) : (
+                          <Text className="text-gray-500 text-[13px]">
+                            No draft record in this league&apos;s history - added via waivers, free agency, or a trade.
+                          </Text>
+                        )}
+                      </View>
+
                       <Text className="text-gray-500 text-[10px] font-bold tracking-widest mb-2">TRANSACTION HISTORY</Text>
                       {!txHistory || txHistory.length === 0 ? (
                         <Text className="text-gray-500 text-[13px] mb-5">No trades or waiver moves on record for this player.</Text>

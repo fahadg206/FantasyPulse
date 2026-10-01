@@ -55,6 +55,30 @@ export default function More() {
       path: `/league/${leagueID}/leaguemanagers`,
     },
     {
+      label: "Team Breakdown",
+      description: "Deep, real analytics for one team - power rating, schedule, playoff odds, and history",
+      icon: <Ionicons name="analytics" size={20} color="#af1222" />,
+      path: `/league/${leagueID}/teambreakdown`,
+    },
+    {
+      label: "Power Rankings",
+      description: "Every team tiered from Contender to Rebuild, off real roster strength and record",
+      icon: <Ionicons name="bar-chart" size={20} color="#af1222" />,
+      path: `/league/${leagueID}/powerrankings`,
+    },
+    {
+      label: "Luck Index",
+      description: "Your real record vs. your all-play record - who's actually good, and who's just lucky",
+      icon: <Ionicons name="shuffle" size={20} color="#af1222" />,
+      path: `/league/${leagueID}/luckindex`,
+    },
+    {
+      label: "Draft Pick Value Chart",
+      description: "Real KTC values for every future pick, by year and draft slot",
+      icon: <Feather name="grid" size={20} color="#af1222" />,
+      path: `/league/${leagueID}/pickvaluechart`,
+    },
+    {
       label: "Trade Center",
       description: "This season's trades, the calculator, and the finder - all in one place",
       icon: <Feather name="repeat" size={20} color="#af1222" />,

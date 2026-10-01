@@ -10,6 +10,7 @@ import TradeHistory from "../../../components/TradeHistory";
 import { displayName } from "../../../lib/getTopPerformers";
 import { getLeagueValueSettings, LeagueValueSettings, RawPlayerValue } from "../../../lib/playerValue";
 import { buildTradeValueLookup, TradeValueLookup } from "../../../lib/tradeValue";
+import { getLeagueDraftPickBoard, TradeablePick, PickTier } from "../../../lib/draftPicks";
 import { NON_STARTER_SLOTS } from "../../../lib/startSitAccuracy";
 import {
   computeOptimalLineupAssignment,
@@ -37,17 +38,24 @@ interface Player {
   value: number;
 }
 
+// A trade asset is either a real player or a real, KTC-priced future draft
+// pick (lib/draftPicks.ts) - unified under one shape so valuation, the
+// sending/receiving lists, and removal all work the same regardless of kind.
 interface TradeItem {
-  playerId: string;
-  player: Player;
+  kind: "player" | "pick";
+  itemId: string; // playerId, or the pick's own id
+  value: number;
   fromUserId: string;
   toUserId: string;
+  player?: Player;
+  pick?: TradeablePick;
 }
 
 const TEAM_ACCENTS = ["#af1222", "#3b82f6", "#eab308"];
+const TIER_COLOR: Record<PickTier, string> = { Early: "#af1222", Mid: "#eab308", Late: "#6b7280" };
 
 function formatValue(v: number): string {
-  if (Math.abs(v) >= 1000) return `${(v / 1000).toFixed(1)}k`;
+  if (Math.abs(v) >= 1000) return `${v < 0 ? "-" : ""}${(Math.abs(v) / 1000).toFixed(1)}k`;
   return String(Math.round(v));
 }
 
@@ -70,6 +78,41 @@ function fairnessVerdict(maxAbsNet: number) {
   if (maxAbsNet <= 2500) return { text: "Slightly lopsided", color: "#eab308" };
   if (maxAbsNet <= 5000) return { text: "Unfair", color: "#f97316" };
   return { text: "Highway robbery", color: "#ef4444" };
+}
+
+// Mirrors PlayerCard's row treatment (colored tile, bled icon, name +
+// subtitle, optional bottom/right slots) so a pick sitting in the same
+// SENDING/RECEIVING list as real players doesn't look like a different kind
+// of UI - just a different kind of asset.
+function PickRow({
+  pick,
+  rightSlot,
+  bottomSlot,
+}: {
+  pick: TradeablePick;
+  rightSlot?: React.ReactNode;
+  bottomSlot?: React.ReactNode;
+}) {
+  const color = TIER_COLOR[pick.tier];
+  return (
+    <View className="bg-[#1c1c1f] border border-white/10 rounded-xl overflow-hidden">
+      <View className="flex-row items-center px-2.5 py-2.5">
+        <View style={{ backgroundColor: `${color}22`, borderColor: color }} className="w-[44px] h-[44px] rounded-full items-center justify-center border">
+          <Feather name="calendar" size={17} color={color} />
+        </View>
+        <View className="flex-1 ml-3">
+          <Text numberOfLines={1} className="text-white font-bold text-[13px]">
+            {pick.label}
+          </Text>
+          <Text className="text-white/60 text-[11px] font-medium">
+            {pick.tierIsProjected ? "Projected" : "Est."} value{pick.currentOwnerUserId !== pick.originalUserId ? ` · ${pick.originalTeamName}'s pick` : ""}
+          </Text>
+          {bottomSlot}
+        </View>
+        {rightSlot}
+      </View>
+    </View>
+  );
 }
 
 export default function TradeCalculator({ hideHeader }: { hideHeader?: boolean } = {}) {
@@ -95,7 +138,7 @@ export default function TradeCalculator({ hideHeader }: { hideHeader?: boolean }
   // --- the trade itself ---
   const [teamIds, setTeamIds] = useState<(string | null)[]>([null, null]);
   const [items, setItems] = useState<TradeItem[]>([]);
-  const [picker, setPicker] = useState<{ forTeam: string; chosenPlayerId?: string } | null>(null);
+  const [picker, setPicker] = useState<{ forTeam: string; mode: "player" | "pick"; chosenId?: string } | null>(null);
   const [detailPlayer, setDetailPlayer] = useState<{ playerId?: string; name: string; position: string; team?: string } | null>(null);
   const [expandedLineup, setExpandedLineup] = useState<Record<string, boolean>>({});
   // Collapsing a team card down to just its header is the way to stop
@@ -108,6 +151,13 @@ export default function TradeCalculator({ hideHeader }: { hideHeader?: boolean }
   const [simData, setSimData] = useState<LeagueSimData | null>(null);
   const [loadingSim, setLoadingSim] = useState(false);
   const [winImpactByTeam, setWinImpactByTeam] = useState<Record<string, number | null>>({});
+
+  // --- real, KTC-priced future draft picks, fetched once at least 2 teams
+  // are picked (same gate as simData) - re-fetched once simData lands so
+  // the soonest draft class's Early/Mid/Late tiers become the real
+  // projection instead of every pick defaulting to "Mid". Picks are a
+  // dynasty/keeper-only concept (see lib/draftPicks.ts).
+  const [draftPicks, setDraftPicks] = useState<TradeablePick[]>([]);
 
   useEffect(() => {
     if (!leagueID) return;
@@ -196,13 +246,14 @@ export default function TradeCalculator({ hideHeader }: { hideHeader?: boolean }
   }, [leagueID]);
 
   const activeTeamIds = teamIds.filter((id): id is string => !!id);
+  const hasMultiTeams = activeTeamIds.length >= 2;
 
   // Fetch the heavier season-schedule/projection data (needed for real
   // win-impact) only once at least 2 teams are picked, and only once -
   // recomputing win impact on every trade edit after that reuses this,
   // it doesn't refetch it.
   useEffect(() => {
-    if (!leagueID || activeTeamIds.length < 2 || simData) return;
+    if (!leagueID || !hasMultiTeams || simData) return;
     let cancelled = false;
     setLoadingSim(true);
     buildLeagueSimData(leagueID)
@@ -215,7 +266,25 @@ export default function TradeCalculator({ hideHeader }: { hideHeader?: boolean }
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leagueID, activeTeamIds.length]);
+  }, [leagueID, hasMultiTeams]);
+
+  // Real future-pick board (ownership + real KTC value). Runs once without
+  // simData (picks show up fast with a neutral "Mid" tier for the soonest
+  // class) and again once simData lands (the soonest class's tiers become
+  // the real projected-standings-based ones).
+  useEffect(() => {
+    if (!leagueID || !valueSettings?.isDynasty || !hasMultiTeams) return;
+    let cancelled = false;
+    getLeagueDraftPickBoard(leagueID, simData)
+      .then((board) => {
+        if (!cancelled) setDraftPicks(board.picks);
+      })
+      .catch((error) => console.error("Error loading draft pick board:", error));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leagueID, valueSettings?.isDynasty, hasMultiTeams, simData]);
 
   // Reset the trade whenever the team lineup changes (swapping a team out
   // mid-build would otherwise leave stale items pointing at a team no
@@ -227,8 +296,10 @@ export default function TradeCalculator({ hideHeader }: { hideHeader?: boolean }
 
   function postTradeRoster(userId: string): string[] {
     const base = allRosters[userId]?.rosterPlayerIds ?? [];
-    const leaving = new Set(items.filter((it) => it.fromUserId === userId).map((it) => it.playerId));
-    const arriving = items.filter((it) => it.toUserId === userId).map((it) => it.playerId);
+    const leaving = new Set(
+      items.filter((it) => it.kind === "player" && it.fromUserId === userId).map((it) => it.itemId)
+    );
+    const arriving = items.filter((it) => it.kind === "player" && it.toUserId === userId).map((it) => it.itemId);
     return base.filter((id) => !leaving.has(id)).concat(arriving);
   }
 
@@ -237,7 +308,7 @@ export default function TradeCalculator({ hideHeader }: { hideHeader?: boolean }
   // recompute on every single render, only once the trade settles for a
   // moment.
   useEffect(() => {
-    if (!simData || activeTeamIds.length < 2) return;
+    if (!simData || !hasMultiTeams) return;
     const handle = setTimeout(() => {
       const adjusted: Record<number, Record<string, number>> = {};
       for (const week of simData.weekNumbers) {
@@ -275,12 +346,19 @@ export default function TradeCalculator({ hideHeader }: { hideHeader?: boolean }
     if (!meta) return;
     const value = valueFor ? valueFor(playerId) : 0;
     const player: Player = { id: playerId, fn: meta.fn, ln: meta.ln, pos: meta.pos, t: meta.t, value };
-    setItems((prev) => [...prev, { playerId, player, fromUserId, toUserId }]);
+    setItems((prev) => [...prev, { kind: "player", itemId: playerId, value, player, fromUserId, toUserId }]);
     setPicker(null);
   };
 
-  const removeItem = (playerId: string, fromUserId: string) => {
-    setItems((prev) => prev.filter((it) => !(it.playerId === playerId && it.fromUserId === fromUserId)));
+  const addPick = (fromUserId: string, pickId: string, toUserId: string) => {
+    const pick = draftPicks.find((p) => p.id === pickId);
+    if (!pick) return;
+    setItems((prev) => [...prev, { kind: "pick", itemId: pickId, value: pick.value, pick, fromUserId, toUserId }]);
+    setPicker(null);
+  };
+
+  const removeItem = (itemId: string, fromUserId: string) => {
+    setItems((prev) => prev.filter((it) => !(it.itemId === itemId && it.fromUserId === fromUserId)));
   };
 
   if (!leagueID) return null;
@@ -293,11 +371,18 @@ export default function TradeCalculator({ hideHeader }: { hideHeader?: boolean }
     );
   }
 
-  const pickerRoster = picker
+  const pickablePicksFor = (userId: string) =>
+    draftPicks
+      .filter((p) => p.currentOwnerUserId === userId)
+      .filter((p) => !items.some((it) => it.kind === "pick" && it.itemId === p.id && it.fromUserId === userId))
+      .sort((a, b) => a.season.localeCompare(b.season) || a.round - b.round);
+
+  const pickerRoster = picker && picker.mode === "player"
     ? (allRosters[picker.forTeam]?.rosterPlayerIds ?? []).filter(
-        (id) => !items.some((it) => it.fromUserId === picker.forTeam && it.playerId === id)
+        (id) => !items.some((it) => it.kind === "player" && it.fromUserId === picker.forTeam && it.itemId === id)
       )
     : [];
+  const pickerPicks = picker && picker.mode === "pick" ? pickablePicksFor(picker.forTeam) : [];
   const pickerDestinations = picker ? destinationsFor(picker.forTeam) : [];
 
   // Dynasty reasons off real KTC trade value (lib/tradeAnalysis.ts, the
@@ -313,10 +398,18 @@ export default function TradeCalculator({ hideHeader }: { hideHeader?: boolean }
     return computeRedraftTeamNeeds(rosterPlayerIds, playersData, seasonToDatePPG, remainingWeeks, leagueAvgNeed!);
   };
 
+  // Real value distribution per team - what's actually leaving, what's
+  // actually arriving, and the net of the two. Showing only the net (as
+  // before) hid the actual scale of the trade: a 9,000-for-9,000 swap and a
+  // 500-for-500 swap both read as "+0" with nothing else shown.
+  const sentByTeam: Record<string, number> = {};
+  const receivedByTeam: Record<string, number> = {};
   const netValueByTeam: Record<string, number> = {};
   activeTeamIds.forEach((id) => {
-    const out = items.filter((it) => it.fromUserId === id).reduce((s, it) => s + it.player.value, 0);
-    const inn = items.filter((it) => it.toUserId === id).reduce((s, it) => s + it.player.value, 0);
+    const out = items.filter((it) => it.fromUserId === id).reduce((s, it) => s + it.value, 0);
+    const inn = items.filter((it) => it.toUserId === id).reduce((s, it) => s + it.value, 0);
+    sentByTeam[id] = out;
+    receivedByTeam[id] = inn;
     netValueByTeam[id] = inn - out;
   });
   const maxAbsNet = Math.max(0, ...activeTeamIds.map((id) => Math.abs(netValueByTeam[id] ?? 0)));
@@ -337,7 +430,8 @@ export default function TradeCalculator({ hideHeader }: { hideHeader?: boolean }
 
   return (
     <>
-    <ScrollView className="flex-1 bg-[#0c0c0e]" contentContainerClassName="p-4 pb-10">
+    <ScrollView className="flex-1 bg-[#0c0c0e]" contentContainerClassName="pt-4 pb-10">
+      <View className="px-4">
       {!hideHeader && (
         <View className="mb-1">
           <Text className="text-[11px] font-bold tracking-widest text-brand">TRADE CALCULATOR</Text>
@@ -350,7 +444,7 @@ export default function TradeCalculator({ hideHeader }: { hideHeader?: boolean }
       {valueSettings && (
         <Text className="text-gray-600 text-[11px] mb-1">
           {valueSettings.isDynasty
-            ? "Needs are based on long-term dynasty value at each position vs. the league's own bar."
+            ? "Needs are based on long-term dynasty value at each position vs. the league's own bar. Future draft picks are priced off real KTC market values."
             : "Needs are based on real season-to-date scoring blended with rest-of-season projections - no long-term value to lean on in redraft."}
         </Text>
       )}
@@ -399,13 +493,28 @@ export default function TradeCalculator({ hideHeader }: { hideHeader?: boolean }
                   <Text numberOfLines={1} className="text-white text-[11px] font-bold text-center">
                     {user?.name}
                   </Text>
+                  <View className="flex-row items-center gap-2 mt-1.5">
+                    <View className="items-center">
+                      <Text className="text-gray-500 text-[8px] font-bold tracking-wide">SENDS</Text>
+                      <Text style={{ fontVariant: ["tabular-nums"] }} className="text-white/80 text-[11px] font-semibold">
+                        {formatValue(sentByTeam[userId] ?? 0)}
+                      </Text>
+                    </View>
+                    <View className="items-center">
+                      <Text className="text-gray-500 text-[8px] font-bold tracking-wide">GETS</Text>
+                      <Text style={{ fontVariant: ["tabular-nums"] }} className="text-white/80 text-[11px] font-semibold">
+                        {formatValue(receivedByTeam[userId] ?? 0)}
+                      </Text>
+                    </View>
+                  </View>
                   <Text
                     style={{ fontVariant: ["tabular-nums"], color: netValue >= 0 ? "#22c55e" : "#ef4444" }}
-                    className="text-[15px] font-extrabold mt-0.5"
+                    className="text-[15px] font-extrabold mt-1"
                   >
                     {netValue >= 0 ? "+" : ""}
                     {formatValue(netValue)}
                   </Text>
+                  <Text className="text-gray-600 text-[8px] font-bold tracking-wide">NET</Text>
                 </View>
               );
             })}
@@ -421,9 +530,10 @@ export default function TradeCalculator({ hideHeader }: { hideHeader?: boolean }
           </View>
         </View>
       )}
+      </View>
 
       {activeTeamIds.length >= 2 && leagueAvgNeed && valueSettings && (
-        <View className="gap-3 mt-3">
+        <View className="flex-row gap-2 mt-3 px-4 items-start">
           {activeTeamIds.map((userId, i) => {
             const user = users.find((u) => u.id === userId);
             const accent = TEAM_ACCENTS[i % TEAM_ACCENTS.length];
@@ -449,108 +559,157 @@ export default function TradeCalculator({ hideHeader }: { hideHeader?: boolean }
             );
 
             const collapsed = !!collapsedTeams[userId];
+            const teamPicks = valueSettings.isDynasty ? pickablePicksFor(userId) : [];
 
             return (
-              <View key={userId} style={{ borderColor: `${accent}33` }} className="bg-[#141416] border rounded-2xl overflow-hidden">
-                <View className="flex-row items-center gap-3 px-4 pt-4 pb-3">
-                  <Pressable onPress={() => router.push(`/profile/manager/${userId}`)} className="flex-row items-center gap-3 flex-1">
-                    <Image source={user?.avatar ? { uri: user.avatar } : helmet} className="w-[40px] h-[40px] rounded-full" />
-                    <View className="flex-1">
-                      <Text numberOfLines={1} className="text-white text-[15px] font-bold">
+              <View key={userId} style={{ flex: 1, minWidth: 0 }}>
+              <View style={{ borderColor: `${accent}33` }} className="bg-[#141416] border rounded-2xl overflow-hidden">
+                <View className="flex-row items-center gap-2 px-2.5 pt-2.5 pb-2">
+                  <Pressable onPress={() => router.push(`/profile/manager/${userId}`)} className="flex-row items-center gap-2 flex-1" style={{ minWidth: 0 }}>
+                    <Image source={user?.avatar ? { uri: user.avatar } : helmet} className="w-[26px] h-[26px] rounded-full" />
+                    <View className="flex-1" style={{ minWidth: 0 }}>
+                      <Text numberOfLines={1} className="text-white text-[12px] font-bold">
                         {user?.name}
                       </Text>
-                      <Text className="text-[11px] mt-0.5" style={{ color: netValue >= 0 ? "#22c55e" : "#ef4444" }}>
-                        {incoming.length > 0 || outgoing.length > 0
-                          ? `${incoming.length > 0 ? `+${incoming.length}` : "0"} players · Value ${netValue >= 0 ? "+" : ""}${formatValue(netValue)}`
-                          : "No changes yet"}
+                      <Text numberOfLines={1} className="text-[9px] mt-0.5">
+                        <Text style={{ color: netValue >= 0 ? "#22c55e" : "#ef4444" }}>
+                          {incoming.length > 0 || outgoing.length > 0
+                            ? `${incoming.length > 0 ? `+${incoming.length}` : "0"} · ${netValue >= 0 ? "+" : ""}${formatValue(netValue)}`
+                            : "No changes"}
+                        </Text>
+                        {notableNeeds.length > 0 && (
+                          <Text className="text-yellow-500 font-bold"> · {notableNeeds.map((n) => n.pos).join("/")}</Text>
+                        )}
                       </Text>
                     </View>
                   </Pressable>
                   <Pressable
                     onPress={() => setCollapsedTeams((p) => ({ ...p, [userId]: !p[userId] }))}
                     hitSlop={8}
-                    className="w-7 h-7 rounded-full bg-white/5 items-center justify-center"
+                    className="w-6 h-6 rounded-full bg-white/5 items-center justify-center"
                   >
-                    <Feather name={collapsed ? "chevron-down" : "chevron-up"} size={14} color="#9ca3af" />
+                    <Feather name={collapsed ? "chevron-down" : "chevron-up"} size={12} color="#9ca3af" />
                   </Pressable>
                 </View>
-
-                {notableNeeds.length > 0 && (
-                  <View className="flex-row items-center gap-1.5 px-4 pb-3">
-                    <Feather name="alert-circle" size={11} color="#eab308" />
-                    <Text className="text-[10px] text-gray-500">
-                      Needs: <Text className="text-yellow-500 font-bold">{notableNeeds.map((n) => n.pos).join(", ")}</Text>
-                    </Text>
-                  </View>
-                )}
 
                 {!collapsed && (
                   <>
 
-                <View className="px-4 pb-3">
-                  <Pressable
-                    onPress={() => setPicker({ forTeam: userId })}
-                    className="flex-row items-center justify-center gap-1.5 border-2 border-brand rounded-xl py-2 mb-2.5"
-                  >
-                    <Feather name="plus" size={13} color="#af1222" />
-                    <Text className="text-brand text-[12px] font-semibold">Send a player from {user?.name}</Text>
-                  </Pressable>
+                <View className="px-2 pb-2.5">
+                  <View className="gap-1.5 mb-2">
+                    <Pressable
+                      onPress={() => setPicker({ forTeam: userId, mode: "player" })}
+                      className="flex-row items-center justify-center gap-1 border-2 border-brand rounded-lg py-1.5"
+                    >
+                      <Feather name="plus" size={11} color="#af1222" />
+                      <Text className="text-brand text-[10px] font-semibold">Player</Text>
+                    </Pressable>
+                    {valueSettings.isDynasty && teamPicks.length > 0 && (
+                      <Pressable
+                        onPress={() => setPicker({ forTeam: userId, mode: "pick" })}
+                        className="flex-row items-center justify-center gap-1 border-2 border-dashed border-white/25 rounded-lg py-1.5"
+                      >
+                        <Feather name="calendar" size={11} color="#9ca3af" />
+                        <Text className="text-gray-300 text-[10px] font-semibold">Pick</Text>
+                      </Pressable>
+                    )}
+                  </View>
 
                   {outgoing.length > 0 && (
-                    <View className="gap-2 mb-2.5">
-                      <Text className="text-[10px] font-bold tracking-wider text-gray-500">SENDING</Text>
-                      {outgoing.map((it) => (
-                        <PlayerCard
-                          key={it.playerId}
-                          playerId={it.playerId}
-                          name={displayName(it.player)}
-                          position={it.player.pos}
-                          team={it.player.t}
-                          bottomSlot={
-                            <View className="flex-row items-center gap-2 mt-0.5">
-                              <Stars value={it.player.value} />
-                              {activeTeamIds.length === 3 && (
-                                <Text className="text-white/70 text-[9px]">→ {users.find((u) => u.id === it.toUserId)?.name}</Text>
-                              )}
-                            </View>
-                          }
-                          rightSlot={
-                            <Pressable onPress={() => removeItem(it.playerId, it.fromUserId)} hitSlop={8}>
-                              <Feather name="x-circle" size={18} color="#ffffff" />
-                            </Pressable>
-                          }
-                          onExpand={() => setDetailPlayer({ playerId: it.playerId, name: displayName(it.player), position: it.player.pos, team: it.player.t })}
-                        />
-                      ))}
+                    <View className="gap-1.5 mb-2">
+                      <Text className="text-[9px] font-bold tracking-wider text-gray-500">SENDING</Text>
+                      {outgoing.map((it) =>
+                        it.kind === "player" && it.player ? (
+                          <PlayerCard
+                            key={it.itemId}
+                            playerId={it.itemId}
+                            name={displayName(it.player)}
+                            position={it.player.pos}
+                            team={it.player.t}
+                            bottomSlot={
+                              <View className="flex-row items-center gap-2 mt-0.5">
+                                <Stars value={it.player.value} />
+                                {activeTeamIds.length === 3 && (
+                                  <Text className="text-white/70 text-[9px]">→ {users.find((u) => u.id === it.toUserId)?.name}</Text>
+                                )}
+                              </View>
+                            }
+                            rightSlot={
+                              <Pressable onPress={() => removeItem(it.itemId, it.fromUserId)} hitSlop={8}>
+                                <Feather name="x-circle" size={18} color="#ffffff" />
+                              </Pressable>
+                            }
+                            onExpand={() => setDetailPlayer({ playerId: it.itemId, name: displayName(it.player!), position: it.player!.pos, team: it.player!.t })}
+                          />
+                        ) : it.pick ? (
+                          <PickRow
+                            key={it.itemId}
+                            pick={it.pick}
+                            bottomSlot={
+                              <View className="flex-row items-center gap-2 mt-0.5">
+                                <Stars value={it.pick.value} />
+                                {activeTeamIds.length === 3 && (
+                                  <Text className="text-white/70 text-[9px]">→ {users.find((u) => u.id === it.toUserId)?.name}</Text>
+                                )}
+                              </View>
+                            }
+                            rightSlot={
+                              <Pressable onPress={() => removeItem(it.itemId, it.fromUserId)} hitSlop={8}>
+                                <Feather name="x-circle" size={18} color="#ffffff" />
+                              </Pressable>
+                            }
+                          />
+                        ) : null
+                      )}
                     </View>
                   )}
 
                   {incoming.length > 0 && (
-                    <View className="gap-2">
-                      <Text className="text-[10px] font-bold tracking-wider text-gray-500">RECEIVING</Text>
-                      {incoming.map((it) => (
-                        <PlayerCard
-                          key={it.playerId}
-                          playerId={it.playerId}
-                          name={displayName(it.player)}
-                          position={it.player.pos}
-                          team={it.player.t}
-                          bottomSlot={
-                            <View className="flex-row items-center gap-2 mt-0.5">
-                              <Stars value={it.player.value} />
-                              {activeTeamIds.length === 3 && (
-                                <Text className="text-white/70 text-[9px]">← {users.find((u) => u.id === it.fromUserId)?.name}</Text>
-                              )}
-                            </View>
-                          }
-                          rightSlot={
-                            <Pressable onPress={() => removeItem(it.playerId, it.fromUserId)} hitSlop={8}>
-                              <Feather name="x-circle" size={18} color="#ffffff" />
-                            </Pressable>
-                          }
-                          onExpand={() => setDetailPlayer({ playerId: it.playerId, name: displayName(it.player), position: it.player.pos, team: it.player.t })}
-                        />
-                      ))}
+                    <View className="gap-1.5">
+                      <Text className="text-[9px] font-bold tracking-wider text-gray-500">RECEIVING</Text>
+                      {incoming.map((it) =>
+                        it.kind === "player" && it.player ? (
+                          <PlayerCard
+                            key={it.itemId}
+                            playerId={it.itemId}
+                            name={displayName(it.player)}
+                            position={it.player.pos}
+                            team={it.player.t}
+                            bottomSlot={
+                              <View className="flex-row items-center gap-2 mt-0.5">
+                                <Stars value={it.player.value} />
+                                {activeTeamIds.length === 3 && (
+                                  <Text className="text-white/70 text-[9px]">← {users.find((u) => u.id === it.fromUserId)?.name}</Text>
+                                )}
+                              </View>
+                            }
+                            rightSlot={
+                              <Pressable onPress={() => removeItem(it.itemId, it.fromUserId)} hitSlop={8}>
+                                <Feather name="x-circle" size={18} color="#ffffff" />
+                              </Pressable>
+                            }
+                            onExpand={() => setDetailPlayer({ playerId: it.itemId, name: displayName(it.player!), position: it.player!.pos, team: it.player!.t })}
+                          />
+                        ) : it.pick ? (
+                          <PickRow
+                            key={it.itemId}
+                            pick={it.pick}
+                            bottomSlot={
+                              <View className="flex-row items-center gap-2 mt-0.5">
+                                <Stars value={it.pick.value} />
+                                {activeTeamIds.length === 3 && (
+                                  <Text className="text-white/70 text-[9px]">← {users.find((u) => u.id === it.fromUserId)?.name}</Text>
+                                )}
+                              </View>
+                            }
+                            rightSlot={
+                              <Pressable onPress={() => removeItem(it.itemId, it.fromUserId)} hitSlop={8}>
+                                <Feather name="x-circle" size={18} color="#ffffff" />
+                              </Pressable>
+                            }
+                          />
+                        ) : null
+                      )}
                     </View>
                   )}
                 </View>
@@ -559,13 +718,13 @@ export default function TradeCalculator({ hideHeader }: { hideHeader?: boolean }
                   <>
                     <View className="flex-row border-t border-white/10">
                       <StatTile
-                        label="LINEUP PTS"
+                        label="PTS"
                         value={`${ptsDelta >= 0 ? "+" : ""}${ptsDelta.toFixed(1)}`}
                         color={ptsDelta >= 0 ? "#22c55e" : "#ef4444"}
                         divider={false}
                       />
                       <StatTile
-                        label="PROJ. WINS"
+                        label="WINS"
                         value={winsDelta === undefined || winsDelta === null ? (loadingSim ? "…" : "-") : `${winsDelta >= 0 ? "+" : ""}${winsDelta}`}
                         color={!winsDelta ? "#6b7280" : winsDelta > 0 ? "#22c55e" : "#ef4444"}
                       />
@@ -574,29 +733,29 @@ export default function TradeCalculator({ hideHeader }: { hideHeader?: boolean }
 
                     <Pressable
                       onPress={() => setExpandedLineup((p) => ({ ...p, [userId]: !p[userId] }))}
-                      className="flex-row items-center justify-center gap-1.5 py-2.5 border-t border-white/10"
+                      className="flex-row items-center justify-center gap-1 py-2 border-t border-white/10"
                     >
-                      <Feather name={expandedLineup[userId] ? "chevron-up" : "chevron-down"} size={13} color="#9ca3af" />
-                      <Text className="text-gray-400 text-[11px] font-semibold">
-                        {expandedLineup[userId] ? "Hide" : "Preview"} projected starting lineup
+                      <Feather name={expandedLineup[userId] ? "chevron-up" : "chevron-down"} size={11} color="#9ca3af" />
+                      <Text className="text-gray-400 text-[9px] font-semibold">
+                        {expandedLineup[userId] ? "Hide" : "Preview"} lineup
                       </Text>
                     </Pressable>
 
                     {expandedLineup[userId] && (
-                      <View className="px-4 pb-4 gap-1.5">
+                      <View className="px-2.5 pb-3 gap-1">
                         {lineup.map((slot, i) => {
                           const meta = slot.playerId ? playersData[slot.playerId] : null;
-                          const isNew = slot.playerId && incoming.some((it) => it.playerId === slot.playerId);
+                          const isNew = slot.playerId && incoming.some((it) => it.kind === "player" && it.itemId === slot.playerId);
                           return (
-                            <View key={i} className="flex-row items-center justify-between py-1">
-                              <View className="flex-row items-center gap-2">
-                                <Text className="text-gray-500 text-[10px] font-bold w-[46px]">{slot.slot}</Text>
-                                <Text numberOfLines={1} className={`text-[12px] max-w-[150px] ${isNew ? "text-brand font-bold" : "text-white"}`}>
+                            <View key={i} className="flex-row items-center justify-between py-0.5" style={{ minWidth: 0 }}>
+                              <View className="flex-row items-center gap-1.5 flex-1" style={{ minWidth: 0 }}>
+                                <Text className="text-gray-500 text-[9px] font-bold w-[32px]">{slot.slot}</Text>
+                                <Text numberOfLines={1} className={`text-[10px] flex-1 ${isNew ? "text-brand font-bold" : "text-white"}`}>
                                   {meta ? `${meta.fn} ${meta.ln}` : "Empty"}
                                 </Text>
-                                {isNew && <Feather name="arrow-up-right" size={11} color="#af1222" />}
+                                {isNew && <Feather name="arrow-up-right" size={9} color="#af1222" />}
                               </View>
-                              <Text style={{ fontVariant: ["tabular-nums"] }} className="text-gray-400 text-[11px]">
+                              <Text style={{ fontVariant: ["tabular-nums"] }} className="text-gray-400 text-[10px]">
                                 {slot.points.toFixed(1)}
                               </Text>
                             </View>
@@ -609,13 +768,14 @@ export default function TradeCalculator({ hideHeader }: { hideHeader?: boolean }
                 </>
                 )}
               </View>
+              </View>
             );
           })}
         </View>
       )}
 
       {leagueID && (
-        <View className="mt-2">
+        <View className="mt-2 px-4">
           <TradeHistory
             leagueID={leagueID}
             userIds={activeTeamIds.length === 2 ? [activeTeamIds[0], activeTeamIds[1]] : undefined}
@@ -626,7 +786,7 @@ export default function TradeCalculator({ hideHeader }: { hideHeader?: boolean }
       <Modal visible={picker !== null} transparent animationType="slide" onRequestClose={() => setPicker(null)}>
         <Pressable className="flex-1 bg-black/50 justify-end" onPress={() => setPicker(null)}>
           <Pressable className="bg-[#150f0f] rounded-t-2xl max-h-[75%]" onPress={() => {}}>
-            {picker && picker.chosenPlayerId ? (
+            {picker && picker.chosenId ? (
               <>
                 <Text className="text-center font-bold py-3 border-b border-white/10 text-white">Send to which team?</Text>
                 <View className="p-4 gap-2.5">
@@ -635,7 +795,11 @@ export default function TradeCalculator({ hideHeader }: { hideHeader?: boolean }
                     return (
                       <Pressable
                         key={toId}
-                        onPress={() => addPlayer(picker.forTeam, picker.chosenPlayerId!, toId)}
+                        onPress={() =>
+                          picker.mode === "player"
+                            ? addPlayer(picker.forTeam, picker.chosenId!, toId)
+                            : addPick(picker.forTeam, picker.chosenId!, toId)
+                        }
                         className="flex-row items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2.5"
                       >
                         <Image source={u?.avatar ? { uri: u.avatar } : helmet} className="w-[30px] h-[30px] rounded-full" />
@@ -644,6 +808,30 @@ export default function TradeCalculator({ hideHeader }: { hideHeader?: boolean }
                     );
                   })}
                 </View>
+              </>
+            ) : picker?.mode === "pick" ? (
+              <>
+                <Text className="text-center font-bold py-3 border-b border-white/10 text-white">Add a draft pick</Text>
+                <FlatList
+                  data={pickerPicks}
+                  keyExtractor={(p) => p.id}
+                  contentContainerClassName="p-3 gap-2"
+                  renderItem={({ item: pick }) => (
+                    <Pressable
+                      onPress={() => {
+                        const dests = destinationsFor(picker.forTeam);
+                        if (dests.length === 1) addPick(picker.forTeam, pick.id, dests[0]);
+                        else setPicker({ forTeam: picker.forTeam, mode: "pick", chosenId: pick.id });
+                      }}
+                      className="mb-2"
+                    >
+                      <PickRow pick={pick} rightSlot={<Feather name="plus-circle" size={20} color="#ffffff" />} />
+                    </Pressable>
+                  )}
+                  ListEmptyComponent={
+                    <Text className="text-gray-500 text-[12px] text-center py-6">No tradeable picks found for this team.</Text>
+                  }
+                />
               </>
             ) : (
               <>
@@ -666,7 +854,7 @@ export default function TradeCalculator({ hideHeader }: { hideHeader?: boolean }
                         onPress={() => {
                           const dests = destinationsFor(picker.forTeam);
                           if (dests.length === 1) addPlayer(picker.forTeam, playerId, dests[0]);
-                          else setPicker({ forTeam: picker.forTeam, chosenPlayerId: playerId });
+                          else setPicker({ forTeam: picker.forTeam, mode: "player", chosenId: playerId });
                         }}
                         className="mb-2"
                       >
@@ -718,11 +906,11 @@ function StatTile({
   divider?: boolean;
 }) {
   return (
-    <View className={`flex-1 items-center py-2.5 ${divider ? "border-l border-white/10" : ""}`}>
-      <Text style={{ color, fontVariant: ["tabular-nums"] }} className="text-[15px] font-bold">
+    <View className={`flex-1 items-center py-2 ${divider ? "border-l border-white/10" : ""}`}>
+      <Text style={{ color, fontVariant: ["tabular-nums"] }} className="text-[12px] font-bold" numberOfLines={1}>
         {value}
       </Text>
-      <Text className="text-gray-500 text-[9px] font-bold tracking-wide mt-0.5">{label}</Text>
+      <Text className="text-gray-500 text-[7px] font-bold tracking-wide mt-0.5">{label}</Text>
     </View>
   );
 }

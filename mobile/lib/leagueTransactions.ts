@@ -21,6 +21,18 @@ export type TradeEvent = (
 ) & { timestamp: number; id: string };
 export type TickerEvent = AddDropEvent | TradeEvent;
 
+/** the real draft slot this league's own draft(s) selected a player at - not this app's own crawl of anything else, straight off Sleeper's real draft-picks record for whichever season actually drafted them. */
+export interface PlayerDraftPickInfo {
+  season: string;
+  round: number;
+  /** pick number within the round (Sleeper's draft_slot) */
+  pickInRound: number;
+  /** pick number across the whole draft */
+  overallPick: number;
+  teamName: string;
+  teamAvatar?: string;
+}
+
 function assetFromPlayer(playerId: string, playersData: any): TxAsset {
   const p = playersData?.[playerId];
   if (!p) return { id: playerId, label: "a player" };
@@ -224,10 +236,105 @@ export async function buildAllSeasonsTradesBetween(leagueId: string, userIds: [s
   return events;
 }
 
-/** every trade and add/drop involving one specific player, across every season this league (and its previous_league_id chain) has real transaction data for - the player detail card's real History tab, same all-seasons crawl pattern as buildAllSeasonsTradesBetween above but keyed off a player id instead of a pair of managers. */
-export async function buildPlayerTransactionHistory(leagueId: string, playerId: string): Promise<TickerEvent[]> {
+/** every real trade ONE manager has ever made in this league, across every season in the previous_league_id chain - Team Breakdown's "All-Time" trade activity toggle, same crawl pattern as buildAllSeasonsTradesBetween above but keyed off a single user id instead of a specific pair, so it also picks up trades with managers who've since left the league. */
+export async function buildAllSeasonsTradesForUser(leagueId: string, userId: string): Promise<TradeEvent[]> {
+  const playersData = await backend.fetchPlayers(leagueId);
+  const events: TradeEvent[] = [];
+  let currentLeagueId: string | null = leagueId;
+
+  while (currentLeagueId && currentLeagueId !== "0") {
+    const leagueIdForRequest: string = currentLeagueId;
+    let leagueRes, usersRes, rostersRes;
+    try {
+      [leagueRes, usersRes, rostersRes] = await Promise.all([
+        sleeper.getLeague(leagueIdForRequest),
+        sleeper.getLeagueUsers(leagueIdForRequest),
+        sleeper.getLeagueRosters(leagueIdForRequest),
+      ]);
+    } catch {
+      break;
+    }
+
+    const rosterToTeam: Record<number, TxTeam> = {};
+    let myRosterId: number | null = null;
+    for (const roster of rostersRes.data) {
+      const owner = usersRes.data.find((u: any) => u.user_id === roster.owner_id);
+      rosterToTeam[roster.roster_id] = {
+        userId: roster.owner_id,
+        name: owner?.display_name ?? "A team",
+        avatar: owner?.avatar ? `https://sleepercdn.com/avatars/thumbs/${owner.avatar}` : undefined,
+      };
+      if (roster.owner_id === userId) myRosterId = roster.roster_id;
+    }
+
+    // Skip fetching this season's transactions entirely if this manager
+    // wasn't even in the league that year.
+    if (myRosterId !== null) {
+      const week: number = Math.max(1, (leagueRes.data.settings?.playoff_week_start ?? 15) - 1);
+      const weeks = Array.from({ length: week }, (_, i) => i + 1);
+      const weekResults = await Promise.all(
+        weeks.map((w) =>
+          fetch(`https://api.sleeper.app/v1/league/${leagueIdForRequest}/transactions/${w}`)
+            .then((r) => r.json())
+            .catch(() => [])
+        )
+      );
+      const transactions = weekResults.flat().filter((t: any) => t?.status === "complete" && t.type === "trade");
+
+      for (const t of transactions) {
+        const timestamp: number = t.status_updated ?? t.created ?? 0;
+        const receivedByRoster: Record<number, TxAsset[]> = {};
+        for (const pid in t.adds || {}) {
+          const rid = t.adds[pid];
+          (receivedByRoster[rid] ??= []).push(assetFromPlayer(pid, playersData));
+        }
+        for (const pick of t.draft_picks || []) {
+          (receivedByRoster[pick.owner_id] ??= []).push({
+            isPick: true,
+            label: `${pick.season} Rd ${pick.round} Pick`,
+          });
+        }
+        const involvedRosterIds = Object.keys(receivedByRoster).map(Number);
+        if (!involvedRosterIds.includes(myRosterId)) continue;
+
+        const team = (rid: number): TxTeam => rosterToTeam[rid] ?? { name: "A team" };
+        if (involvedRosterIds.length === 2) {
+          const [ridA, ridB] = involvedRosterIds;
+          events.push({
+            kind: "trade2",
+            teamA: team(ridA),
+            teamB: team(ridB),
+            aGives: receivedByRoster[ridB] ?? [],
+            aGets: receivedByRoster[ridA] ?? [],
+            timestamp,
+            id: t.transaction_id,
+          });
+        } else {
+          events.push({
+            kind: "tradeMulti",
+            id: t.transaction_id,
+            parts: involvedRosterIds.map((rid) => ({ team: team(rid), receives: receivedByRoster[rid] })),
+            timestamp,
+          });
+        }
+      }
+    }
+
+    currentLeagueId = leagueRes.data.previous_league_id;
+  }
+
+  events.sort((a, b) => b.timestamp - a.timestamp);
+  return events;
+}
+
+/** every trade and add/drop involving one specific player, across every season this league (and its previous_league_id chain) has real transaction data for - the player detail card's real History tab, same all-seasons crawl pattern as buildAllSeasonsTradesBetween above but keyed off a player id instead of a pair of managers. Also surfaces the real draft pick that brought them onto a roster in this league, if this league's own draft(s) ever selected them - found in the same per-season crawl instead of a second walk of the whole chain. */
+export async function buildPlayerTransactionHistory(
+  leagueId: string,
+  playerId: string
+): Promise<{ events: TickerEvent[]; draftPick: PlayerDraftPickInfo | null }> {
   const playersData = await backend.fetchPlayers(leagueId);
   const events: TickerEvent[] = [];
+  let draftPick: PlayerDraftPickInfo | null = null;
   let currentLeagueId: string | null = leagueId;
 
   while (currentLeagueId && currentLeagueId !== "0") {
@@ -251,6 +358,34 @@ export async function buildPlayerTransactionHistory(leagueId: string, playerId: 
         name: owner?.display_name ?? "A team",
         avatar: owner?.avatar ? `https://sleepercdn.com/avatars/thumbs/${owner.avatar}` : undefined,
       };
+    }
+
+    // A player is only ever drafted once in this league's real history -
+    // stop looking for it once found, so older seasons only pay for the
+    // transaction crawl below, not another drafts+picks round trip too.
+    if (!draftPick) {
+      try {
+        const draftsRes = await fetch(`https://api.sleeper.app/v1/league/${leagueIdForRequest}/drafts`).then((r) => r.json());
+        const drafts: any[] = Array.isArray(draftsRes) ? draftsRes : [];
+        for (const draftMeta of drafts) {
+          const picks: any[] = await fetch(`https://api.sleeper.app/v1/draft/${draftMeta.draft_id}/picks`).then((r) => r.json());
+          const found = Array.isArray(picks) ? picks.find((p) => p.player_id === playerId) : undefined;
+          if (found) {
+            const owner = usersRes.data.find((u: any) => u.user_id === found.picked_by);
+            draftPick = {
+              season: leagueRes.data.season,
+              round: found.round,
+              pickInRound: found.draft_slot,
+              overallPick: found.pick_no,
+              teamName: owner?.display_name ?? found.metadata?.username ?? "A team",
+              teamAvatar: owner?.avatar ? `https://sleepercdn.com/avatars/thumbs/${owner.avatar}` : undefined,
+            };
+            break;
+          }
+        }
+      } catch {
+        // Draft data missing/unavailable for this season - transaction crawl below still proceeds normally.
+      }
     }
 
     const week: number = Math.max(1, (leagueRes.data.settings?.playoff_week_start ?? 15) - 1);
@@ -328,5 +463,5 @@ export async function buildPlayerTransactionHistory(leagueId: string, playerId: 
   }
 
   events.sort((a, b) => b.timestamp - a.timestamp);
-  return events;
+  return { events, draftPick };
 }

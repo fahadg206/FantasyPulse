@@ -23,6 +23,8 @@ export interface PlayerBio {
   years_exp?: number;
   college?: string;
   status?: string;
+  /** Sleeper's real injury designation (Questionable/Doubtful/Out/IR/PUP/Sus/...) - absent/null means no current designation, not necessarily 100% healthy. Already present on every object this file's own bulk fetch pulls back; just wasn't typed/used until now. */
+  injury_status?: string;
   /** this player's real id on ESPN's own platform - Sleeper's own database carries every major platform's cross-reference id (espn_id, yahoo_id, ...) so matching a player across providers never needs fuzzy name matching. */
   espn_id?: number;
   yahoo_id?: number;
@@ -44,6 +46,15 @@ export async function getPlayerBio(playerId: string): Promise<PlayerBio | null> 
     console.error(`Error loading player bio for ${playerId}:`, error);
     return null;
   }
+}
+
+const INJURY_ABBREV: Record<string, string> = { Questionable: "Q", Doubtful: "D", Out: "O", IR: "IR", PUP: "PUP", Sus: "SUS", NA: "NA" };
+/** real Sleeper injury designation -> a short badge label + severity color, shared by every screen that shows a player card or the player detail header - one mapping so "Doubtful" reads the same everywhere. null for anything falsy (no current designation). */
+export function injuryBadge(status: string | undefined | null): { label: string; color: string } | null {
+  if (!status) return null;
+  const label = INJURY_ABBREV[status] ?? status.slice(0, 3).toUpperCase();
+  const color = status === "Questionable" ? "#eab308" : status === "Doubtful" ? "#f97316" : "#ef4444";
+  return { label, color };
 }
 
 /** 76 -> `6'4"` - Sleeper's own raw height field is just inches as a string. */
